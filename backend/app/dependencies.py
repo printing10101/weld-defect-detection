@@ -8,7 +8,9 @@ from __future__ import annotations
 import threading
 
 from backend.domain.detect.blob_detector import BlobConfig, BlobDetector
-from backend.domain.interfaces import DefectDetector
+from backend.domain.grade.nb47013 import Nb47013Grader
+from backend.domain.interfaces import DefectDetector, StandardGrader
+from backend.domain.standards.tables.loader import load_standard_tables
 from backend.infra.config import AppConfig, load_config
 from backend.infra.model_store import LocalModelStore
 
@@ -21,6 +23,7 @@ class Registry:
         self.config: AppConfig = load_config()
         self.model = LocalModelStore(self.config.model.default_uri, self.config.model.backend)
         self.detector: DefectDetector = self._build_detector()
+        self.grader: StandardGrader = self._build_grader()
 
     def _build_detector(self) -> DefectDetector:
         """按配置装配检测器：M4a 基线 / M4b 训练模型（模型无关接口，ADR-002）。"""
@@ -37,6 +40,12 @@ class Registry:
                 )
             )
         raise RuntimeError("detect.baseline_enabled=false 需先装配训练模型（M4b）")
+
+    def _build_grader(self) -> StandardGrader:
+        """按配置装配标准判定器（多标准适配，ADR-003）。"""
+        sc = self.config.standard
+        tables = load_standard_tables(sc.default_id, filename=sc.tables_filename)
+        return Nb47013Grader(tables)
 
     @property
     def health(self) -> dict:

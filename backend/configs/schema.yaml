@@ -36,3 +36,6 @@ detect:
   noise_sigma_ratio: float        # 二值化阈值=背景±k×原图噪声
   abs_threshold: float            # 绝对阈值下限（低噪声图兜底）
   dark_only: bool                 # 只检暗缺陷（True）或暗+亮（False）
+standard:
+  default_id: str                 # 默认评级标准（如 NB/T47013.2-2015）
+  tables_filename: str            # 对应数值表文件（tables/ 下）

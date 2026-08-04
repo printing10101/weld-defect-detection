@@ -31,14 +31,21 @@ class StandardTables:
     data: dict[str, Any]
 
 
-def load_standard_tables(standard_id: str) -> StandardTables:
-    """加载并校验标准数值表。文件缺失或结构不符直接抛错（启动即失败）。"""
-    path = _TABLES_DIR / f"{standard_id}.yaml"
+def load_standard_tables(standard_id: str, filename: str | None = None) -> StandardTables:
+    """加载并校验标准数值表。文件缺失或结构不符直接抛错（启动即失败）。
+
+    filename 缺省时由 standard_id 派生（含 '/' 等字符时需显式传入，如
+    'nb47013.yaml' 对应 'NB/T47013.2-2015'）。
+    """
+    name = filename or f"{standard_id}.yaml"
+    path = _TABLES_DIR / name
     if not path.exists():
-        raise FileNotFoundError(f"no standard tables for: {standard_id}")
+        raise FileNotFoundError(f"no standard tables for: {standard_id} ({name})")
     with open(path, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
     _validate(raw)
+    if raw["standard_id"] != standard_id:
+        raise ValueError(f"table standard_id mismatch: {raw['standard_id']} != {standard_id}")
     return StandardTables(
         standard_id=str(raw["standard_id"]),
         version=str(raw["version"]),

@@ -35,3 +35,6 @@ detect:
   noise_sigma_ratio: 2.5
   abs_threshold: 8.0
   dark_only: false
+standard:
+  default_id: NB/T47013.2-2015
+  tables_filename: nb47013.yaml

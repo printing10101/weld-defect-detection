@@ -71,6 +71,11 @@ class DetectCfg(BaseModel):
     dark_only: bool = False
 
 
+class StandardCfg(BaseModel):
+    default_id: str = "NB/T47013.2-2015"
+    tables_filename: str = "nb47013.yaml"
+
+
 class AppConfig(BaseSettings):
     server: ServerCfg = ServerCfg()
     model: ModelCfg = ModelCfg()
@@ -80,6 +85,7 @@ class AppConfig(BaseSettings):
     iqi: IqiCfg = IqiCfg()
     preprocess: PreprocessCfg = PreprocessCfg()
     detect: DetectCfg = DetectCfg()
+    standard: StandardCfg = StandardCfg()
 
     model_config = {"env_prefix": "SCAN_"}
 
