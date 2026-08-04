@@ -17,3 +17,13 @@ iqi:
   wire_diameters_mm: [3.2, 2.5, 2.0, 1.6, 1.25, 1.0, 0.8, 0.63, 0.5, 0.4, 0.32, 0.25, 0.2, 0.16, 0.125, 0.1, 0.08, 0.063, 0.05]
   required_wire_no: 10
   min_contrast_ratio: 3.0
+preprocess:
+  bilateral_d: 9
+  bilateral_sigma_color: 75.0
+  bilateral_sigma_space: 75.0
+  median_k: 3
+  clahe_clip: 2.0
+  clahe_grid: 8
+  canny_kernel: 5
+  morph_k_open: 3
+  morph_k_close: 3

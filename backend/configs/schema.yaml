@@ -18,3 +18,13 @@ iqi:
   wire_diameters_mm: list[float]  # 线型像质计丝号1..N 直径(mm)，递增（公开参考，待官方复核）
   required_wire_no: int           # 工艺要求的最细丝号（越大越难）
   min_contrast_ratio: float       # 可见性阈值：峰对比度/噪声
+preprocess:
+  bilateral_d: int                # 双边滤波直径
+  bilateral_sigma_color: float    # 双边色彩σ
+  bilateral_sigma_space: float    # 双边空间σ
+  median_k: int                   # 中值滤波核（奇数）
+  clahe_clip: float               # CLAHE 裁剪限值
+  clahe_grid: int                 # CLAHE 分块
+  canny_kernel: int               # Canny 前高斯核（奇数）
+  morph_k_open: int               # 开运算核
+  morph_k_close: int              # 闭运算核

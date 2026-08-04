@@ -49,6 +49,18 @@ class IqiCfg(BaseModel):
     min_contrast_ratio: float = 3.0
 
 
+class PreprocessCfg(BaseModel):
+    bilateral_d: int = 9
+    bilateral_sigma_color: float = 75.0
+    bilateral_sigma_space: float = 75.0
+    median_k: int = 3
+    clahe_clip: float = 2.0
+    clahe_grid: int = 8
+    canny_kernel: int = 5
+    morph_k_open: int = 3
+    morph_k_close: int = 3
+
+
 class AppConfig(BaseSettings):
     server: ServerCfg = ServerCfg()
     model: ModelCfg = ModelCfg()
@@ -56,6 +68,7 @@ class AppConfig(BaseSettings):
     paths: PathsCfg = PathsCfg()
     density: DensityCfg = DensityCfg()
     iqi: IqiCfg = IqiCfg()
+    preprocess: PreprocessCfg = PreprocessCfg()
 
     model_config = {"env_prefix": "SCAN_"}
 

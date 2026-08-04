@@ -12,12 +12,12 @@ dependencies = [
     "pyyaml>=6.0",
     "pydicom>=2.4",
     "numpy>=1.26",
+    "scikit-image>=0.22",
 ]
 
 [project.optional-dependencies]
 ml = [
     "opencv-python-headless>=4.9",
-    "scikit-image>=0.22",
     "torch>=2.2",
     "ultralytics>=8.2",
     "onnxruntime>=1.17",
