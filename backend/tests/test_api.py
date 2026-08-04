@@ -17,6 +17,6 @@ def test_health_ok() -> None:
 
 def test_unimplemented_returns_501() -> None:
     with TestClient(app) as client:
-        resp = client.post("/api/v1/detect")
+        resp = client.post("/api/v1/judge")  # M5 前仍未实现
     assert resp.status_code == 501
     assert resp.json()["error"]["code"] == "NOT_IMPLEMENTED"

@@ -27,3 +27,11 @@ preprocess:
   canny_kernel: 5
   morph_k_open: 3
   morph_k_close: 3
+detect:
+  baseline_enabled: true
+  min_area_px: 30
+  max_area_px: 200000
+  min_size_px: 3
+  noise_sigma_ratio: 2.5
+  abs_threshold: 8.0
+  dark_only: false

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import threading
 
+from backend.domain.detect.blob_detector import BlobConfig, BlobDetector
+from backend.domain.interfaces import DefectDetector
 from backend.infra.config import AppConfig, load_config
 from backend.infra.model_store import LocalModelStore
 
@@ -18,6 +20,23 @@ class Registry:
         self._lock = threading.Lock()
         self.config: AppConfig = load_config()
         self.model = LocalModelStore(self.config.model.default_uri, self.config.model.backend)
+        self.detector: DefectDetector = self._build_detector()
+
+    def _build_detector(self) -> DefectDetector:
+        """按配置装配检测器：M4a 基线 / M4b 训练模型（模型无关接口，ADR-002）。"""
+        dc = self.config.detect
+        if dc.baseline_enabled:
+            return BlobDetector(
+                BlobConfig(
+                    min_area_px=dc.min_area_px,
+                    max_area_px=dc.max_area_px,
+                    min_size_px=dc.min_size_px,
+                    noise_sigma_ratio=dc.noise_sigma_ratio,
+                    abs_threshold=dc.abs_threshold,
+                    dark_only=dc.dark_only,
+                )
+            )
+        raise RuntimeError("detect.baseline_enabled=false 需先装配训练模型（M4b）")
 
     @property
     def health(self) -> dict:

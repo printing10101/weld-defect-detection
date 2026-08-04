@@ -61,6 +61,16 @@ class PreprocessCfg(BaseModel):
     morph_k_close: int = 3
 
 
+class DetectCfg(BaseModel):
+    baseline_enabled: bool = True  # M4a 基线检测器开关
+    min_area_px: int = 30
+    max_area_px: int = 200_000
+    min_size_px: int = 3
+    noise_sigma_ratio: float = 2.5
+    abs_threshold: float = 8.0
+    dark_only: bool = False
+
+
 class AppConfig(BaseSettings):
     server: ServerCfg = ServerCfg()
     model: ModelCfg = ModelCfg()
@@ -69,6 +79,7 @@ class AppConfig(BaseSettings):
     density: DensityCfg = DensityCfg()
     iqi: IqiCfg = IqiCfg()
     preprocess: PreprocessCfg = PreprocessCfg()
+    detect: DetectCfg = DetectCfg()
 
     model_config = {"env_prefix": "SCAN_"}
 

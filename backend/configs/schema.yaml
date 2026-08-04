@@ -28,3 +28,11 @@ preprocess:
   canny_kernel: int               # Canny 前高斯核（奇数）
   morph_k_open: int               # 开运算核
   morph_k_close: int              # 闭运算核
+detect:
+  baseline_enabled: bool          # M4a 基线检测器开关（训练模型就绪后置 false）
+  min_area_px: int                # 连通域最小面积
+  max_area_px: int                # 连通域最大面积
+  min_size_px: int                # 连通域最小边长
+  noise_sigma_ratio: float        # 二值化阈值=背景±k×原图噪声
+  abs_threshold: float            # 绝对阈值下限（低噪声图兜底）
+  dark_only: bool                 # 只检暗缺陷（True）或暗+亮（False）
