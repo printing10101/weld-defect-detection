@@ -11,3 +11,10 @@ security:
 paths:
   data_dir: str
   tmp_dir: str
+density:
+  low: float   # AB 级黑度下限（默认 2.0）
+  high: float  # AB 级黑度上限（默认 4.5）
+iqi:
+  wire_diameters_mm: list[float]  # 线型像质计丝号1..N 直径(mm)，递增（公开参考，待官方复核）
+  required_wire_no: int           # 工艺要求的最细丝号（越大越难）
+  min_contrast_ratio: float       # 可见性阈值：峰对比度/噪声

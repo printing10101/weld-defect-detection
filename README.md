@@ -35,8 +35,10 @@ curl http://127.0.0.1:18773/api/v1/health
 ## 快速开始（前端，无需 Rust）
 ```bash
 cd src
-pnpm install
-pnpm dev     # http://127.0.0.1:5173（/api 代理到后端 18773）
+yarn install      # 或 npm install（本机选用 yarn 1：pnpm 在中文路径下链接阶段挂起）
+yarn dev          # http://127.0.0.1:5173（/api 代理到后端 18773）
+# 由后端 openapi.json 重新生成前端类型（后端运行中执行）：
+yarn gen-api      # -> src/types/generated.ts（T6 已生成，见 src/types/）
 ```
 
 ## 护栏与校验（§19.6，合并前必过）
@@ -55,6 +57,6 @@ CI：`.github/workflows/ci.yml`（ruff → pyright → eslint/vue-tsc → import
 - 任何架构演进先写 `docs/adr/` 再动手。
 
 ## 待办
-- [ ] T6 收尾：由 openapi.json 生成前端类型
+- [x] T6 收尾：`src/types/generated.ts` 已由 openapi.json 生成（`yarn gen-api` 可随时重生成）
 - [ ] M2 起：按规格书 §4–§7 派发功能任务（T7 CI 全绿后方可开始）
-- [ ] 安装 Rust 工具链后启用 Tauri 打包（M6）
+- [x] Rust 工具链：本机已装 cargo 1.97.1 + cargo-tauri（Tauri 打包 M6 直接可用）

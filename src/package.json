@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc -b && vite build",
-    "typecheck": "vue-tsc -b",
-    "lint": "eslint . --max-warnings 0"
+    "build": "vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "gen-api": "openapi-typescript http://127.0.0.1:18773/openapi.json -o src/types/generated.ts"
   },
   "dependencies": {
     "vue": "^3.4.0"

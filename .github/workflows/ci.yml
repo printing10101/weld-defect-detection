@@ -30,14 +30,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
-          cache-dependency-path: src/pnpm-lock.yaml
-      - run: cd src && pnpm install --frozen-lockfile
-      - run: cd src && pnpm run typecheck
-      - run: cd src && pnpm run build
+          cache: yarn
+          cache-dependency-path: src/yarn.lock
+      - run: npm install -g yarn@1.22.22
+      - run: cd src && yarn install --frozen-lockfile
+      - run: cd src && yarn typecheck
+      - run: cd src && yarn build

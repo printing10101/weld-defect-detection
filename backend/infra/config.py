@@ -34,11 +34,28 @@ class PathsCfg(BaseModel):
     tmp_dir: str = "data/tmp"
 
 
+class DensityCfg(BaseModel):
+    low: float = 2.0  # AB 级黑度下限
+    high: float = 4.5  # AB 级黑度上限
+
+
+class IqiCfg(BaseModel):
+    # 线型像质计丝号 1..N 直径(mm)，递增（公开参考，待官方复核）
+    wire_diameters_mm: tuple[float, ...] = (
+        3.2, 2.5, 2.0, 1.6, 1.25, 1.0, 0.8, 0.63, 0.5, 0.4,
+        0.32, 0.25, 0.2, 0.16, 0.125, 0.1, 0.08, 0.063, 0.05,
+    )
+    required_wire_no: int = 10
+    min_contrast_ratio: float = 3.0
+
+
 class AppConfig(BaseSettings):
     server: ServerCfg = ServerCfg()
     model: ModelCfg = ModelCfg()
     security: SecurityCfg = SecurityCfg()
     paths: PathsCfg = PathsCfg()
+    density: DensityCfg = DensityCfg()
+    iqi: IqiCfg = IqiCfg()
 
     model_config = {"env_prefix": "SCAN_"}
 

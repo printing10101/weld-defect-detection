@@ -9,3 +9,11 @@ security:
 paths:
   data_dir: data
   tmp_dir: data/tmp
+density:
+  low: 2.0
+  high: 4.5
+iqi:
+  # 线型像质计丝号直径（公开参考，正式使用前须按 IQI 标准复核）
+  wire_diameters_mm: [3.2, 2.5, 2.0, 1.6, 1.25, 1.0, 0.8, 0.63, 0.5, 0.4, 0.32, 0.25, 0.2, 0.16, 0.125, 0.1, 0.08, 0.063, 0.05]
+  required_wire_no: 10
+  min_contrast_ratio: 3.0
