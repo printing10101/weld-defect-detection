@@ -1,0 +1,15 @@
+# NB/T47013.2-2015 数值表（占位，未授权）
+# ⚠️ 下列数值为公开解读占位（{{STD_TABLE_*}}），须以正式标准原文复核后填写，
+#    并将 authorized 置为 true。authorized=false 时判定实现必须熔断（不输出级别）。
+standard_id: NB/T47013.2-2015
+version: "2015"
+authorized: false
+
+# 圆形缺陷点数换算表（长径 -> 点数，按母材厚度分档）{{STD_TABLE_点数}}
+round_points: {}
+
+# 不计点数缺陷的最大长径（按 T 分档，mm）{{STD_TABLE_不计}}
+round_ignore_size_mm: {}
+
+# 条形缺陷长度限值（单条/组内累计，mm）{{STD_TABLE_条形}}
+linear_limits: {}

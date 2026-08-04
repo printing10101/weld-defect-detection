@@ -1,0 +1,13 @@
+# 配置键清单（冻结，§T8）
+# 新增键必须三处同步：本文件 + default.yaml + backend/infra/config.py
+server:
+  host: str   # 本地绑定（默认 127.0.0.1）
+  port: int   # 默认 18773
+model:
+  default_uri: str
+  backend: str   # onnx | torch | tensorrt
+security:
+  encrypt: bool
+paths:
+  data_dir: str
+  tmp_dir: str

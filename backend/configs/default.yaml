@@ -1,0 +1,11 @@
+server:
+  host: 127.0.0.1
+  port: 18773
+model:
+  default_uri: models/weights/best.onnx
+  backend: onnx
+security:
+  encrypt: true
+paths:
+  data_dir: data
+  tmp_dir: data/tmp

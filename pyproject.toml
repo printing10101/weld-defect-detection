@@ -1,0 +1,67 @@
+[project]
+name = "scan-detection"
+version = "0.1.0"
+description = "射线焊缝缺陷智能检测系统（后端）"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.2",
+    "sqlalchemy>=2.0",
+    "pyyaml>=6.0",
+    "pydicom>=2.4",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+ml = [
+    "opencv-python-headless>=4.9",
+    "scikit-image>=0.22",
+    "torch>=2.2",
+    "ultralytics>=8.2",
+    "onnxruntime>=1.17",
+]
+report = ["weasyprint>=62"]
+dev = [
+    "pytest>=8",
+    "httpx>=0.27",
+    "ruff>=0.4",
+    "pyright>=1.1.370",
+    "import-linter>=2.0",
+    "cryptography>=42",
+    "opencv-python-headless>=4.9",  # transform 契约测试依赖
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+include = ["backend"]
+
+[tool.importlinter]
+root_package = "backend"
+
+[[tool.importlinter.contracts]]
+name = "Layering contract (app -> infra -> domain)"
+type = "layers"
+layers = ["app", "infra", "domain"]
+containers = ["backend"]
+
+[[tool.importlinter.contracts]]
+name = "Infra must not import business decision logic"
+type = "forbidden"
+source_modules = ["backend.infra"]
+forbidden_modules = ["backend.domain.grade", "backend.domain.preprocess"]

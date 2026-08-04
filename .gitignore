@@ -1,0 +1,36 @@
+# Node / Frontend
+node_modules/
+dist/
+*.local
+
+# Rust / Tauri
+target/
+src/src-tauri/target/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+backend/.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.pyright/
+
+# Data & artifacts（DVC 追踪的原始数据除外）
+data/tmp/
+data/.dvc/tmp/
+backend/models/weights/*.onnx
+backend/models/weights/*.pt
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Tool-managed workspace memory
+.workbuddy/
+
+# OS
+.DS_Store
+Thumbs.db

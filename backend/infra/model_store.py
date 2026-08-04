@@ -1,0 +1,38 @@
+"""模型存储/加载（§T4 / §7.4）。
+
+M4 前为桩：只管理 URI/版本/哈希状态，不加载真实权重。
+真实推理实现（YOLO/RT-DETR 等）在 M4 里程碑以 DefectDetector 实现注入。
+"""
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+
+
+class LocalModelStore:
+    """registry 中的模型状态容器（单例，经 backend.app.dependencies 访问）。"""
+
+    def __init__(self, default_uri: str, backend: str = "onnx") -> None:
+        self.default_uri = default_uri
+        self.backend = backend
+        self.active_version: str | None = None
+        self._hash: str | None = None
+
+    def load(self, model_uri: str | None = None) -> None:
+        """加载权重并记录版本（M1 桩：仅当文件存在时计算哈希）。"""
+        uri = model_uri or self.default_uri
+        path = Path(uri)
+        if path.exists():
+            self._hash = hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+            self.active_version = f"{path.stem}::{self._hash}"
+        else:
+            self._hash = None
+            self.active_version = f"{path.stem}::stub"
+
+    @property
+    def status(self) -> dict:
+        return {
+            "uri": self.default_uri,
+            "backend": self.backend,
+            "active_version": self.active_version,
+        }
