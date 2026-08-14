@@ -33,6 +33,7 @@ from backend.app.routers import (
     records,
     report,
     review,
+    standards,
     verify,
 )
 from backend.domain.errors import AppError
@@ -144,6 +145,7 @@ def create_app() -> FastAPI:
         health.router,
         verify.router,
         preprocess.router,
+        standards.router,
         detect.router,
         devices.router,
         judge.router,

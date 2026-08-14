@@ -1,8 +1,12 @@
-"""ISO 17636 / ISO 5817 适配器骨架（§6.1 预留）。
+"""ISO 17636 适配器（§6.1 注册，方法标准语义）。
 
-v1 仅登记标准身份与数值表入口，评级逻辑未实现：
-grade() 一律抛 GradingAmbiguousError（熔断 422），禁止静默错判——
-宁可"需人工复核"也不输出一个未经验证的级别。
+ISO 17636（焊缝无损检测 射线检测）定义**成像质量等级 A/B**（IQI 灵敏度）
+与工艺要求，**不输出缺陷验收级别**——缺陷验收等级在 ISO 10675-1 中给出
+（验收等级 1/2/3，配合 ISO 5817 的缺陷质量分级）。
+
+本适配器正确语义：不套用 NB/GB 的 I-IV 级别（标准错配即静默错判）；
+grade() 熔断 422 → 需人工按 ISO 10675-1 判定。成像质量等级 A/B 的 IQI
+灵敏度映射表未转录前也不臆造。
 """
 
 from __future__ import annotations
@@ -13,7 +17,7 @@ from backend.domain.interfaces import StandardGrader
 
 
 class Iso17636Grader(StandardGrader):
-    """ISO 17636 焊缝射线检测评定（预留骨架）。"""
+    """ISO 17636 焊缝射线检测（成像质量等级 A/B，不输出缺陷级别）。"""
 
     standard_id = "ISO17636"
 
@@ -22,5 +26,6 @@ class Iso17636Grader(StandardGrader):
 
     def grade(self, defects: list[Detection], context: ImageMeta) -> GradeResult:
         raise GradingAmbiguousError(
-            f"标准 {self.standard_id} 适配器未实现（预留骨架）：禁止输出级别，需人工复核"
+            f"标准 {self.standard_id} 定义成像质量等级 A/B（IQI 灵敏度），"
+            "不输出缺陷级别；缺陷验收等级须依 ISO 10675-1 人工判定"
         )
