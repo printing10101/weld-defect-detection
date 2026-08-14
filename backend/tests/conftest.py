@@ -45,6 +45,10 @@ def _test_env(auth_table: Path) -> None:
     os.environ["SCAN_PATHS__REPORTS_DIR"] = str(_TMP_ROOT / "reports")
     # P2-9：测试禁用限流（TestClient 共享计数会误伤套件）；安全头中间件保持生效
     os.environ.setdefault("SCAN_RATE_LIMIT", "0")
+    # 检测器确定性：强制 M4a 基线（blob），不依赖开发机是否存在训练权重。
+    # 集成测试用合成底片断言 ≥N 缺陷，训练 YOLO 在合成图上 0 检出；
+    # 训练模型路径由 test_model_registry 等单测直接实例化 YoloDetector 覆盖。
+    os.environ["SCAN_DETECT__BASELINE_ENABLED"] = "true"
     # T3：确定性鉴权环境——固定签名密钥 + 引导管理员凭据，使 bootstrap 播种可复现，
     # 既保证 test_auth.py 能稳定登录，也避免每次运行生成随机管理员密码污染日志。
     os.environ["SCAN_AUTH_SECRET"] = "test-auth-secret-please-change-in-prod-0123456789"
