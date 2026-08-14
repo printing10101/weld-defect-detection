@@ -1,10 +1,11 @@
 <script setup lang="ts">
-/** 应用壳（DESIGN.md：AppShell = RailNav + main 主区，托管旅程/档案两视图）。 */
+/** 应用壳（DESIGN.md：AppShell = RailNav + main 主区，托管旅程/档案/批量三视图）。 */
 import { ref } from "vue";
 import type { ViewId } from "../types/api";
 import RailNav from "./RailNav.vue";
 import JourneyView from "../views/JourneyView.vue";
 import ArchiveView from "../views/ArchiveView.vue";
+import BatchView from "../views/BatchView.vue";
 
 const view = ref<ViewId>("journey");
 </script>
@@ -15,6 +16,7 @@ const view = ref<ViewId>("journey");
     <main class="main">
       <JourneyView v-show="view === 'journey'" @archive="view = 'archive'" />
       <ArchiveView v-show="view === 'archive'" :active="view === 'archive'" />
+      <BatchView v-show="view === 'batch'" :active="view === 'batch'" @archive="view = 'archive'" />
     </main>
   </div>
 </template>

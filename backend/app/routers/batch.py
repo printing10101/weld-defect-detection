@@ -53,6 +53,26 @@ class CancelOut(BaseModel):
     ok: bool
 
 
+class BatchRetryOut(BaseModel):
+    ok: bool
+    retried: int
+
+
+class BatchSummaryOut(BaseModel):
+    """GET /batches 列表项（BatchManager.list 摘要）。"""
+
+    batch_id: str
+    status: str
+    total: int
+    done: int
+    failed: int
+    cancelled: int
+    progress: float
+    estimated_sec: float
+    created_at: str | None = None
+    finished_at: str | None = None
+
+
 def _suffix_ok(name: str | None, allowed: tuple[str, ...]) -> bool:
     suffix = Path(name or "upload.png").suffix.lower() or ".png"
     return suffix in allowed
@@ -225,3 +245,25 @@ def cancel_batch(
             detail={"code": "NOT_FOUND", "message": f"batch not found: {batch_id}"},
         )
     return CancelOut(ok=True)
+
+
+@router.get("/batches", response_model=list[BatchSummaryOut])
+def list_batches(reg: Annotated[Registry, Depends(get_registry)]) -> list[BatchSummaryOut]:
+    """批次摘要列表（按创建时间倒序），供历史查看与断点续跑入口。"""
+    return [BatchSummaryOut(**row) for row in reg.batch_manager.list()]
+
+
+@router.post("/batch/{batch_id}/retry", response_model=BatchRetryOut)
+def retry_batch(
+    batch_id: str,
+    reg: Annotated[Registry, Depends(get_registry)],
+) -> BatchRetryOut:
+    """断点续跑：重跑本批 failed/cancelled 任务（原图暂存目录仍在）。"""
+    try:
+        retried = reg.batch_manager.retry(batch_id)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": f"batch not found: {batch_id}"},
+        ) from exc
+    return BatchRetryOut(ok=True, retried=retried)

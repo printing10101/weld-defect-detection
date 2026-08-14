@@ -177,3 +177,40 @@ def test_batch_too_many_images_rejected() -> None:
         assert resp.json()["detail"]["code"] == "BATCH_TOO_LARGE"
     finally:
         reg.config.batch.max_per_batch = orig
+
+
+def test_batch_list_endpoint() -> None:
+    """GET /batches：提交后列表包含该批次（最近在前），带进度摘要。"""
+    name, data = _film_png(seed=5)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/batch",
+            files=[("images", (name, data, "image/png"))],
+            data={"pixel_spacing_mm": "0.1", "base_metal_thickness_mm": "20", "force": "true"},
+        )
+        assert resp.status_code == 200
+        batch_id = resp.json()["batch_id"]
+        rows = client.get("/api/v1/batches").json()
+    assert any(r["batch_id"] == batch_id for r in rows)
+    assert rows[0]["batch_id"] == batch_id  # 最近提交在前
+    assert 0.0 <= rows[0]["progress"] <= 1.0
+    assert rows[0]["total"] == 1
+
+
+def test_batch_retry_endpoint() -> None:
+    """POST /batch/{id}/retry：无 failed/cancelled 任务时 retried=0；未知批次 404。"""
+    name, data = _film_png(seed=6)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/batch",
+            files=[("images", (name, data, "image/png"))],
+            data={"pixel_spacing_mm": "0.1", "base_metal_thickness_mm": "20", "force": "true"},
+        )
+        batch_id = resp.json()["batch_id"]
+        _wait_batch(client, batch_id)
+        r = client.post(f"/api/v1/batch/{batch_id}/retry")
+        assert r.status_code == 200
+        assert r.json() == {"ok": True, "retried": 0}
+        r404 = client.post("/api/v1/batch/nope/retry")
+        assert r404.status_code == 404
+        assert r404.json()["detail"]["code"] == "NOT_FOUND"

@@ -10,6 +10,7 @@ const auth = useAuth();
 
 const NAV: { id: ViewId; label: string }[] = [
   { id: "journey", label: "检测旅程" },
+  { id: "batch", label: "批量检测" },
   { id: "archive", label: "档案检索" },
 ];
 </script>

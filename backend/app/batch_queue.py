@@ -43,10 +43,16 @@ class BatchItem:
 
 @dataclass
 class BatchTaskState:
-    """单个任务运行时状态。"""
+    """单个任务运行时状态。
+
+    image_path / options 为断点续跑（retry）保留：failed/cancelled 任务
+    重跑时需要原图与原始公共参数（快照持久化后进程重启也可用）。
+    """
 
     task_id: str
     image_name: str
+    image_path: str = ""  # 原图绝对路径（重跑用）
+    options: dict[str, Any] = field(default_factory=dict)  # run_inspection 公共参数（重跑用）
     status: str = "pending"  # pending | running | done | failed | cancelled
     error: str | None = None
     result: dict[str, Any] | None = None
@@ -84,6 +90,8 @@ class BatchManager:
             BatchTaskState(
                 task_id=uuid.uuid4().hex,
                 image_name=item.image_name or item.image_path.name,
+                image_path=str(item.image_path),
+                options=dict(item.options),
             )
             for item in items
         ]
@@ -127,6 +135,68 @@ class BatchManager:
             batch["cancelled_flag"] = True
             self._persist(batch)
             return True
+
+    def retry(self, batch_id: str) -> int:
+        """断点续跑：将本批 failed/cancelled 任务重新入队，返回重跑任务数。
+
+        原图依赖「有 failed/cancelled 即保留暂存目录」的清理策略（_cleanup_staging），
+        故重跑时原图仍在；重跑完成后 _maybe_finish 再触发目录清理。
+        """
+        with self._lock:
+            batch = self._batches.get(batch_id)
+            if batch is None:
+                raise KeyError(f"batch not found: {batch_id}")
+            if batch["cancelled_flag"]:
+                batch["cancelled_flag"] = False  # 用户显式重试：解除取消标记
+            pending: list[tuple[str, str, str, dict[str, Any]]] = []
+            for t in batch["tasks"]:
+                if t["status"] in ("failed", "cancelled"):
+                    t["status"] = "pending"
+                    t["error"] = None
+                    t["result"] = None
+                    pending.append((t["task_id"], t["image_path"], t["image_name"], t["options"]))
+            if not pending:
+                return 0
+            batch["status"] = "running"
+            batch["finished_at"] = None
+            self._persist(batch)
+        for task_id, image_path, image_name, options in pending:
+            self._pool.submit(
+                self._run_one,
+                batch_id,
+                task_id,
+                BatchItem(image_path=Path(image_path), options=options, image_name=image_name),
+            )
+        return len(pending)
+
+    def list(self) -> list[dict[str, Any]]:
+        """批次摘要列表（最近提交在前，供历史/断点续跑入口）。
+
+        排序用 dict 插入序（提交/恢复序）倒序：created_at 为秒级精度，
+        同秒提交时时间序不可区分，插入序是确定性的稳定序。
+        """
+        with self._lock:
+            batches = list(self._batches.values())
+        batches.reverse()  # 后提交/后恢复在前
+        out: list[dict[str, Any]] = []
+        for b in batches:
+            total = max(1, b["total"])
+            progress = min(1.0, (b["done"] + b["failed"] + b["cancelled"]) / total)
+            out.append(
+                {
+                    "batch_id": b["batch_id"],
+                    "status": b["status"],
+                    "total": b["total"],
+                    "done": b["done"],
+                    "failed": b["failed"],
+                    "cancelled": b["cancelled"],
+                    "progress": round(progress, 3),
+                    "estimated_sec": b.get("estimated_sec", 0.0),
+                    "created_at": b.get("created_at"),
+                    "finished_at": b.get("finished_at"),
+                }
+            )
+        return out
 
     def shutdown(self) -> None:
         """应用退出时释放线程池（等运行中任务结束）。"""
@@ -186,10 +256,19 @@ class BatchManager:
     def _cleanup_staging(self, batch: dict) -> None:
         """批次终态后清理上传暂存目录（P1-3：防 data/tmp 持续增长）。
 
+        断点续跑守卫：批次内存在 failed/cancelled 任务时**保留**暂存目录
+        （原图供 retry 重跑），仅当全部任务成功/已处理完才整体清理。
         只删本批次自身记录的 cleanup_dirs（提交时登记的批次专属目录），
         越界路径一律跳过；删除失败仅告警（快照已持久化，不阻断）。
         注：用原生删除绕 safe-delete shim（只删自己生成的暂存文件，无外部风险）。
         """
+        retryable = {"failed", "cancelled"}
+        if any(t.get("status") in retryable for t in batch.get("tasks", [])):
+            _LOG.info(
+                "batch %s has retryable tasks, keep staging for retry",
+                batch["batch_id"],
+            )
+            return
         import nt  # Windows 原生删除（绕 genie-safe-delete shim）
 
         try:

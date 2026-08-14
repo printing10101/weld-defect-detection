@@ -122,3 +122,90 @@ def test_batch_manager_cleans_staging(tmp_path: Path) -> None:
         assert not staging.exists(), "批次完成后暂存目录应被清理"
     finally:
         bm.shutdown()
+
+
+def test_batch_manager_retry_reruns_failed_and_cleans(tmp_path: Path) -> None:
+    """断点续跑：failed 任务重跑成功；暂存目录在重跑前保留、重跑成功后清理。"""
+
+    class _Flaky:
+        def __init__(self, counter: dict) -> None:
+            self._counter = counter
+
+        def run_inspection(self, **options):
+            self._counter["n"] += 1
+            if self._counter["n"] == 1:
+                raise ValueError("first attempt fails")
+            return {
+                "image_id": str(options["image_path"]),
+                "report_id": "r1",
+                "joint_level": None,
+                "need_review": False,
+            }
+
+    counter: dict = {"n": 0}
+    bm = BatchManager(
+        lambda: _Flaky(counter), workers=1, per_image_estimate_sec=1.0, batch_dir=tmp_path / "batch"
+    )
+    staging = tmp_path / "staging_retry"
+    staging.mkdir(parents=True, exist_ok=True)
+    p = staging / "a.png"
+    p.write_bytes(b"x")
+    try:
+        batch_id = bm.submit([BatchItem(p, image_name="a.png", cleanup_dir=staging)])
+        finished = _wait_finished(bm, batch_id)
+        assert finished["failed"] == 1
+        assert staging.exists(), "存在 failed 任务时暂存目录应保留（供 retry 重跑）"
+
+        # 重跑失败任务 → 全部成功 → 暂存目录清理
+        assert bm.retry(batch_id) == 1
+        finished2 = _wait_finished(bm, batch_id)
+        assert finished2["failed"] == 0
+        assert finished2["done"] == 1
+        assert not staging.exists(), "重跑全部成功后暂存目录应清理"
+    finally:
+        bm.shutdown()
+
+
+def test_batch_manager_retry_unknown_raises(tmp_path: Path) -> None:
+    bm = BatchManager(_factory, workers=1, per_image_estimate_sec=1.0, batch_dir=tmp_path / "batch")
+    try:
+        try:
+            bm.retry("nope")
+        except KeyError:
+            pass
+        else:  # pragma: no cover
+            raise AssertionError("未知批次 retry 必须抛 KeyError")
+    finally:
+        bm.shutdown()
+
+
+def test_batch_manager_retry_none_left_returns_zero(tmp_path: Path) -> None:
+    """无 failed/cancelled 任务时 retry 返回 0。"""
+    bm = BatchManager(_factory, workers=1, per_image_estimate_sec=1.0, batch_dir=tmp_path / "batch")
+    p = tmp_path / "ok.png"
+    p.write_bytes(b"x")
+    try:
+        batch_id = bm.submit([BatchItem(p)])
+        _wait_finished(bm, batch_id)
+        assert bm.retry(batch_id) == 0
+    finally:
+        bm.shutdown()
+
+
+def test_batch_manager_list_orders_recent_first(tmp_path: Path) -> None:
+    """批次列表：最近提交在前，且带进度/计数摘要。"""
+    bm = BatchManager(_factory, workers=1, per_image_estimate_sec=1.0, batch_dir=tmp_path / "batch")
+    a = tmp_path / "a.png"
+    b = tmp_path / "b.png"
+    a.write_bytes(b"x")
+    b.write_bytes(b"x")
+    try:
+        id1 = bm.submit([BatchItem(a)])
+        id2 = bm.submit([BatchItem(b)])
+        rows = bm.list()
+        assert [r["batch_id"] for r in rows] == [id2, id1]
+        assert rows[0]["total"] == 1
+        assert rows[0]["status"] == "running" or rows[0]["status"] == "finished"
+        assert 0.0 <= rows[0]["progress"] <= 1.0
+    finally:
+        bm.shutdown()

@@ -9,6 +9,10 @@ import type {
   ActivePoolOut,
   ActiveSampleIn,
   ActiveSampleOut,
+  BatchRetryOut,
+  BatchStatusOut,
+  BatchSubmitOut,
+  BatchSummaryOut,
   HealthResponse,
   LoginIn,
   LoginOut,
@@ -151,4 +155,31 @@ export function activeExport(body: ActiveExportIn): Promise<ActiveExportOut> {
 /** 主动学习：训练池状态（样本数 / 数据版本指纹 / 最近导出）。 */
 export function activePool(): Promise<ActivePoolOut> {
   return request<ActivePoolOut>("/active/pool");
+}
+
+/* ── 批量处理（§12.1）：多图/文件夹导入 → 异步队列 → 进度 → 取消/重试 ── */
+
+/** 提交批量评片：FormData 含 images[]（多文件）+ 公共参数 → batch_id（异步执行）。 */
+export function submitBatch(form: FormData): Promise<BatchSubmitOut> {
+  return request<BatchSubmitOut>("/batch", { method: "POST", body: form });
+}
+
+/** 批次进度与逐任务结果。 */
+export function getBatchStatus(batchId: string): Promise<BatchStatusOut> {
+  return request<BatchStatusOut>(`/batch/${batchId}`);
+}
+
+/** 历史批次摘要列表（最近在前），断点续跑入口。 */
+export function listBatches(): Promise<BatchSummaryOut[]> {
+  return request<BatchSummaryOut[]>("/batches");
+}
+
+/** 取消批次：未启动任务不再执行。 */
+export function cancelBatch(batchId: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/batch/${batchId}/cancel`, { method: "POST" });
+}
+
+/** 断点续跑：重跑本批 failed/cancelled 任务。 */
+export function retryBatch(batchId: string): Promise<BatchRetryOut> {
+  return request<BatchRetryOut>(`/batch/${batchId}/retry`, { method: "POST" });
 }

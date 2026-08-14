@@ -49,7 +49,7 @@ export interface ApiError {
 /* ── 真实后端契约（镜像 backend/app/routers/report.py · records.py · review.py）── */
 
 /** 顶层视图（RailNav 导航目标） */
-export type ViewId = "journey" | "archive";
+export type ViewId = "journey" | "archive" | "batch";
 
 /** POST /api/v1/report → ReportOut */
 export interface ReportOut {
@@ -209,4 +209,61 @@ export interface LoginOut {
   access_token: string;
   token_type: string;
   user: UserOut;
+}
+
+
+/* ── 批量处理（§12.1 · POST /api/v1/batch、GET /batch/{id}、GET /batches、retry/cancel）── */
+
+export type BatchTaskStatus = "pending" | "running" | "done" | "failed" | "cancelled";
+
+/** POST /api/v1/batch → BatchSubmitOut */
+export interface BatchSubmitOut {
+  batch_id: string;
+  total: number;
+  estimated_sec: number;
+}
+
+/** GET /api/v1/batch/{id} → tasks[] 项 */
+export interface BatchTaskOut {
+  task_id: string;
+  image_name: string;
+  status: BatchTaskStatus;
+  error: string | null;
+  image_id: string | null;
+  report_id: string | null;
+  joint_level: string | null;
+  need_review: boolean | null;
+}
+
+/** GET /api/v1/batch/{id} → BatchStatusOut */
+export interface BatchStatusOut {
+  batch_id: string;
+  status: string;
+  total: number;
+  done: number;
+  failed: number;
+  cancelled: number;
+  estimated_sec: number;
+  progress: number;
+  tasks: BatchTaskOut[];
+}
+
+/** GET /api/v1/batches → 列表项（历史/断点续跑入口） */
+export interface BatchSummaryOut {
+  batch_id: string;
+  status: string;
+  total: number;
+  done: number;
+  failed: number;
+  cancelled: number;
+  progress: number;
+  estimated_sec: number;
+  created_at: string | null;
+  finished_at: string | null;
+}
+
+/** POST /api/v1/batch/{id}/retry → BatchRetryOut */
+export interface BatchRetryOut {
+  ok: boolean;
+  retried: number;
 }
