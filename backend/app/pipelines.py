@@ -16,8 +16,6 @@ import time
 import uuid
 from pathlib import Path
 
-_LOG = logging.getLogger("scandetection.pipeline")
-
 from backend.app.dependencies import Registry
 from backend.domain.density import check_density, estimate_density
 from backend.domain.dto import DefectShape, Detection, ImageMeta, Modality
@@ -29,6 +27,8 @@ from backend.domain.quantify import BBoxQuantifier
 from backend.domain.review import ReviewDecision, ReviewRole, resolve_review
 from backend.domain.standards.tables.loader import disclaimer_for
 from backend.infra.image_loader import load_image
+
+_LOG = logging.getLogger("scandetection.pipeline")
 
 
 def _resolve_spacing(requested: float | None, from_meta: float | None) -> tuple[float, bool]:

@@ -19,8 +19,6 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-_LOG = logging.getLogger("scandetection.repository")
-
 from backend.domain.dto import DefectClass
 from backend.infra.db import (
     AuditRecord,
@@ -32,6 +30,8 @@ from backend.infra.db import (
     UserRecord,
     create_db_engine,
 )
+
+_LOG = logging.getLogger("scandetection.repository")
 
 _PAGE_MAX = 100
 _LEVELS = ("I", "II", "III", "IV")
@@ -128,13 +128,28 @@ class InspectionRepository:
             rec = session.get(ReportRecord, report_id)
             return self._report_to_dict(rec) if rec is not None else None
 
-    def update_report(self, report_id: str, pdf_path: str) -> None:
-        """回填报告 PDF 路径（报告生成后）。"""
+    def update_report(
+        self,
+        report_id: str,
+        pdf_path: str | None = None,
+        report_hash: str | None = None,
+        signed_at: datetime | None = None,
+    ) -> None:
+        """回填报告字段（PDF 路径 / 数字指纹 / 签发时间，§7.2）。
+
+        pdf_path 由报告生成后回填；report_hash/signed_at 由 PdfReporter.build
+        写入（数字签名）。任一字段为 None 表示不改动对应列。
+        """
         with Session(self._engine) as session, session.begin():
             rec = session.get(ReportRecord, report_id)
             if rec is None:
                 raise KeyError(f"report not found: {report_id}")
-            rec.pdf_path = pdf_path
+            if pdf_path is not None:
+                rec.pdf_path = pdf_path
+            if report_hash is not None:
+                rec.report_hash = report_hash
+            if signed_at is not None:
+                rec.signed_at = signed_at
 
     def list_records(
         self,
@@ -636,6 +651,8 @@ class InspectionRepository:
             "standard_ref": r.standard_ref,
             "signer": r.signer,
             "basis": list(r.basis or []),
+            "report_hash": r.report_hash,
+            "signed_at": _fmt_dt(r.signed_at) if r.signed_at else None,
         }
 
     @staticmethod

@@ -11,24 +11,6 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-_LOG = logging.getLogger("scandetection")
-
-
-def _configure_logging() -> None:
-    """统一日志（关键路径可追溯）。
-
-    默认 WARNING 级别会吞掉业务 info/warning；这里显式配成 INFO 并固定格式
-    （时间/级别/模块/消息），使模型加载、推理、判定、审计等关键路径可被观测。
-    force=True 确保本配置优先生效（避免被第三方库的早期 basicConfig 覆盖）。
-    """
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S",
-        force=True,
-    )
-
-
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,6 +23,7 @@ from backend.app.routers import (
     auth,
     batch,
     detect,
+    devices,
     evaluation,
     explain,
     health,
@@ -109,6 +92,24 @@ def _start_annotator_if_enabled() -> None:
         _LOG.warning("annotator launch failed: %s", exc)
 
 
+_LOG = logging.getLogger("scandetection")
+
+
+def _configure_logging() -> None:
+    """统一日志（关键路径可追溯）。
+
+    默认 WARNING 级别会吞掉业务 info/warning；这里显式配成 INFO 并固定格式
+    （时间/级别/模块/消息），使模型加载、推理、判定、审计等关键路径可被观测。
+    force=True 确保本配置优先生效（避免被第三方库的早期 basicConfig 覆盖）。
+    """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+        force=True,
+    )
+
+
 def create_app() -> FastAPI:
     """构造 FastAPI 应用（§T5）。
 
@@ -144,6 +145,7 @@ def create_app() -> FastAPI:
         verify.router,
         preprocess.router,
         detect.router,
+        devices.router,
         judge.router,
         batch.router,
         review.router,

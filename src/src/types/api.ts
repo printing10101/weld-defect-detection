@@ -49,7 +49,7 @@ export interface ApiError {
 /* ── 真实后端契约（镜像 backend/app/routers/report.py · records.py · review.py）── */
 
 /** 顶层视图（RailNav 导航目标） */
-export type ViewId = "journey" | "archive" | "batch";
+export type ViewId = "journey" | "archive" | "batch" | "device";
 
 /** POST /api/v1/report → ReportOut */
 export interface ReportOut {
@@ -266,4 +266,63 @@ export interface BatchSummaryOut {
 export interface BatchRetryOut {
   ok: boolean;
   retried: number;
+}
+
+
+/* ── 设备标定（§12.4 · /api/v1/devices…）与报告数字签名校验（§7.2）── */
+
+export type CalibrationStatus = "ok" | "over";
+
+export interface CalibrationOut {
+  calibration_id: string;
+  device_id: string;
+  calibrator: string;
+  pixel_spacing_mm: number;
+  ref_pixel_spacing_mm: number | null;
+  deviation_pct: number | null;
+  status: CalibrationStatus;
+  density_ref: number | null;
+  notes: string | null;
+  calibrated_at: string | null;
+}
+
+export interface DeviceOut {
+  device_id: string;
+  name: string;
+  model: string | null;
+  serial_no: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string | null;
+  calibration_count: number;
+  last_calibration: CalibrationOut | null;
+}
+
+export interface DeviceDetailOut extends DeviceOut {
+  calibrations: CalibrationOut[];
+}
+
+export interface DeviceIn {
+  name: string;
+  model?: string | null;
+  serial_no?: string | null;
+  notes?: string | null;
+}
+
+export interface CalibrationIn {
+  calibrator: string;
+  pixel_spacing_mm: number;
+  ref_pixel_spacing_mm?: number | null;
+  density_ref?: number | null;
+  notes?: string | null;
+}
+
+/** POST /api/v1/report/{id}/verify → VerifyOut（§7.2 数字签名校验） */
+export interface VerifyOut {
+  report_id: string;
+  valid: boolean | null;
+  hash: string | null;
+  signer: string | null;
+  generated_at: string | null;
+  reason: string | null;
 }

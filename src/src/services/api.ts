@@ -13,6 +13,11 @@ import type {
   BatchStatusOut,
   BatchSubmitOut,
   BatchSummaryOut,
+  CalibrationIn,
+  CalibrationOut,
+  DeviceDetailOut,
+  DeviceIn,
+  DeviceOut,
   HealthResponse,
   LoginIn,
   LoginOut,
@@ -21,6 +26,7 @@ import type {
   ReviewIn,
   ReviewOut,
   UserOut,
+  VerifyOut,
 } from "../types/api";
 import { authHeaders, clearToken, setToken } from "./auth";
 
@@ -182,4 +188,39 @@ export function cancelBatch(batchId: string): Promise<{ ok: boolean }> {
 /** 断点续跑：重跑本批 failed/cancelled 任务。 */
 export function retryBatch(batchId: string): Promise<BatchRetryOut> {
   return request<BatchRetryOut>(`/batch/${batchId}/retry`, { method: "POST" });
+}
+
+/* ── 设备标定（§12.4）与报告数字签名校验（§7.2） ── */
+
+/** 设备列表（含最近标定摘要与一致性状态）。 */
+export function listDevices(): Promise<DeviceOut[]> {
+  return request<DeviceOut[]>("/devices");
+}
+
+/** 注册检测设备。 */
+export function registerDevice(body: DeviceIn): Promise<DeviceOut> {
+  return request<DeviceOut>("/devices", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** 设备详情：档案 + 完整标定档案。 */
+export function getDevice(deviceId: string): Promise<DeviceDetailOut> {
+  return request<DeviceDetailOut>(`/devices/${deviceId}`);
+}
+
+/** 记录一次标定（跨设备一致率 ≤5% 判定）。 */
+export function addCalibration(deviceId: string, body: CalibrationIn): Promise<CalibrationOut> {
+  return request<CalibrationOut>(`/devices/${deviceId}/calibrations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** 报告数字签名校验：重算内容指纹与签发时比对（防篡改）。 */
+export function verifyReport(reportId: string): Promise<VerifyOut> {
+  return request<VerifyOut>(`/report/${reportId}/verify`, { method: "POST" });
 }

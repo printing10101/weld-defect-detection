@@ -42,6 +42,7 @@ class ReportContent:
     standard_ref: str
     signer: str | None
     disclaimer: str
+    fingerprint: str | None = None  # 报告内容指纹（SHA-256，§7.2 数字签名，PDF 页脚展示）
 
 
 def build_report_content(
@@ -49,6 +50,7 @@ def build_report_content(
     defects: list[dict[str, Any]],
     report: dict[str, Any] | None,
     disclaimer: str | None = None,
+    fingerprint: str | None = None,
 ) -> ReportContent:
     """从检查记录（repository 返回的 dict）组装报告内容。
 
@@ -77,4 +79,5 @@ def build_report_content(
         standard_ref=str(image.get("standard_id") or ""),
         signer=(report or {}).get("signer"),
         disclaimer=disclaimer or _DISCLAIMER_DEFAULT,
+        fingerprint=fingerprint,
     )

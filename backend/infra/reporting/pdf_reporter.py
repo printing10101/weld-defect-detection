@@ -11,8 +11,12 @@ M7 起报告经 pdfa.postprocess_to_pdfa 转写为 PDF/A-1b（字体已全量嵌
 
 from __future__ import annotations
 
+import hashlib
 import io
+import json
+import logging
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 
 import cv2
@@ -124,6 +128,8 @@ _MAX_ANNOTATIONS = 50  # 图谱最多标注框数（防超大报告与糊图）
 _EMBED_MAX_SIDE = 1600  # 嵌入报告的影像最长边（px）：底片常见 4k+，原尺寸会撑爆 PDF
 _MAX_IMAGE_H = 95 * mm  # 单张嵌入影像最大高度，防止竖长图撑破版心
 
+_LOG = logging.getLogger("scandetection.reporting")
+
 
 class PdfReporter:
     """reportlab 实现的报告生成器（实现 Reporter Protocol）。"""
@@ -135,7 +141,11 @@ class PdfReporter:
         self._font = _register_font()
 
     def build(self, image_id: str, template: str = "standard") -> str:
-        """生成 PDF/A-1b 报告，返回绝对路径。image_id 不存在抛 ValueError。"""
+        """生成 PDF/A-1b 报告，返回绝对路径。image_id 不存在抛 ValueError。
+
+        §7.2 数字签名：按报告关键字段计算内容指纹（SHA-256），写入 PDF 页脚
+        并持久化到 reports.report_hash / signed_at，供 verify 端点防篡改校验。
+        """
         del template  # v1 统一模板（参数预留）
         image = self._repo.get_image(image_id)
         if image is None:
@@ -145,7 +155,10 @@ class PdfReporter:
         # 工业过渡路径（T1）：按报告所用标准表自行生成免责声明（与判定器同源），
         # 表缺失/解析失败时回退默认强声明，不阻断出片。
         disclaimer = _report_disclaimer(image.get("standard_id") or "")
-        content = build_report_content(image, defects, report, disclaimer=disclaimer or None)
+        fingerprint = report_fingerprint(image, defects, report)
+        content = build_report_content(
+            image, defects, report, disclaimer=disclaimer or None, fingerprint=fingerprint
+        )
 
         # 原图只解码一次，原始图与标注图共用（原实现解码两次，大底片翻倍开销）
         gray = _read_gray(image["path"])
@@ -163,7 +176,60 @@ class PdfReporter:
                 rl_path.unlink(missing_ok=True)
             except OSError:
                 pass
+        # 指纹写库（§7.2）：报告行存在则回填，缺行/写入失败不阻断出片。
+        report_id = (report or {}).get("report_id")
+        if report_id:
+            try:
+                self._repo.update_report(
+                    report_id,
+                    pdf_path=str(pdf_path),
+                    report_hash=fingerprint,
+                    signed_at=datetime.now(UTC).replace(tzinfo=None),
+                )
+            except (KeyError, OSError) as exc:  # pragma: no cover - 持久化尽力而为
+                _LOG.warning("fingerprint persist failed report=%s: %s", report_id, exc)
         return str(pdf_path)
+
+
+def report_fingerprint(image: dict, defects: list[dict], report: dict | None) -> str:
+    """报告内容指纹：关键字段 canonical JSON → SHA-256 hex（§7.2 数字签名）。
+
+    覆盖影像标识/工件/厚度/标定、级别/需复核、缺陷明细（类别/几何/当量/级别）、
+    判定依据条款与签发人；字段按 key 排序、紧凑序列化，保证同内容稳定可复现。
+    verify 端点用同一函数重算比对 → 防篡改。
+    """
+    payload = {
+        "image_id": image.get("image_id") or image.get("id"),
+        "workpiece_no": image.get("workpiece_no"),
+        "weld_no": image.get("weld_no"),
+        "pixel_spacing_mm": image.get("pixel_spacing_mm"),
+        "base_metal_thickness_mm": image.get("base_metal_thickness_mm"),
+        "joint_level": image.get("joint_level"),
+        "need_review": bool(image.get("need_review", False)),
+        "standard_id": image.get("standard_id"),
+        "standard_version": image.get("standard_version"),
+        "defects": [
+            {
+                "class_id": d.get("class_id"),
+                "shape": d.get("shape"),
+                "length_mm": d.get("length_mm"),
+                "width_mm": d.get("width_mm"),
+                "area_mm2": d.get("area_mm2"),
+                "perimeter_mm": d.get("perimeter_mm"),
+                "joint_level": d.get("joint_level"),
+                "need_review": bool(d.get("need_review", False)),
+            }
+            for d in (defects or [])
+        ],
+        "report": {
+            "joint_level": (report or {}).get("joint_level"),
+            "standard_ref": (report or {}).get("standard_ref"),
+            "signer": (report or {}).get("signer"),
+            "basis": list((report or {}).get("basis") or []),
+        },
+    }
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _report_disclaimer(standard_id: str) -> str:
@@ -468,6 +534,12 @@ def _render(
         flow.append(Paragraph("⚠ 本报告标注需要人工复核。", styles["warn"]))
     flow.append(Spacer(1, 4 * mm))
     flow.append(Paragraph(f"签字：{c.signer or '____________'}", styles["meta"]))
+    if c.fingerprint:
+        flow.append(
+            Paragraph(
+                f"数字指纹：SHA-256:{c.fingerprint[:12]}（报告内容防篡改校验）", styles["meta"]
+            )
+        )
     flow.append(Spacer(1, 4 * mm))
     flow.append(Paragraph(f"免责声明：{c.disclaimer}", styles["fine"]))
 

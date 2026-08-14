@@ -12,6 +12,9 @@ from sqlalchemy import inspect
 from backend.infra.db import Base, create_db_engine
 from backend.infra.migrate import ensure_migrations
 
+# schema 演进：0001 基线 + 0002（devices/calibrations + reports 数字签名字段）
+_HEAD = "0002_devices_report_hash"
+
 
 def test_migrate_fresh_db_creates_tables(tmp_path) -> None:
     p = str(tmp_path / "fresh.db")
@@ -19,8 +22,9 @@ def test_migrate_fresh_db_creates_tables(tmp_path) -> None:
     eng = create_db_engine(p)
     with eng.connect() as c:
         tables = set(inspect(c).get_table_names())
-    assert version == "0001_initial"
+    assert version == _HEAD
     assert {"images", "defects", "reports", "reviews", "audit_log", "alembic_version"} <= tables
+    assert {"devices", "calibrations"} <= tables
 
 
 def test_migrate_legacy_create_all_db_stamps_head(tmp_path) -> None:
@@ -33,7 +37,7 @@ def test_migrate_legacy_create_all_db_stamps_head(tmp_path) -> None:
         has_version = inspect(c).get_table_names().__contains__("alembic_version")
         ver = c.exec_driver_sql("SELECT version_num FROM alembic_version").fetchone()
     assert has_version
-    assert ver[0] == "0001_initial"
-    assert version == "0001_initial"
+    assert ver[0] == _HEAD
+    assert version == _HEAD
     # 幂等
-    assert ensure_migrations(p) == "0001_initial"
+    assert ensure_migrations(p) == _HEAD

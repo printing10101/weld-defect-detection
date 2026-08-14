@@ -1,7 +1,11 @@
-"""IQI + 黑度校验（§4.2）。
+"""影像质量校验 + 报告数字签名校验。
 
-M2 真实实现：multipart 上传 → infra 加载 → 黑度估计 + 线型 IQI 识别 → evaluable。
-注：M2 基线为单图轻量计算（同步执行）；批量/重型管线按 §13.11 进线程池（M6）。
+两部分：
+1. POST /api/v1/verify（§4.2，原实现）：multipart 上传 → 黑度估计 + 线型 IQI
+   识别 + 伪缺陷筛查 → evaluable（单图轻量同步计算）。
+2. POST /api/v1/report/{id}/verify（§7.2，新增）：报告数字签名校验——生成时
+   PdfReporter.build 计算内容指纹（关键字段 canonical JSON → SHA-256）写入
+   reports.report_hash；本端点用同一函数重算比对，防篡改。
 """
 
 from __future__ import annotations
@@ -9,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
@@ -20,6 +24,7 @@ from backend.domain.density import check_density, estimate_density
 from backend.domain.iqi import IqiConfig, enrich_grade, verify_iqi
 from backend.domain.pseudo_defect import PseudoDefectCfg, screen_pseudo_defects
 from backend.infra.image_loader import load_image
+from backend.infra.reporting.pdf_reporter import report_fingerprint
 
 router = APIRouter(tags=["verify"], dependencies=[Depends(get_current_user)])
 
@@ -123,4 +128,59 @@ def _verify_sync(
         density_ok=density_ok,
         pseudo_defect=PseudoDefectOut(passed=pd.passed, notes=pd.notes),
         evaluable=bool(density_ok and iqi.passed and pd.passed),
+    )
+
+
+# ---------------------------------------------------------------------------
+# §7.2 报告数字签名校验（POST /api/v1/report/{id}/verify）
+# ---------------------------------------------------------------------------
+
+
+class VerifyOut(BaseModel):
+    report_id: str
+    valid: bool | None  # True=一致；False=不一致；None=无法校验（legacy 无指纹）
+    hash: str | None
+    signer: str | None
+    generated_at: str | None
+    reason: str | None = None  # legacy | mismatch 说明
+
+
+@router.post("/report/{report_id}/verify", response_model=VerifyOut)
+def verify_report(
+    report_id: str,
+    reg: Annotated[Registry, Depends(get_registry)],
+) -> VerifyOut:
+    """校验报告数字签名：重算内容指纹与签发时比对。"""
+    repo = reg.repository
+    rep = repo.get_report(report_id)
+    if rep is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": f"report not found: {report_id}"},
+        )
+    stored = rep.get("report_hash")
+    if not stored:
+        return VerifyOut(
+            report_id=report_id,
+            valid=None,
+            hash=None,
+            signer=rep.get("signer"),
+            generated_at=rep.get("generated_at"),
+            reason="legacy",
+        )
+    image = repo.get_image(rep["image_id"])
+    if image is None:  # pragma: no cover - 外键约束下不应出现
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": f"image not found: {rep['image_id']}"},
+        )
+    recomputed = report_fingerprint(image, image.get("defects") or [], rep)
+    valid = recomputed == stored
+    return VerifyOut(
+        report_id=report_id,
+        valid=valid,
+        hash=stored,
+        signer=rep.get("signer"),
+        generated_at=rep.get("generated_at"),
+        reason=None if valid else "mismatch",
     )

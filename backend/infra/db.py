@@ -107,6 +107,44 @@ class ReportRecord(Base):
     standard_ref: Mapped[str | None] = mapped_column(String(128), default=None)
     signer: Mapped[str | None] = mapped_column(String(64), default=None)
     basis: Mapped[list] = mapped_column(JSON, default=list)  # 判定依据条款快照
+    # §7.2 数字签名：报告内容指纹（SHA-256）+ 签发时间；POST /report/{id}/verify 校验。
+    report_hash: Mapped[str | None] = mapped_column(String(64), default=None)
+    signed_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+
+
+class DeviceRecord(Base):
+    """检测设备档案（§12.4 设备标定与跨设备一致性）。"""
+
+    __tablename__ = "devices"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))  # 设备名/编号，如 CR-01
+    model: Mapped[str | None] = mapped_column(String(128), default=None)
+    serial_no: Mapped[str | None] = mapped_column(String(128), default=None)
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    created_by: Mapped[str | None] = mapped_column(String(64), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class CalibrationRecord(Base):
+    """一次设备标定记录（§12.4）。
+
+    标定时比对实测像素标定与标定件参考值：相对偏差 ≤5% → status=ok，
+    超差 → status=over（跨设备一致率 ≤5% 的量化门槛）。
+    """
+
+    __tablename__ = "calibrations"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    device_id: Mapped[str] = mapped_column(ForeignKey("devices.id"), index=True)
+    calibrator: Mapped[str] = mapped_column(String(64))  # 标定员
+    pixel_spacing_mm: Mapped[float] = mapped_column(Float)  # 实测像素标定（mm/px）
+    ref_pixel_spacing_mm: Mapped[float | None] = mapped_column(Float, default=None)  # 标定件参考值
+    deviation_pct: Mapped[float | None] = mapped_column(Float, default=None)  # 相对偏差 %
+    status: Mapped[str] = mapped_column(String(8), default="ok")  # ok | over
+    density_ref: Mapped[float | None] = mapped_column(Float, default=None)  # 黑度校验值（可选）
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    calibrated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
 class ReviewRecord(Base):

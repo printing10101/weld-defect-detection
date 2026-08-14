@@ -11,8 +11,6 @@ import os
 import threading
 from pathlib import Path
 
-_LOG = logging.getLogger("scandetection.dependencies")
-
 from backend.app.auth import ROLE_ADMIN, hash_password
 from backend.app.batch_queue import BatchManager
 from backend.domain.detect.blob_detector import BlobConfig, BlobDetector
@@ -28,6 +26,8 @@ from backend.infra.model_registry import ModelEntry, ModelRegistry
 from backend.infra.model_store import LocalModelStore
 from backend.infra.reporting.pdf_reporter import PdfReporter
 from backend.infra.repository import InspectionRepository
+
+_LOG = logging.getLogger("scandetection.dependencies")
 
 # 安装根目录锚点：backend/app/dependencies.py -> parents[2] = 安装根目录
 _INSTALL_ROOT = Path(__file__).resolve().parents[2]
@@ -99,6 +99,10 @@ class Registry:
         self.batch_manager = self._build_batch_manager()
         self.syncer = self._build_syncer()
         self.eval_dir = _resolve_path(str(Path(self.config.paths.data_dir) / "eval"))
+        # §12.4 设备标定档案（跨设备一致性 ≤5%）
+        from backend.infra.device_store import DeviceStore
+
+        self.device_store = DeviceStore(_resolve_path(self.config.paths.db_path))
 
     def _seed_bootstrap_admin(self) -> None:
         """首启动引导管理员（§T3，P0）。
