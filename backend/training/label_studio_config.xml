@@ -1,0 +1,15 @@
+<!-- 焊缝 X 光缺陷标注配置（Label Studio）。
+     类别顺序必须与此处一致，才能与训练 data.yaml 的 YOLO 索引对齐：
+       0 气孔 / 1 夹渣 / 2 未焊透 / 3 未熔合 / 4 裂纹 / 5 咬边
+     导出时选 YOLO 格式，得到的 txt class_id 即与本项目 DefectClass 一致。 -->
+<View>
+  <Image name="image" value="$image" zoom="true" rotateControl="true"/>
+  <RectangleLabels name="label" toName="image" strokeWidth="2">
+    <Label value="气孔" background="#e53935"/>
+    <Label value="夹渣" background="#fb8c00"/>
+    <Label value="未焊透" background="#1e88e5"/>
+    <Label value="未熔合" background="#43a047"/>
+    <Label value="裂纹" background="#8e24aa"/>
+    <Label value="咬边" background="#6d4c41"/>
+  </RectangleLabels>
+</View>

@@ -6,6 +6,7 @@
 - `image: np.ndarray` 约定：单通道灰度，shape (H,W) 或 (H,W,1)，
   dtype uint8(0-255) 或 float32(0-1)。
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
@@ -26,7 +27,9 @@ class DefectDetector(Protocol):
     """缺陷检测器（模型无关，§5.1）。"""
 
     def load(self, model_uri: str, backend: str = "onnx") -> None: ...
-    def infer(self, image: np.ndarray, conf: float, iou: float) -> list[Detection]: ...
+    def infer(
+        self, image: np.ndarray, conf: float, iou: float, class_conf: dict[int, float] | None = None
+    ) -> list[Detection]: ...
 
 
 @runtime_checkable

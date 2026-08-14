@@ -2,6 +2,7 @@
 
 错误码与 §14 错误码表一一对应；由应用层全局处理器映射 HTTP 状态。
 """
+
 from __future__ import annotations
 
 

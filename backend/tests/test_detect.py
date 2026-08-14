@@ -1,4 +1,5 @@
 """M4a 检测与量化测试（§5）：基线检测器 + 几何换算 + API。"""
+
 from __future__ import annotations
 
 import cv2
@@ -62,3 +63,41 @@ def test_detect_api() -> None:
     for key in ("L_mm", "W_mm", "area_mm2", "perimeter_mm", "aspect_ratio", "confidence"):
         assert key in first
     assert body["annotated_image"]  # 标注图 base64 非空
+
+
+# ---------------------------------------------------------------------------
+# M4：不确定性估计（§5.5，模型无关代理）
+# ---------------------------------------------------------------------------
+from backend.domain.detect.uncertainty import estimate_uncertainty
+from backend.domain.detect.yolo_detector import YoloDetector
+
+
+def test_uncertainty_near_threshold_is_high() -> None:
+    # score 刚好压线 → 最不可信
+    assert estimate_uncertainty(0.30, 0.30, 0, 5000) > 0.9
+
+
+def test_uncertainty_confident_large_is_low() -> None:
+    # 高置信 + 大目标 → 低不确定
+    assert estimate_uncertainty(0.99, 0.30, 0, 5000) < 0.1
+
+
+def test_uncertainty_safety_critical_class_higher() -> None:
+    # 同置信度下，安全关键类别（裂纹）不确定性基线高于气孔
+    crack = estimate_uncertainty(0.99, 0.05, 4, 2000)
+    porosity = estimate_uncertainty(0.99, 0.30, 0, 2000)
+    assert crack > porosity
+
+
+def test_uncertainty_clamped() -> None:
+    assert 0.0 <= estimate_uncertainty(0.5, 0.3, 0, 1000) <= 1.0
+    assert estimate_uncertainty(2.0, 0.3, 0, 1000) <= 1.0  # score 越界被 clip
+    assert estimate_uncertainty(-1.0, 0.3, 0, 1000) >= 0.0
+
+
+def test_yolo_to_detections_uses_estimator() -> None:
+    # 大且高置信气孔 → 低不确定（不再恒等于 1-score）
+    dets = YoloDetector._to_detections([(10, 10, 40, 40, 0, 0.95)], conf=0.3, class_conf=None)
+    assert len(dets) == 1
+    assert dets[0].uncertainty < 0.1
+    assert dets[0].uncertainty != round(1.0 - 0.95, 4)  # 与旧 1-score 行为不同

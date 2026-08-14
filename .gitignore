@@ -16,12 +16,44 @@ backend/.venv/
 .pytest_cache/
 .ruff_cache/
 .pyright/
+.coverage
+.coverage.*
 
 # Data & artifacts（DVC 追踪的原始数据除外）
 data/tmp/
 data/.dvc/tmp/
+data/scan.db
+data/images/
+data/reports/
+data/real_label/
+data/training/
+data/external/
+data/compare/
+data/runs/
+data/batch/
+data/demo/
+data/prelabels/
+backend/data/
+data/eval/.gate_work/
+data/experiments/
+runs/
+图片/
+train_status.json
+measure_signals.json
+x.txt
 backend/models/weights/*.onnx
 backend/models/weights/*.pt
+
+# 打包/构建产物（非源码，不入库）
+_pkg/
+installer_src/
+src/src-tauri/gen/
+src/src-tauri/target/
+# Tauri 打包运行时：嵌入版 Python + 依赖（构建产物，体积大，不入库）
+src/python_embed/
+# 本地模型副本（安装包由 backend/models/weights 注入，不入库）
+models/weights/
+nul
 
 # Env / secrets
 .env
@@ -34,3 +66,9 @@ backend/models/weights/*.pt
 # OS
 .DS_Store
 Thumbs.db
+
+# Temp extraction from 射线竞赛.rar (analysis only, not project source)
+射线竞赛/
+_read_docx.py
+data/m6_demo_report.pdf
+src/vite.build.config.ts.timestamp-*.mjs

@@ -8,6 +8,7 @@
 参数（TARGET_SIZE / MEAN / STD / RGB_ORDER）为冻结占位，正式训练调参时
 **两条路径同时更新**并经 ADR-007 记录，禁止单边修改。
 """
+
 from __future__ import annotations
 
 import numpy as np

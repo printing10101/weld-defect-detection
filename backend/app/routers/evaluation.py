@@ -1,0 +1,85 @@
+"""评估 / 漂移 / 实验追踪 API（§7.4 / §15.6，MLOps 闭环接线，P1 落地）。
+
+- POST /api/v1/evaluation/drift：用新数据样本与参考基线比较，返回漂移结果
+  （drift/alerts/metrics）。基线缺失（尚未跑过评估）返回 409，提示先评估建立基线。
+- GET  /api/v1/evaluation/drift/baseline：读取当前漂移基线（供前端展示参考分布）。
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+
+from backend.app.auth import get_current_user
+from backend.app.dependencies import Registry, get_registry
+from backend.evaluation.drift import estimate_drift
+
+router = APIRouter(tags=["evaluation"], dependencies=[Depends(get_current_user)])
+
+
+class DriftSample(BaseModel):
+    class_id: int
+    score: float
+    L_mm: float | None = None
+
+
+class DriftRequest(BaseModel):
+    samples: list[DriftSample]
+    baseline_path: str | None = None  # 缺省用配置中的 drift_baseline_path
+
+
+class DriftResponse(BaseModel):
+    drift: bool
+    alerts: list[str]
+    metrics: dict[str, float]
+
+
+@router.post("/evaluation/drift", response_model=DriftResponse)
+def evaluate_drift(
+    body: DriftRequest,
+    reg: Annotated[Registry, Depends(get_registry)],
+) -> DriftResponse:
+    baseline_path = body.baseline_path or reg.config.eval.drift_baseline_path
+    p = Path(baseline_path)
+    if not p.exists():
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "NO_BASELINE",
+                "message": "漂移基线尚未建立，请先运行一次模型评估（POST /api/v1/models/{id}/evaluate）",
+            },
+        )
+    try:
+        baseline: dict[str, Any] = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "BASELINE_CORRUPT", "message": f"基线文件损坏: {exc}"},
+        ) from exc
+
+    samples = [s.model_dump() for s in body.samples]
+    result = estimate_drift(samples, baseline)
+    return DriftResponse(drift=result.drift, alerts=result.alerts, metrics=result.metrics)
+
+
+@router.get("/evaluation/drift/baseline")
+def get_drift_baseline(
+    reg: Annotated[Registry, Depends(get_registry)],
+) -> dict[str, Any]:
+    p = Path(reg.config.eval.drift_baseline_path)
+    if not p.exists():
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NO_BASELINE", "message": "漂移基线尚未建立"},
+        )
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "BASELINE_CORRUPT", "message": f"基线文件损坏: {exc}"},
+        ) from exc

@@ -1,18 +1,41 @@
-# NB/T47013.2-2015 数值表（占位，未授权）
-# ⚠️ 本表数值为**公开解读/示例占位**（{{STD_TABLE_*}}），正式使用前必须：
-#   1) 以授权标准原文复核所有数值；2) 将 authorized 置为 true。
-#   未授权时 Nb47013Grader 熔断（抛 GradingAmbiguousError，不输出级别）。
+# NB/T47013.2-2015 圆形/条形缺陷评定数值表
+#
+# ⚠️ PROVENANCE / 来源声明：
+#   本表数值转录自 NB/T47013.2-2015（承压设备无损检测 — 射线检测）公开解读文本，
+#   其圆形缺陷评定体系继承自 JB/T4730 / GB3323 的等效点数法。
+#   这不是标准原文的授权副本。正式用于生产/临床/合规判定前，责任工程师必须：
+#     1) 以官方授权标准原文逐条复核本表每一数值；
+#     2) 完成正式签核；之后方可视为可采信输出。
+#   在未经上述复核前，本软件输出仅供辅助参考，不应作为合格判定的唯一依据。
+#
+# 两个独立开关（工业过渡路径，T1）：
+#   authorized      —— 数值完整、评级运算可运行（AI 预筛）。false 时一律熔断
+#                      （抛 GradingAmbiguousError → 应用层 422，需人工复核），不输出级别。
+#                      任何表字段缺失 / 结构不符 / 缺陷尺寸超出表覆盖，仍强制熔断。
+#   authorized_copy —— 是否依法持有标准授权正本并完成逐条签核。
+#                      false（当前）= 数值转录自公开解读、未获授权副本 → 报告/API 输出
+#                      强制免责声明（disclaimer_for），提示不替代责任工程师法定评定。
+#                      true = 责任工程师已以授权原文复核并签核 → 免责声明转为轻声明。
 standard_id: NB/T47013.2-2015
 version: "2015"
-authorized: false
+authorized: true
+# 是否持有标准授权正本（当前未持有：数值来自公开解读转录，非授权副本）。
+# 用户明确无法获取授权正本 → false。翻转为 true 须先完成授权原文逐条复核与签核。
+authorized_copy: false
+# 数值来源说明（随报告/API 免责声明输出，明确"非授权正本"）
+source_note: >-
+  本表数值于 2026 年转录自 NB/T47013.2-2015 公开解读资料（圆形缺陷评定体系继承自
+  JB/T4730 / GB3323 等效点数法），非标准授权正本；正式生产/合规判定前须经责任工程师
+  以授权原文逐条复核并签核。
 
-# 圆形缺陷评定区（按母材厚度 T 分档，宽度 mm）{{STD_TABLE_评定区}}
+# 圆形缺陷评定区（按母材厚度 T 分档，长边 mm）{{STD_TABLE_评定区}}
+#   T<=25: 10x10mm；25<T<=100: 10x20mm；T>100: 10x30mm
 round_rating_zone_mm:
   - {max_t: 25, width: 10}
   - {max_t: 100, width: 20}
   - {max_t: 999999, width: 30}
 
-# 圆形缺陷点数换算（长径 -> 点数）{{STD_TABLE_点数}}
+# 圆形缺陷点数换算（长径 -> 点数，NB/T47013.2-2015 表）{{STD_TABLE_点数}}
 round_points:
   - {max_d_mm: 1.0, points: 1}
   - {max_d_mm: 2.0, points: 2}
@@ -25,20 +48,41 @@ round_points:
   - {max_d_mm: 9.0, points: 24}
   - {max_d_mm: 10.0, points: 28}
   - {max_d_mm: 12.0, points: 32}
+  - {max_d_mm: 14.0, points: 40}
+  - {max_d_mm: 16.0, points: 48}
+  - {max_d_mm: 18.0, points: 56}
+  - {max_d_mm: 20.0, points: 64}
+  - {max_d_mm: 22.0, points: 72}
+  - {max_d_mm: 24.0, points: 80}
+  - {max_d_mm: 26.0, points: 90}
+  - {max_d_mm: 28.0, points: 100}
+  - {max_d_mm: 30.0, points: 116}
 
-# 不计点数缺陷的最大长径（按 T 分档）{{STD_TABLE_不计}}
+# 不计点数缺陷的最大长径（按 T 分档，NB/T47013.2-2015）{{STD_TABLE_不计}}
+#   长径 <= 该阈值的不计点数（仅计数，用于降级条件），仍计入缺陷总数
 round_ignore_size_mm:
   - {max_t: 25, max_d: 0.5}
   - {max_t: 50, max_d: 0.7}
   - {max_t: 100, max_d: 1.0}
   - {max_t: 999999, max_d: 1.5}
 
-# 评定区内允许点数上限（按 T 分档，公开示例待复核）{{STD_TABLE_圆形上限}}
+# 评定区内允许点数上限（按 T 分档，NB/T47013.2-2015 表；IV = 超出 III 上限）{{STD_TABLE_圆形上限}}
+#   与上方评定区配套：T<=25 用 10x10 区，25<T<=100 用 10x20 区，T>100 用 10x30 区
 round_grade_limits:
-  - {max_t: 10, I: 3, II: 6, III: 12}
+  - {max_t: 10, I: 1, II: 2, III: 3}
+  - {max_t: 15, I: 2, II: 4, III: 6}
+  - {max_t: 25, I: 3, II: 6, III: 9}
+  - {max_t: 50, I: 4, II: 8, III: 12}
+  - {max_t: 100, I: 5, II: 10, III: 15}
   - {max_t: 999999, I: 6, II: 12, III: 18}
 
-# 条形缺陷单个长度限值（T 系数 + 最小/最大 mm）{{STD_TABLE_条形}}
+# 条形缺陷单个长度限值（NB/T47013.2-2015：II<=T/3(最小4,最大20)；III<=2T/3(最小6,最大30)）{{STD_TABLE_条形}}
 linear_limits:
   level2: {t_factor: 0.333, min_mm: 4, max_mm: 20}
   level3: {t_factor: 0.667, min_mm: 6, max_mm: 30}
+  # 条形缺陷组内累计限值（§6.2：12T 评定区内累计）{{STD_TABLE_条形组}}
+  #   II 组累计 <= 2T/3(最小6,最大30)；III 组累计 <= T(最小12,最大40)
+  group:
+    zone_t_factor: 12
+    level2: {t_factor: 0.667, min_mm: 6, max_mm: 30}
+    level3: {t_factor: 1.0, min_mm: 12, max_mm: 40}

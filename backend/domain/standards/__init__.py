@@ -4,4 +4,5 @@
 - 数值表统一放 tables/*.yaml，经 loader 加载并校验。
 - 未授权数值（authorized=false）熔断：不得输出级别（§T8）。
 """
+
 from __future__ import annotations

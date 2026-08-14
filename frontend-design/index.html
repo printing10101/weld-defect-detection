@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>射线焊缝智能评片 · 完整用户旅程原型</title>
+<style>
+  :root{
+    /* 设计令牌（极简 ZINE，全站统一） */
+    --paper:     #F3EFE6;  --paper-2: #EAE4D6;  --paper-3: #E2DBC9;
+    --ink:       #2B2620;  --ink-soft:#6B6458;  --ink-faint:#9A9286;
+    --accent:    #1F4E8C;  --signal:  #C0392B;  --amber:#B8860B;
+    --ok:        #2E6B4F;
+    --line:      rgba(43,38,32,.14); --line-soft: rgba(43,38,32,.08);
+    --serif:"Noto Serif SC","Source Han Serif SC","Songti SC","SimSun",Georgia,serif;
+    --mono:"JetBrains Mono","Cascadia Code","SFMono-Regular",Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:var(--mono);color:var(--ink);background:var(--paper);
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/></svg>");
+    -webkit-font-smoothing:antialiased;
+  }
+  .app{display:flex;min-height:100vh}
+
+  /* 左栏 */
+  .rail{width:226px;flex:0 0 226px;background:var(--paper-2);border-right:1px solid var(--line);padding:30px 22px;display:flex;flex-direction:column;gap:26px}
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand .mark{width:14px;height:14px;background:var(--accent);border-radius:1px}
+  .brand .name{font-family:var(--serif);font-size:15px;letter-spacing:.06em}
+  .rail .sub{font-size:10.5px;color:var(--ink-faint);letter-spacing:.04em;line-height:1.6}
+  nav{display:flex;flex-direction:column;gap:2px}
+  nav button{appearance:none;border:0;background:transparent;cursor:pointer;text-align:left;font-family:var(--mono);font-size:12.5px;color:var(--ink-soft);padding:11px 12px;border-left:2px solid transparent;display:flex;gap:9px;align-items:center;transition:.15s}
+  nav button .dot{width:5px;height:5px;border-radius:50%;background:var(--ink-faint);opacity:.5}
+  nav button:hover{color:var(--ink);background:var(--paper-3)}
+  nav button.active{color:var(--ink);border-left-color:var(--accent);background:var(--paper-3)}
+  nav button.active .dot{background:var(--accent);opacity:1}
+  .rail .foot{margin-top:auto;font-size:10px;color:var(--ink-faint);line-height:1.7}
+
+  /* 主区 */
+  main{flex:1;padding:44px 56px 70px;max-width:1120px}
+  .view{display:none;animation:fade .3s ease}
+  .view.active{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  /* 步骤指示器 */
+  .stepper{display:flex;gap:0;align-items:center;margin-bottom:34px;font-size:11.5px;letter-spacing:.05em}
+  .step{display:flex;align-items:center;gap:8px;color:var(--ink-faint)}
+  .step .num{width:22px;height:22px;border:1px solid var(--line);display:grid;place-items:center;font-size:10px;color:var(--ink-soft)}
+  .step.done .num{background:var(--accent);border-color:var(--accent);color:#F3EFE6}
+  .step.active .num{border-color:var(--accent);color:var(--accent)}
+  .step.done,.step.active{color:var(--ink)}
+  .bar{flex:0 0 44px;height:1px;background:var(--line);margin:0 12px}
+  .bar.done{background:var(--accent)}
+
+  h1.title{font-family:var(--serif);font-weight:600;font-size:28px;position:relative;margin-bottom:6px;letter-spacing:.02em}
+  h1.title::before{content:attr(data-t);position:absolute;left:2px;top:2px;color:var(--accent);opacity:.15;z-index:-1}
+  .lede{font-size:11px;color:var(--ink-soft);letter-spacing:.05em;margin-bottom:26px}
+  .section-h{font-family:var(--serif);font-size:15px;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:baseline}
+  .section-h .no{font-family:var(--mono);font-size:11px;color:var(--accent)}
+  .hint{font-size:10.5px;color:var(--ink-faint);letter-spacing:.03em;line-height:1.7}
+  .row{display:flex;gap:16px;flex-wrap:wrap}
+  .grow{flex:1;min-width:280px}
+
+  /* 上传 */
+  .guide{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px}
+  .guide .g{border:1px solid var(--line-soft);padding:14px 16px;background:var(--paper-2)}
+  .guide .n{font-family:var(--serif);color:var(--accent);font-size:13px;margin-bottom:4px}
+  .guide .t{font-size:10.5px;color:var(--ink-soft);line-height:1.6}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 4px}
+  .chip{font-size:10.5px;color:var(--ink-soft);border:1px solid var(--line);padding:6px 11px}
+  .chip.on{color:#F3EFE6;background:var(--accent);border-color:var(--accent)}
+  .drop{border:1.5px dashed var(--line);background:var(--paper-3);padding:38px 20px;text-align:center;cursor:pointer;transition:.15s}
+  .drop:hover,.drop.over{border-color:var(--accent);color:var(--ink)}
+  .drop .big{font-family:var(--serif);font-size:16px;color:var(--ink);margin-bottom:6px}
+  .drop .hint{font-size:10px;color:var(--ink-faint)}
+  .preview{display:none;margin-top:12px;border:1px solid var(--line);background:var(--paper-2);padding:12px;gap:14px;align-items:center}
+  .preview.show{display:flex}
+  .preview img,.preview .ph{width:120px;height:80px;object-fit:cover;background:#cfc9bd;display:grid;place-items:center;font-size:9px;color:var(--ink-soft)}
+  .preview .meta{font-size:10.5px;color:var(--ink-soft);line-height:1.7}
+  .err{display:none;margin-top:8px;font-size:11px;color:var(--signal)}
+  .err.show{display:block}
+  .field{margin-top:12px}
+  .field label{display:block;font-size:10.5px;color:var(--ink-soft);margin-bottom:5px;letter-spacing:.03em}
+  .field .req{color:var(--signal)}
+  .field input{width:100%;max-width:320px;background:var(--paper-3);border:1px solid var(--line);font-family:var(--mono);font-size:12px;color:var(--ink);padding:9px 11px}
+  .field .why{font-size:10px;color:var(--ink-faint);margin-top:4px}
+  .btn{appearance:none;border:1px solid var(--accent);background:var(--accent);color:#F3EFE6;font-family:var(--mono);font-size:12px;letter-spacing:.05em;padding:11px 22px;cursor:pointer;margin-top:18px}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn.ghost{background:transparent;color:var(--accent)}
+  .btn.link{background:none;border:none;color:var(--accent);padding:0;margin:0;font-size:11.5px;text-decoration:underline;cursor:pointer}
+  .demo-note{margin-top:18px;font-size:10px;color:var(--ink-faint);line-height:1.8;border-top:1px dashed var(--line);padding-top:12px}
+
+  /* 处理中 */
+  .proc-head{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:18px}
+  .proc-head .clock{font-size:20px;color:var(--accent)}
+  .proc-head .expect{font-size:10.5px;color:var(--ink-faint)}
+  .track{border:1px solid var(--line);background:var(--paper-2)}
+  .stage-row{display:flex;align-items:center;gap:14px;padding:13px 16px;border-bottom:1px solid var(--line-soft)}
+  .stage-row:last-child{border-bottom:0}
+  .stage-row .idx{font-size:10px;color:var(--ink-faint);width:16px}
+  .stage-row .nm{font-size:12px;color:var(--ink-soft);flex:0 0 200px}
+  .stage-row .st{margin-left:auto;font-size:10px;letter-spacing:.05em}
+  .stage-row.done .nm{color:var(--ink)}
+  .stage-row.done .st{color:var(--ok)}
+  .stage-row.run .nm{color:var(--accent)}
+  .stage-row.run .st{color:var(--accent)}
+  .stage-row.fail .st{color:var(--signal)}
+  .stage-row .det{display:none;font-size:10px;color:var(--ink-faint);width:100%;margin-top:6px}
+  .stage-row .det.show{display:block}
+  .pb{height:3px;background:var(--line)}
+  .pb>i{display:block;height:100%;width:0;background:var(--accent);transition:width .4s}
+  .tip{margin-top:16px;font-size:11px;color:var(--ink-soft);min-height:18px}
+  .leave{margin-top:10px;font-size:10.5px;color:var(--ink-faint)}
+
+  /* 结果 */
+  .banner{border:1px solid var(--line);padding:20px 22px;margin-bottom:22px;display:flex;align-items:center;gap:22px;flex-wrap:wrap;background:var(--paper-2)}
+  .banner .lv{font-family:var(--serif);font-size:34px;color:var(--accent);line-height:1}
+  .banner .con{font-size:12px;line-height:1.8;flex:1;min-width:220px}
+  .banner .con b{font-family:var(--serif);font-size:14px}
+  .banner.review{border-color:var(--amber)}
+  .banner.review .lv{color:var(--amber)}
+  .banner.fail{border-color:var(--signal)}
+  .banner.fail .lv{color:var(--signal)}
+  .banner .why{display:block;margin-top:8px;font-size:10.5px;color:var(--ink-faint)}
+  .compare{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  .plate{background:var(--paper-2);border:1px solid var(--line);padding:12px}
+  .plate .cap{font-size:10.5px;color:var(--ink-soft);text-align:center;margin-top:8px}
+  .plate svg{display:block;width:100%;height:auto;background:#cfc9bd}
+  .kv{display:grid;grid-template-columns:150px 1fr;font-size:12px;border-top:1px solid var(--line-soft)}
+  .kv div{padding:9px 4px;border-bottom:1px solid var(--line-soft)}
+  .kv .k{color:var(--ink-faint)}
+  .kv .v{color:var(--ink)}
+  .acts{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:6px}
+  .act{border:1px solid var(--line);padding:16px;background:var(--paper-2);cursor:pointer;transition:.15s}
+  .act:hover{border-color:var(--accent)}
+  .act .a{font-family:var(--serif);color:var(--accent);font-size:13px;margin-bottom:5px}
+  .act .d{font-size:10px;color:var(--ink-soft);line-height:1.6}
+  .sig{font-family:var(--serif);font-size:12.5px;color:var(--ink-soft);margin-top:26px;border-top:1px solid var(--line);padding-top:13px}
+  .again{margin-top:16px}
+
+  /* 档案 */
+  .search{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+  .search input{flex:1;min-width:220px;background:var(--paper-3);border:1px solid var(--line);font-family:var(--mono);font-size:12px;color:var(--ink);padding:10px 12px}
+  table{width:100%;border-collapse:collapse;font-size:11.5px}
+  th,td{text-align:left;padding:11px 8px;border-bottom:1px solid var(--line-soft)}
+  th{color:var(--ink-faint);font-weight:400;letter-spacing:.05em;font-size:10px}
+  td .lv{color:var(--accent)}
+  .need{color:var(--signal)}
+  .stat{font-size:11px;color:var(--ink-faint);margin-top:16px}
+  .stat b{color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><span class="mark"></span><span class="name">射线评片</span></div>
+    <div class="sub">焊缝缺陷智能检测<br/>NB/T47013.2-2015 · 本地优先</div>
+    <nav id="nav">
+      <button data-go="journey" class="active"><span class="dot"></span>检测旅程</button>
+      <button data-go="archive"><span class="dot"></span>档案检索</button>
+    </nav>
+    <div class="foot">v0.2 旅程原型<br/>上传 → 处理 → 报告解读<br/>极简 ZINE · 单一钴蓝锚</div>
+  </aside>
+
+  <main>
+    <!-- ══════════ 视图：检测旅程 ══════════ -->
+    <section class="view active" id="journey">
+      <div class="stepper" id="stepper">
+        <div class="step active" data-s="1"><span class="num">01</span>上传</div>
+        <div class="bar"></div>
+        <div class="step" data-s="2"><span class="num">02</span>处理</div>
+        <div class="bar"></div>
+        <div class="step" data-s="3"><span class="num">03</span>报告</div>
+      </div>
+
+      <!-- ── 阶段1：上传引导 ── -->
+      <div id="stage-intro">
+        <h1 class="title" data-t="开始一次检测">开始一次检测</h1>
+        <div class="lede">UPLOAD · 三步完成 · 全程本地处理</div>
+
+        <div class="guide">
+          <div class="g"><div class="n">一 · 准备底片</div><div class="t">拖入或选择射线底片。支持 DICOM(.dcm) / PNG / TIFF，建议 ≥500×500 的 8/16bit 灰度影像。</div></div>
+          <div class="g"><div class="n">二 · 填写参数</div><div class="t">像素标定有默认值；母材厚度 T 是评级依据，必填。缺省时仅出图谱、评级锁定。</div></div>
+          <div class="g"><div class="n">三 · 查看报告</div><div class="t">约 15–30 秒后得到 PDF/A 报告：级别结论、缺陷解读与操作建议。</div></div>
+        </div>
+
+        <div class="row">
+          <div class="grow">
+            <div class="chips"><span class="chip on">DICOM .dcm</span><span class="chip on">PNG</span><span class="chip on">TIFF</span></div>
+            <div class="hint">仅接受 8/16bit 灰度；彩色影像请先转为灰度。文件 ≤ 50MB。</div>
+            <div class="drop" id="drop">
+              <div class="big">拖入底片，或点击选择</div>
+              <div class="hint">影像只在本机处理，不上传任何服务器</div>
+            </div>
+            <input type="file" id="file" accept=".dcm,.png,.tif,.tiff" style="display:none" />
+            <div class="preview" id="preview">
+              <img id="pimg" alt="preview" /><span class="ph" id="pph" style="display:none">DICOM</span>
+              <div class="meta" id="pmeta"></div>
+            </div>
+            <div class="err" id="ferr"></div>
+          </div>
+          <div class="grow">
+            <div class="field">
+              <label>像素标定（mm/px）</label>
+              <input id="spacing" value="0.1000" />
+              <div class="why">默认 0.1000 mm/px；若底片带标尺可覆盖。用于把像素尺寸换算为真实当量。</div>
+            </div>
+            <div class="field">
+              <label>母材厚度 T（mm）<span class="req">*</span></label>
+              <input id="thick" placeholder="如 20" />
+              <div class="why">评级必须（NB/T47013.2 按 T 分档评定区与限值）。不填则结果仅含图谱与级别锁定提示。</div>
+              <div class="err" id="terr"></div>
+            </div>
+            <div class="field">
+              <label>演示路径（原型用）</label>
+              <div class="chips">
+                <span class="chip on" data-demo="ok">正常流程</span>
+                <span class="chip" data-demo="review">需人工复核</span>
+                <span class="chip" data-demo="fail">检测失败</span>
+              </div>
+            </div>
+            <button class="btn" id="start">开始检测 →</button>
+          </div>
+        </div>
+
+        <div class="demo-note">演示说明：本原型用定时器模拟后端流水线（载入 → 质量校验 → 缺陷检测 → 当量量化 → 标准评级 → 生成报告），已加速；真实耗时通常 15–30 秒。可选三条演示路径体验完整状态分支。</div>
+      </div>
+
+      <!-- ── 阶段2：处理中 ── -->
+      <div id="stage-proc" style="display:none">
+        <h1 class="title" data-t="正在处理">正在处理</h1>
+        <div class="lede" id="proc-lede">PROCESSING · 影像本地流水线执行中</div>
+        <div class="proc-head">
+          <div><span style="font-size:11px;color:var(--ink-faint)">已耗时</span> <span class="clock" id="clock">00:00</span></div>
+          <div class="expect">预计 15–30 秒（演示已加速至约 5 秒）</div>
+        </div>
+        <div class="track" id="track"></div>
+        <div class="pb"><i id="pbfill"></i></div>
+        <div class="tip" id="tip">处理完成后自动归档，可在「档案检索」随时查看。</div>
+        <div class="leave">你可以先去做别的事：结果会自动保存到本地档案。全程不出本机。</div>
+      </div>
+
+      <!-- ── 阶段3：报告解读 ── -->
+      <div id="stage-result" style="display:none">
+        <h1 class="title" data-t="评片报告">评片报告</h1>
+        <div class="lede" id="res-lede">RESULT · RPT-2026-0001 · 生成于本地</div>
+
+        <div class="banner" id="banner">
+          <div class="lv" id="b-lv">II 级</div>
+          <div class="con" id="b-con"></div>
+        </div>
+
+        <div class="section-h"><span class="no">影像</span>送检原始 vs 检测标注（并排对照）</div>
+        <div class="compare">
+          <div class="plate">
+            <svg viewBox="0 0 300 200" preserveAspectRatio="xMidYMid meet">
+              <rect width="300" height="200" fill="#b9b3a6"/><rect x="128" y="0" width="44" height="200" fill="#cfc9bd"/><rect x="147" y="0" width="3" height="200" fill="#9a9488"/><circle cx="160" cy="70" r="7" fill="#8d877b"/><rect x="135" y="120" width="11" height="16" fill="#857f73"/>
+            </svg>
+            <div class="cap">送检原始影像（未标注）</div>
+          </div>
+          <div class="plate">
+            <svg viewBox="0 0 300 200" preserveAspectRatio="xMidYMid meet">
+              <rect width="300" height="200" fill="#b9b3a6"/><rect x="128" y="0" width="44" height="200" fill="#cfc9bd"/><rect x="147" y="0" width="3" height="200" fill="#9a9488"/><rect x="153" y="63" width="14" height="14" fill="none" stroke="#C0392B" stroke-width="2"/><rect x="134" y="119" width="12" height="18" fill="none" stroke="#C0392B" stroke-width="2"/>
+            </svg>
+            <div class="cap">检测标注影像（红框：AI 定位缺陷）</div>
+          </div>
+        </div>
+
+        <div class="section-h"><span class="no">缺陷</span>缺陷清单与当量对照</div>
+        <div class="kv">
+          <div class="k">#1 气孔</div><div class="v">Ø1.8mm · 面积 2.26mm² · 评定 I</div>
+          <div class="k">#2 夹渣</div><div class="v">4.1×1.2mm · 面积 4.92mm² · 评定 II</div>
+          <div class="k">限值对照</div><div class="v">条形限值 II ≤ T/3 = 6.7mm（实测 4.1mm ✓）</div>
+        </div>
+
+        <div class="section-h"><span class="no">依据</span>判定依据</div>
+        <div class="kv">
+          <div class="k">标准</div><div class="v">NB/T47013.2-2015 · 评定区 T=20 → 10×10</div>
+          <div class="k">可评片性</div><div class="v">IQI 丝号 10/10 通过 · 黑度 2.80（AB 级）· 可评片</div>
+        </div>
+
+        <div class="section-h"><span class="no">建议</span>接下来可以做什么</div>
+        <div class="acts">
+          <div class="act"><div class="a">导出 PDF/A</div><div class="d">生成归档合规报告（长期保存、数字可追溯）</div></div>
+          <div class="act" id="act-review"><div class="a">发起人工复核</div><div class="d">初评与复评双人一致性校验，分歧自动升级仲裁</div></div>
+          <div class="act"><div class="a">查看同工件历史</div><div class="d">对比该工件历次检测的级别与缺陷演变</div></div>
+        </div>
+
+        <div class="sig">签字：____________　免责：本报告由系统自动生成，仅供质量追溯参考；需复核或不可评片时，结论不作为正式评片依据。</div>
+        <div class="again"><button class="btn ghost" id="again">← 重新检测</button></div>
+      </div>
+    </section>
+
+    <!-- ══════════ 视图：档案检索 ══════════ -->
+    <section class="view" id="archive">
+      <h1 class="title" data-t="档案检索">档案检索</h1>
+      <div class="lede">RECORDS · 处理结果自动归档，可随时回来查看</div>
+      <div class="search">
+        <input placeholder="检索 影像编号 / 工件号 / 焊口…" />
+        <span class="chip on">全部</span><span class="chip">待复核</span><span class="chip">I 级</span><span class="chip">II 级</span>
+      </div>
+      <table>
+        <thead><tr><th>影像编号</th><th>工件号</th><th>级别</th><th>主要类别</th><th>日期</th><th>状态</th></tr></thead>
+        <tbody>
+          <tr><td>IMG-2026-0142</td><td>WP-7781</td><td><span class="lv">II</span></td><td>气孔 / 夹渣</td><td>08-04</td><td>已归档</td></tr>
+          <tr><td>IMG-2026-0141</td><td>WP-7765</td><td><span class="lv">I</span></td><td>气孔</td><td>08-03</td><td>已归档</td></tr>
+          <tr><td>IMG-2026-0139</td><td>WP-7740</td><td class="need">待复核</td><td>未熔合</td><td>08-02</td><td class="need">复核中</td></tr>
+          <tr><td>IMG-2026-0136</td><td>WP-7712</td><td><span class="lv">III</span></td><td>未焊透</td><td>08-01</td><td>已归档</td></tr>
+          <tr><td>IMG-2026-0130</td><td>WP-7690</td><td><span class="lv">I</span></td><td>气孔</td><td>07-30</td><td>已归档</td></tr>
+        </tbody>
+      </table>
+      <div class="stat">共 <b>128</b> 份记录 · 待复核 <b class="need">3</b> 份 · 本月新增 24</div>
+    </section>
+  </main>
+</div>
+
+<script>
+(function(){
+  'use strict';
+  const $=s=>document.querySelector(s), $$=s=>document.querySelectorAll(s);
+  const DEMO={ok:'正常流程',review:'需人工复核',fail:'检测失败'};
+  let demo='ok', file=null, timer=null, tick=null, t0=0, runId=0;
+
+  /* 流水线阶段（与后端同名子任务对应） */
+  const STAGES=[
+    {nm:'载入影像',             det:'读取 DICOM 2000×1200 · 16bit 灰度',        ms:650},
+    {nm:'影像质量校验（IQI/黑度）', det:'像质计丝号 10/10 · 黑度 2.80 · AB 级',   ms:750},
+    {nm:'缺陷检测（YOLO）',      det:'候选 3 处 → 保留置信 0.92 / 0.88',          ms:1250},
+    {nm:'当量量化',             det:'气孔 Ø1.8mm · 夹渣 4.1×1.2mm',             ms:700},
+    {nm:'标准评级（NB/T47013.2）', det:'评定区 10×10 · 条形限值 T/3 对照',        ms:700},
+    {nm:'生成报告（PDF/A）',     det:'章节 7 · 影像 2 · 归档合规',                ms:800}
+  ];
+  const FAIL_AT=1, FAIL_DET='像质计丝号 8/10 < 要求 10 · 影像不可评片';
+  const TIPS=['处理完成后自动归档，可在「档案检索」随时查看。','影像只在本机处理，不上传任何服务器。','需要复核时，系统会给出保守原因并引导人工复核。','评级依据 NB/T47013.2-2015，条款可在报告页查看。'];
+  let tipI=0;
+
+  /* 导航 */
+  $('#nav').addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b)return;
+    $$('#nav button').forEach(x=>x.classList.toggle('active',x===b));
+    $$('.view').forEach(v=>v.classList.toggle('active',v.id===b.dataset.go));
+  });
+
+  /* 演示路径 chips */
+  $$('[data-demo]').forEach(c=>c.addEventListener('click',()=>{
+    demo=c.dataset.demo;
+    $$('[data-demo]').forEach(x=>x.classList.toggle('on',x===c));
+  }));
+
+  /* 文件选择与校验 */
+  const drop=$('#drop'), fileIn=$('#file');
+  drop.addEventListener('click',()=>fileIn.click());
+  drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('over')});
+  drop.addEventListener('dragleave',()=>drop.classList.remove('over'));
+  drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('over');if(e.dataTransfer.files[0])pick(e.dataTransfer.files[0])});
+  fileIn.addEventListener('change',()=>{if(fileIn.files[0])pick(fileIn.files[0])});
+
+  function pick(f){
+    const ext=f.name.split('.').pop().toLowerCase();
+    const okExt=['dcm','png','tif','tiff'].includes(ext);
+    const okSize=f.size<=50*1024*1024;
+    if(!okExt){showErr('不支持 .'+ext+'：请提供 DICOM(.dcm) / PNG / TIFF 影像。');return}
+    if(!okSize){showErr('文件超过 50MB，请压缩或拆分后重试。');return}
+    hideErr();
+    file=f; fileIn.value='';
+    $('#preview').classList.add('show');
+    if(ext==='dcm'){ $('#pimg').style.display='none'; $('#pph').style.display='grid';
+      $('#pmeta').textContent='DICOM 影像 · '+f.size/1024+' KB';
+    }else{
+      $('#pph').style.display='none'; $('#pimg').style.display='block';
+      const url=URL.createObjectURL(f);
+      $('#pimg').src=url;
+      $('#pimg').onload=()=>$('#pmeta').textContent=`${f.name} · ${f.size/1024|0} KB`;
+    }
+  }
+  function showErr(t){const e=$('#ferr');e.textContent='⚠ '+t;e.classList.add('show')}
+  function hideErr(){$('#ferr').classList.remove('show')}
+
+  /* 步骤指示器 */
+  function setStep(n){
+    $$('.step').forEach((s,i)=>{
+      const cur=+s.dataset.s;
+      s.classList.toggle('active',cur===n);
+      s.classList.toggle('done',cur<n);
+    });
+    $$('.bar').forEach((b,i)=>b.classList.toggle('done',i+1<n));
+  }
+  function show(id){
+    ['stage-intro','stage-proc','stage-result'].forEach(x=>$('#'+x).style.display=(x===id?'block':'none'));
+  }
+
+  /* 开始检测 */
+  $('#start').addEventListener('click',()=>{
+    const th=$('#thick').value.trim();
+    if(!th){$('#terr').textContent='⚠ 母材厚度 T 必填（评级依据）；不填则评级将被锁定。';$('#terr').classList.add('show');return}
+    $('#terr').classList.remove('show');
+    $('#proc-lede').textContent='PROCESSING · '+($('#spacing').value||'0.1000')+' mm/px · T='+th+'mm';
+    show('stage-proc'); setStep(2);
+    startPipeline();
+  });
+
+  function startPipeline(){
+    const my=++runId; clearInterval(timer); clearInterval(tick);
+    t0=Date.now(); tipI=0;
+    timer=setInterval(()=>{ if(runId!==my)return; const s=Math.floor((Date.now()-t0)/1000);
+      $('#clock').textContent='0'+Math.floor(s/60)+':'+('0'+s%60).slice(-2); },250);
+    tick=setInterval(()=>{ if(runId!==my)return;
+      $('#tip').textContent='· '+TIPS[tipI++%TIPS.length]; },1600);
+
+    const track=$('#track'); track.innerHTML='';
+    STAGES.forEach((s,i)=>{
+      const row=document.createElement('div'); row.className='stage-row'; row.id='sr'+i;
+      row.innerHTML='<span class="idx">'+(i<9?'0':'')+(i+1)+'</span><span class="nm"></span><span class="det"></span><span class="st">○ 待执行</span>';
+      row.querySelector('.nm').textContent=s.nm;
+      track.appendChild(row);
+    });
+
+    let t=0, done=0;
+    const total=STAGES.reduce((a,s)=>a+s.ms,0);
+    const failDst = demo==='fail' ? FAIL_AT : -1;
+
+    function runStage(i){
+      if(runId!==my)return;
+      const row=$('#sr'+i);
+      row.classList.add('run'); row.querySelector('.st').textContent='◐ 进行中';
+      row.querySelector('.det').textContent=(i===FAIL_AT&&demo==='fail')?FAIL_DET:STAGES[i].det;
+      row.querySelector('.det').classList.add('show');
+      setTimeout(()=>{
+        if(runId!==my)return;
+        if(i===failDst){
+          row.classList.remove('run'); row.classList.add('fail');
+          row.querySelector('.st').textContent='✕ 失败';
+          $('#pbfill').style.width=((i+1)/STAGES.length*100)+'%';
+          finish('fail');
+          return;
+        }
+        row.classList.remove('run'); row.classList.add('done');
+        row.querySelector('.st').textContent='✓ 完成';
+        done++; t+=STAGES[i].ms;
+        $('#pbfill').style.width=(done/STAGES.length*100)+'%';
+        if(i+1<STAGES.length) runStage(i+1);
+        else finish(demo==='review'?'review':'ok');
+      },STAGES[i].ms);
+    }
+    runStage(0);
+  }
+
+  function finish(branch){
+    clearInterval(timer); clearInterval(tick);
+    if(branch==='fail'){ renderResult('fail'); return }
+    renderResult(branch);
+  }
+  function renderResult(branch){
+    show('stage-result'); setStep(3);
+    const b=$('#banner'); b.className='banner';
+    const lv=$('#b-lv'), con=$('#b-con');
+    $('#res-lede').textContent='RESULT · RPT-2026-0001 · 生成于 '+new Date().toLocaleTimeString('zh-CN',{hour12:false});
+    if(branch==='fail'){
+      b.classList.add('fail'); lv.textContent='不可评片';
+      con.innerHTML='<b>影像质量未达标准，未生成评级结论。</b>像质计丝号 8/10 未达要求（应 ≥10），按保守原则拒绝自动评片。<span class="why">原因：IQI 灵敏度不达标 / 黑度超出 AB 级范围。可调整曝光或增补像质计后重拍；如需走流程，可转人工评片。</span>';
+    }else if(branch==='review'){
+      b.classList.add('review'); lv.textContent='待复核';
+      con.innerHTML='<b>综合评定 II 级，但本报告需人工复核。</b>影像质量或标准数值存在需确认项，系统按保守原则先给出初评。<span class="why">为什么：标准数值未授权（tables.authorized=false）或双人评片出现分歧，按 §12.2 升级仲裁。这并非误报，而是"宁保守不误放行"。</span>';
+    }else{
+      b.classList.remove('review','fail'); lv.textContent='II 级';
+      con.innerHTML='<b>可接受。</b>检出气孔 Ø1.8mm（I）、夹渣 4.1×1.2mm（II），均未超 NB/T47013.2 限值，综合评定 II 级。建议关注夹渣的后续演变。<span class="why">已通过 IQI/黑度校验，可作正式评片依据；如需归档请导出 PDF/A。</span>';
+    }
+  }
+
+  /* 重新检测 */
+  $('#again').addEventListener('click',()=>{ runId++; clearInterval(timer); clearInterval(tick);
+    show('stage-intro'); setStep(1); $('#pbfill').style.width='0'; });
+
+  /* 档案 chips（单选演示） */
+  $$('.search .chip').forEach(c=>c.addEventListener('click',()=>{
+    $$('.search .chip').forEach(x=>x.classList.remove('on')); c.classList.add('on');
+  }));
+})();
+</script>
+</body>
+</html>

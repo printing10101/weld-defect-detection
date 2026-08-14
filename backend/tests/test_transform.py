@@ -1,4 +1,5 @@
 """train/serve 预处理一致性测试（ADR-007 / §T3）。"""
+
 from __future__ import annotations
 
 import numpy as np

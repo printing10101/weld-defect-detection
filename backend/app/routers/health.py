@@ -1,4 +1,5 @@
 """健康检查（§14 GET /api/v1/health）。"""
+
 from __future__ import annotations
 
 from typing import Annotated

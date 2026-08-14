@@ -3,6 +3,7 @@
 属于基础设施层（I/O）：只做解码与元数据抽取，不含业务判定。
 输出约定：uint8 单通道灰度（供算法层使用）；ImageMeta 携带 modality / pixel_spacing。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,6 +12,7 @@ import cv2
 import numpy as np
 
 from backend.domain.dto import ImageMeta, Modality
+from backend.domain.errors import ImageUnreadableError
 
 _DICOM_SUFFIXES = {".dcm", ".dicom"}
 
@@ -38,15 +40,66 @@ def _load_dicom(p: Path) -> tuple[np.ndarray, ImageMeta]:
     import pydicom
 
     ds = pydicom.dcmread(str(p))
-    arr = ds.pixel_array.astype(np.float32)
+    stored = ds.pixel_array  # 可能 2D / 3D(多帧) / 3D(RGB) / 4D(多帧彩色)
+    arr = stored.astype(np.float32)
     slope = float(getattr(ds, "RescaleSlope", 1.0) or 1.0)
     inter = float(getattr(ds, "RescaleIntercept", 0.0) or 0.0)
     arr = arr * slope + inter
     # MONOCHROME1：值越低代表透过越少（底片黑度越高），反转以统一"高值=亮"
     if str(getattr(ds, "PhotometricInterpretation", "MONOCHROME2")).strip() == "MONOCHROME1":
         arr = arr.max() - arr
-    gray = _to_uint8(arr)
-    return gray, ImageMeta(modality=Modality.DICOM, pixel_spacing_mm=_pixel_spacing(ds))
+    # 多帧/彩色 DICOM（§4.1 "含多帧"）按 SamplesPerPixel / NumberOfFrames 判定，
+    # 不依赖最后维是否为 3/4（否则宽=3/4 的单通道多帧会被误判为彩色）。
+    spp = int(getattr(ds, "SamplesPerPixel", 1) or 1)
+    nframes = int(getattr(ds, "NumberOfFrames", 1) or 1)
+    # 多帧/彩色 DICOM（§4.1 "含多帧"）选单帧：返回 (2D 灰阶, 原始帧像素)
+    frame, raw_frame = _select_dicom_frame(arr, stored, samples_per_pixel=spp, num_frames=nframes)
+    gray = _to_uint8(frame)
+    # 保留原始存储像素（未做 rescale/归一化）供黑度测量，
+    # 否则逐图 min-max 拉伸会抹掉黑度这一绝对量（§4.2）。
+    bits = int(getattr(ds, "BitsStored", None) or (16 if stored.dtype == np.uint16 else 8))
+    return gray, ImageMeta(
+        modality=Modality.DICOM,
+        pixel_spacing_mm=_pixel_spacing(ds),
+        bit_depth=bits,
+        density_array=np.asarray(raw_frame) if raw_frame is not None else None,
+    )
+
+
+def _select_dicom_frame(
+    arr: np.ndarray,
+    stored: np.ndarray,
+    samples_per_pixel: int = 1,
+    num_frames: int = 1,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    """从 DICOM pixel_array 选出单帧 2D 灰阶与其原始像素（供黑度测量）。
+
+    判定依据 SamplesPerPixel / NumberOfFrames（而非末维是否为 3/4，避免宽=3/4 的
+    单通道多帧被误判为彩色）：
+    - 单通道单帧 (H,W)：直接返回；
+    - 单通道多帧 (F,H,W)：选空间标准差最大帧（最清晰/对比最强，利于 IQI 与评片）；
+    - 彩色（无论单/多帧）：转灰度，密度回退灰阶（不做彩色黑度）。
+    返回 (gray2d, raw_frame_or_None)。
+    """
+    if samples_per_pixel == 3:
+        if num_frames > 1:  # 多帧彩色 (F,H,W,C)
+            idx = int(np.argmax(arr.std(axis=(1, 2, 3))))
+            return _color_to_gray(arr[idx]), None
+        return _color_to_gray(arr), None  # 彩色 2D (H,W,C)
+    if num_frames > 1:  # 单通道多帧 (F,H,W)
+        idx = int(np.argmax(arr.std(axis=(1, 2))))
+        return arr[idx], stored[idx]
+    return arr, stored  # 单通道单帧 (H,W)
+
+
+def _color_to_gray(arr: np.ndarray) -> np.ndarray:
+    """RGB→灰阶（DICOM RGB 为 sRGB；亮度加权，不依赖 cv2 颜色空间假设）。"""
+    if arr.dtype != np.uint8:
+        arr = _to_uint8(arr)
+    r = arr[..., 0].astype(np.float32)
+    g = arr[..., 1].astype(np.float32)
+    b = arr[..., 2].astype(np.float32)
+    return (0.299 * r + 0.587 * g + 0.114 * b).astype(np.uint8)
 
 
 def _pixel_spacing(ds) -> float | None:
@@ -60,10 +113,26 @@ def _pixel_spacing(ds) -> float | None:
 
 
 def _load_generic(p: Path, mode: Modality) -> tuple[np.ndarray, ImageMeta]:
-    img = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
+    # IMREAD_ANYDEPTH：保留 16bit 原始位深供黑度测量；cv2.imread 在 Windows 上对
+    # 非 ASCII 路径会失败，故走 np.fromfile + imdecode 的 unicode 安全路径。
+    img = _imread_unicode(p, cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH)
     if img is None:
-        raise ValueError(f"cannot decode image: {p}")
-    return img, ImageMeta(modality=mode)
+        raise ImageUnreadableError(f"无法解码图像: {p.name}")
+    is_16 = img.dtype == np.uint16
+    gray = img if not is_16 else _to_uint8(img)
+    return gray, ImageMeta(
+        modality=mode,
+        bit_depth=16 if is_16 else 8,
+        density_array=img if is_16 else None,
+    )
+
+
+def _imread_unicode(p: Path, flags: int = cv2.IMREAD_GRAYSCALE) -> np.ndarray | None:
+    """Unicode 安全解码：cv2.imread 在 Windows 上对非 ASCII 路径返回 None。"""
+    buf = np.fromfile(str(p), dtype=np.uint8)
+    if buf.size == 0:
+        return None
+    return cv2.imdecode(buf, flags)
 
 
 def _to_uint8(arr: np.ndarray) -> np.ndarray:

@@ -1,21 +1,20 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
-import { getHealth } from "./services/api";
+import { onMounted } from "vue";
+import AppShell from "./components/AppShell.vue";
+import LoginView from "./views/LoginView.vue";
+import { useAuth } from "./composables/useAuth";
+import { AUTH_UNAUTHORIZED_EVENT } from "./services/api";
 
-const health = ref<string>("checking backend...");
+const auth = useAuth();
 
-onMounted(async () => {
-  try {
-    health.value = JSON.stringify(await getHealth());
-  } catch (err) {
-    health.value = `backend unreachable: ${String(err)}`;
-  }
+onMounted(() => {
+  void auth.bootstrap();
+  // 令牌在服务端失效（过期/被禁用）时，任何请求遇 401 都会广播该事件 → 立即返回登录态
+  window.addEventListener(AUTH_UNAUTHORIZED_EVENT, () => auth.logout());
 });
 </script>
 
 <template>
-  <main>
-    <h1>ScanDetection (M1 skeleton)</h1>
-    <p>backend /api/v1/health → {{ health }}</p>
-  </main>
+  <LoginView v-if="!auth.isAuthenticated.value" />
+  <AppShell v-else />
 </template>

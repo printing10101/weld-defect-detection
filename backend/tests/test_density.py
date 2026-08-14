@@ -1,4 +1,5 @@
 """黑度估计与门限测试（§4.2）。"""
+
 from __future__ import annotations
 
 import numpy as np

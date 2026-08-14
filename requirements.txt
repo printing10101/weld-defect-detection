@@ -1,0 +1,23 @@
+# ScanDetection 生产运行时依赖全集（与 pyproject.toml 的
+# [project].dependencies + [project.optional-dependencies].{ml,report} 并集一致）。
+# 安装方式：在虚拟环境中执行  pip install -r requirements.txt
+# torch 使用 CPU 版以减小体积；如需 GPU 版请移除下方 --extra-index-url 行。
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+pydantic-settings>=2.2
+sqlalchemy>=2.0
+pyyaml>=6.0
+pydicom>=2.4
+numpy>=1.26
+scikit-image>=0.22
+# §7.5 静态加密（AES-256-GCM，默认开启）运行时必需
+cryptography>=42
+opencv-python-headless>=4.9
+torch>=2.2
+ultralytics>=8.2
+onnxruntime>=1.17
+reportlab>=4.0
+pypdf>=4.0

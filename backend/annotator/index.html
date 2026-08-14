@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>焊缝缺陷标注器 · 真实定检图</title>
+<style>
+  :root{ --bg:#0f1115; --panel:#1a1d24; --line:#2a2e38; --txt:#e6e8ee; --muted:#9aa3b2;
+         --accent:#4ea1ff; --ok:#3ecf8e; --warn:#ffb454; }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;
+       background:var(--bg);color:var(--txt);height:100vh;display:flex;flex-direction:column}
+  header{display:flex;align-items:center;gap:16px;padding:10px 16px;background:var(--panel);
+         border-bottom:1px solid var(--line);flex:0 0 auto}
+  header h1{font-size:15px;margin:0;font-weight:600}
+  .prog{color:var(--muted);font-size:13px}
+  .prog b{color:var(--txt)}
+  .spacer{flex:1}
+  button{background:#262b36;color:var(--txt);border:1px solid var(--line);border-radius:6px;
+         padding:6px 12px;cursor:pointer;font-size:13px}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);color:#06121f;border-color:var(--accent);font-weight:600}
+  .legend{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .legend .c{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted)}
+  .sw{width:12px;height:12px;border-radius:3px;display:inline-block}
+  main{display:flex;flex:1;min-height:0}
+  aside{width:240px;background:var(--panel);border-right:1px solid var(--line);overflow:auto;flex:0 0 auto}
+  .it{padding:7px 12px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;
+      align-items:center;gap:8px;font-size:13px}
+  .it:hover{background:#22262f}
+  .it.active{background:#22324a;border-left:3px solid var(--accent);padding-left:9px}
+  .badge{font-size:10px;padding:1px 5px;border-radius:4px;background:#3a2c12;color:var(--warn)}
+  .badge.seed{background:#13314a;color:var(--accent)}
+  .dot{width:8px;height:8px;border-radius:50%;background:#3a3f4b;flex:0 0 auto}
+  .dot.ok{background:var(--ok)}
+  .rev{color:var(--warn);font-size:11px}
+  .stage{flex:1;display:flex;flex-direction:column;min-width:0;background:#0b0d11}
+  .canvas-wrap{flex:1;display:flex;align-items:center;justify-content:center;overflow:auto;padding:12px;position:relative}
+  canvas{background:#000;cursor:crosshair;max-width:100%}
+  .tools{display:flex;align-items:center;gap:12px;padding:8px 16px;background:var(--panel);
+         border-top:1px solid var(--line);flex:0 0 auto;flex-wrap:wrap}
+  .tools label{color:var(--muted);display:flex;align-items:center;gap:6px;cursor:pointer}
+  .clsrow{display:flex;gap:6px}
+  .clsbtn{padding:4px 8px;border:1px solid var(--line);border-radius:5px;cursor:pointer;font-size:12px;color:var(--muted)}
+  .clsbtn.active{color:#06121f;font-weight:600;border-color:transparent}
+  .hint{color:var(--muted);font-size:12px}
+  .prelabel-note{color:var(--warn);font-size:12px;display:none}
+  .dirty{color:var(--warn)}
+</style>
+</head>
+<body>
+<header>
+  <h1>焊缝缺陷标注器</h1>
+  <div class="prog">进度 <b id="pg">0/0</b> · 种子集 <b id="seed">0/0</b> <span id="dirty" class="dirty"></span></div>
+  <div class="legend" id="legend"></div>
+  <div class="spacer"></div>
+  <button id="prev">‹ 上一张</button>
+  <button id="next">下一张 ›</button>
+  <button id="save" class="primary">保存 (Ctrl+S)</button>
+</header>
+<main>
+  <aside id="list"></aside>
+  <div class="stage">
+    <div class="canvas-wrap">
+      <canvas id="cv"></canvas>
+      <div class="prelabel-note" id="prenote">⚠ 此图由种子模型自动预标注，请逐框校正（删错/补缺/改类）。</div>
+    </div>
+    <div class="tools">
+      <div class="clsrow" id="clsrow"></div>
+      <label><input type="checkbox" id="review"> 需人工复核 (n)</label>
+      <span class="hint">拖拽空白画框 · 点框选中后可拖动/角点缩放 · Del 删除 · 1–6 选类 · ← → 翻页</span>
+    </div>
+  </div>
+</main>
+<script>
+const CLASSES = ["气孔","夹渣","未焊透","未熔合","裂纹","咬边"];
+const COLORS  = ["#ff5b5b","#3ecf8e","#4ea1ff","#ffd24e","#ff7ce0","#46d6e0"];
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+let IMAGES=[], idx=-1, boxes=[], curCls=0, sel=-1, dirty=false, needReview=false;
+let imgObj=null, scale=1, iw=0, ih=0, fromPrelabel=false;
+let drag=null; // {mode:'new'|'move'|'resize', ...}
+
+// 构建类按钮与图例
+const legend=document.getElementById('legend'), clsrow=document.getElementById('clsrow');
+CLASSES.forEach((c,i)=>{
+  const sw=`<span class="sw" style="background:${COLORS[i]}"></span>`;
+  legend.insertAdjacentHTML('beforeend',`<span class="c">${sw}${i+1} ${c}</span>`);
+  const b=document.createElement('div'); b.className='clsbtn'+(i===0?' active':'');
+  b.style.background = i===0?COLORS[i]:'';
+  b.textContent=(i+1)+' '+c; b.onclick=()=>setCls(i); clsrow.appendChild(b);
+});
+function setCls(i){curCls=i;
+  [...clsrow.children].forEach((b,k)=>{b.classList.toggle('active',k===i);b.style.background=k===i?COLORS[k]:'';});
+  if(sel>=0){boxes[sel].cls=i; dirty=true; draw();}
+}
+
+async function loadList(){
+  const r=await fetch('/api/images'); IMAGES=await r.json();
+  const list=document.getElementById('list'); list.innerHTML='';
+  let labeled=0, seedDone=0;
+  IMAGES.forEach((it,i)=>{
+    if(it.labeled) labeled++;
+    if(it.is_seed && it.labeled) seedDone++;
+    const div=document.createElement('div'); div.className='it'+(i===idx?' active':'');
+    div.innerHTML=`<span class="dot ${it.labeled?'ok':''}"></span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.name}</span>
+      ${it.is_seed?'<span class="badge seed">种子</span>':''}
+      ${it.need_review?'<span class="rev">复</span>':''}`;
+    div.onclick=()=>open(i); list.appendChild(div);
+  });
+  document.getElementById('pg').textContent=labeled+'/'+IMAGES.length;
+  const seeds=IMAGES.filter(x=>x.is_seed).length;
+  document.getElementById('seed').textContent=seedDone+'/'+seeds;
+}
+async function open(i){
+  if(dirty && !confirm('当前图有未保存修改，确定切换？')) return;
+  idx=i; await loadImage(); await loadList();
+  [...document.getElementById('list').children].forEach((d,k)=>d.classList.toggle('active',k===idx));
+}
+async function loadImage(){
+  const it=IMAGES[idx]; if(!it) return;
+  const r=await fetch('/api/label/'+encodeURIComponent(it.name));
+  const d=await r.json();
+  fromPrelabel=!!d.from_prelabel;
+  document.getElementById('prenote').style.display=fromPrelabel?'block':'none';
+  needReview=!!d.need_review; document.getElementById('review').checked=needReview;
+  boxes=parseLabel(d.label); sel=-1; dirty=false; updateDirty();
+  await new Promise(res=>{
+    imgObj=new Image(); imgObj.onload=()=>{iw=imgObj.naturalWidth; ih=imgObj.naturalHeight;
+      fit(); res();}; imgObj.src='/img/'+encodeURIComponent(it.name);
+  });
+}
+function parseLabel(txt){
+  const out=[]; if(!txt) return out;
+  txt.split('\n').forEach(line=>{
+    const p=line.trim().split(/\s+/); if(p.length<5) return;
+    const c=+p[0], cx=+p[1], cy=+p[2], nw=+p[3], nh=+p[4];
+    out.push({cls:c, x:(cx-nw/2), y:(cy-nh/2), w:nw, h:nh}); // 暂存归一化，draw 时乘尺寸
+  });
+  return out;
+}
+function fmtLabel(){
+  return boxes.map(b=>{
+    const cx=(b.x+b.w/2), cy=(b.y+b.h/2);
+    return `${b.cls} ${cx.toFixed(6)} ${cy.toFixed(6)} ${b.w.toFixed(6)} ${b.h.toFixed(6)}`;
+  }).join('\n');
+}
+function fit(){
+  const wrap=cv.parentElement; const maxW=wrap.clientWidth-24, maxH=wrap.clientHeight-24;
+  scale=Math.min(maxW/iw, maxH/ih, 1);
+  cv.width=Math.round(iw*scale); cv.height=Math.round(ih*scale);
+  cv.style.width=cv.width+'px'; cv.style.height=cv.height+'px';
+  draw();
+}
+function toImg(e){const r=cv.getBoundingClientRect();return {x:(e.clientX-r.left)/scale, y:(e.clientY-r.top)/scale};}
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  if(imgObj) ctx.drawImage(imgObj,0,0,cv.width,cv.height);
+  boxes.forEach((b,i)=>{
+    const x=b.x*iw*scale, y=b.y*ih*scale, w=b.w*iw*scale, h=b.h*ih*scale;
+    ctx.lineWidth=2; ctx.strokeStyle=COLORS[b.cls];
+    ctx.strokeRect(x,y,w,h);
+    ctx.fillStyle=COLORS[b.cls]; ctx.globalAlpha=.85;
+    ctx.fillRect(x,y-15,ctx.measureText(CLASSES[b.cls]).width+6,14);
+    ctx.globalAlpha=1; ctx.fillStyle='#06121f'; ctx.font='12px sans-serif';
+    ctx.fillText(CLASSES[b.cls],x+3,y-3);
+    if(i===sel){
+      ctx.strokeStyle='#fff'; ctx.lineWidth=1.5; ctx.strokeRect(x,y,w,h);
+      const hs=6; [[x,y],[x+w,y],[x,y+h],[x+w,y+h]].forEach(([hx,hy])=>{
+        ctx.fillStyle='#fff'; ctx.fillRect(hx-hs/2,hy-hs/2,hs,hs);
+      });
+    }
+  });
+}
+// 交互
+cv.addEventListener('mousedown',e=>{
+  if(!imgObj) return; const p=toImg(e);
+  // 角点命中？
+  if(sel>=0){const b=boxes[sel];
+    const corners=[[b.x,b.y],[b.x+b.w,b.y],[b.x,b.y+b.h],[b.x+b.w,b.y+b.h]];
+    for(let k=0;k<4;k++){const cx=corners[k][0]*iw*scale, cy=corners[k][1]*ih*scale;
+      if(Math.abs(p.x*iw*scale-cx)<8 && Math.abs(p.y*ih*scale-cy)<8){
+        drag={mode:'resize',corner:k,start:{...b}}; return;}}}
+  // 框内选中
+  for(let i=boxes.length-1;i>=0;i--){const b=boxes[i];
+    if(p.x>=b.x*iw && p.x<=(b.x+b.w)*iw && p.y>=b.y*ih && p.y<=(b.y+b.h)*ih){
+      sel=i; setCls(b.cls); drag={mode:'move',dx:p.x-b.x*iw,dy:p.y-b.y*ih}; draw(); return;}}
+  // 新建
+  sel=-1; drag={mode:'new',x0:p.x/iw,y0:p.y/ih}; boxes.push({cls:curCls,x:p.x/iw,y:p.y/ih,w:0,h:0}); sel=boxes.length-1;
+});
+cv.addEventListener('mousemove',e=>{
+  if(!drag) return; const p=toImg(e);
+  if(drag.mode==='new'){const b=boxes[sel]; b.w=Math.max(0,p.x/iw-drag.x0); b.h=Math.max(0,p.y/ih-drag.y0); dirty=true; draw();}
+  else if(drag.mode==='move'){const b=boxes[sel]; b.x=p.x/iw-drag.dx; b.y=p.y/ih-drag.dy; dirty=true; draw();}
+  else if(drag.mode==='resize'){const b=boxes[sel]; const s=drag.start;
+    let x0=s.x,y0=s.y,x1=s.x+s.w,y1=s.y+s.h;
+    if(drag.corner===0){x0=p.x/iw;y0=p.y/ih;} if(drag.corner===1){x1=p.x/iw;y0=p.y/ih;}
+    if(drag.corner===2){x0=p.x/iw;y1=p.y/ih;} if(drag.corner===3){x1=p.x/iw;y1=p.y/ih;}
+    b.x=Math.min(x0,x1);b.y=Math.min(y0,y1);b.w=Math.abs(x1-x0);b.h=Math.abs(y1-y0); dirty=true; draw();}
+});
+window.addEventListener('mouseup',()=>{ if(drag&&drag.mode==='new'){const b=boxes[sel];
+  if(b.w*iw<4||b.h*ih<4){boxes.splice(sel,1);sel=-1;} dirty=true; draw();} drag=null;});
+cv.addEventListener('click',()=>{});
+document.addEventListener('keydown',e=>{
+  if(e.key>='1'&&e.key<='6'){setCls(+e.key-1);}
+  else if(e.key==='n'){needReview=!needReview;document.getElementById('review').checked=needReview;dirty=true;updateDirty();}
+  else if(e.key==='Delete'||e.key==='Backspace'){if(sel>=0){boxes.splice(sel,1);sel=-1;dirty=true;draw();}}
+  else if(e.key==='ArrowLeft'){if(idx>0)open(idx-1);}
+  else if(e.key==='ArrowRight'){if(idx<IMAGES.length-1)open(idx+1);}
+  else if((e.ctrlKey||e.metaKey)&&e.key==='s'){e.preventDefault();save();}
+});
+document.getElementById('review').onchange=e=>{needReview=e.target.checked;dirty=true;updateDirty();};
+document.getElementById('prev').onclick=()=>{if(idx>0)open(idx-1);};
+document.getElementById('next').onclick=()=>{if(idx<IMAGES.length-1)open(idx+1);};
+document.getElementById('save').onclick=save;
+function updateDirty(){document.getElementById('dirty').textContent=dirty?'● 未保存':'';}
+async function save(){
+  if(idx<0) return; const it=IMAGES[idx];
+  const body=JSON.stringify({label:fmtLabel(),need_review:needReview});
+  const r=await fetch('/api/label/'+encodeURIComponent(it.name),{method:'POST',
+    headers:{'Content-Type':'application/json'},body});
+  if(r.ok){dirty=false;updateDirty();await loadList();
+    document.getElementById('pg').textContent=IMAGES.filter(x=>x.labeled).length+'/'+IMAGES.length;}
+}
+window.addEventListener('resize',()=>{if(imgObj)fit();});
+loadList().then(()=>{ if(IMAGES.length) open(0); });
+</script>
+</body>
+</html>

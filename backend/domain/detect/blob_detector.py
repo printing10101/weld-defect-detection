@@ -7,6 +7,7 @@
 类别暂标 POROSITY 且置信度取启发式低值 + 高不确定性；**不可用于正式评级**，
 须替换为训练模型（M4b YOLODetector），接口不变、主干零改动。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -50,20 +51,29 @@ class BlobDetector:
         image: np.ndarray,
         conf: float = 0.3,
         iou: float = 0.5,
+        class_conf: dict[int, float] | None = None,
     ) -> list[Detection]:
         """预处理 → 自适应二值化（相对背景）→ 连通域 → 缺陷候选框。"""
         enhanced = self.preprocessor.enhance(self.preprocessor.denoise(image), 1.0)
         blur = cv2.GaussianBlur(enhanced, (5, 5), 0)
-        bg = float(np.median(blur))
-        # 阈值用**原图噪声**估计（denoise 后噪声趋近 0 会致过度检出），
-        # 并设绝对下限兜底低噪声图。
-        original_noise = estimate_noise(image)
-        margin = max(self.cfg.noise_sigma_ratio * max(original_noise, 1.0), self.cfg.abs_threshold)
+        # 阈值在归一化 [0,1] 量纲下计算，使 noise_sigma_ratio 与 abs_threshold
+        # 与位深无关：8bit 与 16bit 底片得到**相同比例**的判定边界，且
+        # abs_threshold 在 16bit 上不再是微不足道的 8 灰度级（此前低噪声 16bit
+        # 图几乎只靠噪声项、绝对兜底失效）。8bit 行为与此前逐像素等价。
+        max_v = float(_dtype_max(blur.dtype))
+        norm = blur.astype(np.float64) / max_v
+        bg = float(np.median(norm))
+        img_max = float(_dtype_max(image.dtype))
+        original_noise = estimate_noise(image) / img_max  # 归一化噪声σ
+        margin = max(
+            self.cfg.noise_sigma_ratio * max(original_noise, 1.0 / img_max),
+            self.cfg.abs_threshold / 255.0,
+        )
 
-        mask = np.zeros_like(image, np.uint8)
-        mask[blur < bg - margin] = 255  # 暗缺陷
+        mask = np.zeros(norm.shape, np.uint8)
+        mask[norm < bg - margin] = 255  # 暗缺陷
         if not self.cfg.dark_only:
-            mask[blur > bg + margin] = 255  # 亮缺陷（夹钨等）
+            mask[norm > bg + margin] = 255  # 亮缺陷（夹钨等）
 
         n_labels, _labels, stats, _cents = cv2.connectedComponentsWithStats(mask)
         detections: list[Detection] = []
@@ -84,6 +94,13 @@ class BlobDetector:
                 )
             )
         return detections
+
+
+def _dtype_max(dtype: np.dtype) -> int:
+    """动态范围上限：整数按 iinfo，浮点影像按 [0,1] 语义返回 1。"""
+    if np.issubdtype(dtype, np.integer):
+        return int(np.iinfo(dtype).max)
+    return 1
 
 
 def _heuristic_score(w: int, h: int, area: int) -> float:

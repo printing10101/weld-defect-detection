@@ -4,19 +4,72 @@ server:
 model:
   default_uri: models/weights/best.onnx
   backend: onnx
+  weights_dir: models/weights   # 模型注册表扫描目录（§7.4，M4）
+  registry_state_file: data/model_registry.json  # 活跃模型指针持久化
 security:
   encrypt: true
+eval:
+  golden_dir: data/eval/golden          # 固定版本化评估集（禁止用于训练）；缺失则 evaluate 返回 409
+  drift_baseline_path: data/eval/drift_baseline.json  # 漂移监控参考基线
+  experiments_dir: data/experiments      # 实验追踪 JSONL 落盘（§7.4）
+  auto_on_activate: true                 # 模型激活后自动跑 Golden Set 评估
+sync:
+  kind: local                            # local | http（§7.6 端边云同步适配器）
+  http_endpoint: null                    # kind=http 时的推送 URL
+  http_token: null                       # 可选 Bearer Token（建议环境变量注入，勿入库）
+annotator:
+  enabled: false                         # 随主应用同进程启动标注器（默认关）
+  host: 127.0.0.1
+  port: 8899
 paths:
   data_dir: data
   tmp_dir: data/tmp
+  db_path: data/scan.db
+  images_dir: data/images
+  reports_dir: data/reports
 density:
   low: 2.0
   high: 4.5
 iqi:
+  type: wire  # wire | hole（线型/孔型像质计，§4.2）
   # 线型像质计丝号直径（公开参考，正式使用前须按 IQI 标准复核）
   wire_diameters_mm: [3.2, 2.5, 2.0, 1.6, 1.25, 1.0, 0.8, 0.63, 0.5, 0.4, 0.32, 0.25, 0.2, 0.16, 0.125, 0.1, 0.08, 0.063, 0.05]
   required_wire_no: 10
+  # 孔型像质计孔径（公开参考，正式使用前须按 IQI 标准复核）
+  hole_diameters_mm: [1.0, 0.8, 0.63, 0.5, 0.4, 0.32, 0.25, 0.2, 0.16, 0.125]
+  required_hole_no: 6
   min_contrast_ratio: 3.0
+  auto_locate: true            # 自动定位像质计（模板匹配），关闭则须前端/人工给 ROI
+  locate_threshold: 0.3         # 像质计带垂直周期性强度下限（低于视为未找到）
+  # A/AB/B 影像质量等级 → 线型像质计要求丝号（公开参考，正式使用前须按标准复核）
+  # 每项：[透照厚度上限 mm, A级要求丝号, AB级要求丝号, B级要求丝号]；等级越严要求越细
+  sensitivity:
+    - [2.0, 14, 13, 12]
+    - [4.0, 13, 12, 11]
+    - [8.0, 12, 11, 10]
+    - [12.0, 11, 10, 9]
+    - [18.0, 10, 9, 8]
+    - [30.0, 9, 8, 7]
+    - [50.0, 8, 7, 6]
+    - [80.0, 7, 6, 5]
+    - [120.0, 6, 5, 4]
+    - [200.0, 5, 4, 3]
+    - [350.0, 4, 3, 2]
+    - [9999.0, 3, 2, 1]
+pseudo_defect:
+  hough_threshold: 60
+  scratch_min_ratio: 0.5
+  scratch_grating_min_lines: 5
+  canny_lo: 40
+  canny_hi: 120
+  uniformity_low_freq: 0.012
+  uniformity_max_ratio: 6.0
+  dust_tophat_k: 15
+  dust_min_area: 10
+  dust_max_count: 400
+  block_on_scratch: true    # 长直划痕阻断评片
+  block_on_uniformity: false  # 显影不均默认仅告警（焊件自然灰度梯度大）
+  block_on_dust: false      # 尘点密集默认仅告警
 preprocess:
   bilateral_d: 9
   bilateral_sigma_color: 75.0
@@ -27,14 +80,70 @@ preprocess:
   canny_kernel: 5
   morph_k_open: 3
   morph_k_close: 3
+  gamma: 1.0  # 请求未传 gamma 时的缺省值（1.0 = 跳过伽马校正）
+  enabled: true  # run_inspection 中是否应用降噪+增强（关闭则对原始 gray 推理）
+quality:
+  w_noise: 0.25
+  w_sharp: 0.20
+  w_contrast: 0.20
+  w_dynamic: 0.15
+  w_uniform: 0.10
+  w_artifact: 0.10
+  min_score: 70.0           # RQI 门限（0–100），低于判不合格（已按真实底片标定）
+  block_on_quality: true    # True=不合格阻断评片；False=仅告警+need_review
+  noise_good: 4.0           # 噪声σ ≤ 此值满分
+  noise_bad: 14.0           # 噪声σ ≥ 此值 0 分
+  sharp_good: 1.5           # 平均梯度幅值满分阈值（真实底片实测 ~0.7–8.7，原 18 严重偏高）
+  contrast_good: 25.0       # 信号对比度（中值滤波后 std）满分阈值
+  dr_good: 0.6              # 动态范围利用率（(p99−p1)/255）满分阈值
+  uniformity_low_freq: 0.012
+  uniformity_max_ratio: 6.0
+  dust_tophat_k: 15
+  dust_min_area: 10
+  dust_max_count: 400
+  # 三类硬门禁（反证测试后补强；任一触发即判不合格，不扰动已标定 RQI）
+  blur_lap_bad: 30.0         # Laplacian 方差低于此值判失焦/模糊（真实底片实测 ≥45）
+  exposure_entropy_bad: 0.62 # 直方图熵(归一化)低于此值判过/欠曝（真实底片实测 ≥0.73）
+  stain_smooth_bad: 0.15     # 平滑异常斑块占比高于此值判污渍（真实底片实测 ≤0.14）
 detect:
-  baseline_enabled: true
+  baseline_enabled: false  # M4b 训练模型检测器已接入；权重缺失时自动回退 M4a 基线
+  allow_baseline_fallback: true  # false = 训练模型加载失败即启动失败（生产建议 false）
+  infer_conf: 0.3   # 推理置信度阈值（§T8：统一入口，禁散落硬编码）
+  infer_iou: 0.5    # NMS IoU 阈值
+  # 逐类置信度阈值（ADR-010）：稀有/安全关键缺陷低阈值优先召回，气孔高阈值抑误检。
+  # 键=DefectClass.value(0气孔/1夹渣/2未焊透/3未熔合/4裂纹/5咬边)，未列出的类回落 infer_conf。
+  class_conf: {0: 0.30, 1: 0.12, 2: 0.12, 3: 0.08, 4: 0.05, 5: 0.18}
+  round_aspect_max: 3.0  # 圆形/条形分界（NB/T47013：L/W<=3 记为圆形缺陷）
   min_area_px: 30
   max_area_px: 200000
   min_size_px: 3
   noise_sigma_ratio: 2.5
   abs_threshold: 8.0
   dark_only: false
+  review_conf: 0.5  # 检测不确定性阈值，超过则 need_review（人工兜底，M4b/ADR-010）
+mask_refine:
+  enabled: true               # False=退化为包围盒近似（与 BBoxQuantifier 等价）
+  blur_k: 5                   # ROI 高斯平滑核（奇数）
+  adaptive_block: 31         # 自适应阈值窗口（奇数，≤ROI 短边）
+  adaptive_c: 8.0             # 自适应阈值常数 C（0–255 量纲，越大越保守）
+  min_mask_abs_area_px: 4     # 轮廓面积小于此值丢弃
+  min_mask_rel_area: 0.25     # 掩膜面积须 ≥ 此比例×框面积，否则回退包围盒（抗误检）
+  close_k: 5                  # 形态学闭运算核（填补断裂）
+  round_aspect_max: 3.0       # 圆形/条形分界（NB/T47013：L/W<=3 为圆形）
+upload:
+  max_bytes: 209715200  # 200 MiB 单文件上限（超限返回 413）
+  allowed_suffixes: [".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".dcm", ".dicom", ".ima"]
 standard:
   default_id: NB/T47013.2-2015
   tables_filename: nb47013.yaml
+review:
+  kappa_threshold: 0.8  # Cohen's κ 高度一致阈值（§15.3）；低于则升级仲裁
+batch:
+  workers: 2            # 批量并行 worker 数（§12.1）
+  max_per_batch: 100    # 单批最大图数（防一次性打爆资源）
+  per_image_estimate_sec: 8.0  # 单图预估耗时（进度/预计时间展示用）
+auth:
+  token_ttl_minutes: 1440   # 访问令牌有效期（分钟，默认 24h）
+  bootstrap_username_env: SCAN_ADMIN_USERNAME   # 首启动引导管理员用户名环境变量
+  bootstrap_password_env: SCAN_ADMIN_PASSWORD   # 首启动引导管理员密码环境变量
+  bootstrap_default_username: admin             # 未设环境变量时的默认管理员用户名

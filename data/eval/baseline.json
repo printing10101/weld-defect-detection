@@ -1,0 +1,14 @@
+{
+  "mAP50": 0.4747,
+  "recall": 0.7879,
+  "precision": 0.1086,
+  "gt_total": 33,
+  "by_class": {
+    "0": {
+      "ap50": 0.4747,
+      "recall": 0.7879,
+      "precision": 0.1086,
+      "gt_count": 33
+    }
+  }
+}

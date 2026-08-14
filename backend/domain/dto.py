@@ -5,20 +5,32 @@
 - backend/app/routers（Pydantic schema）
 - src/src/types/api.ts（前端类型）
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
 
+import numpy as np
+
 
 class DefectClass(Enum):
-    """五类典型焊缝缺陷（§1.3）。"""
+    """焊缝缺陷类别（§1.3，ADR-010 扩展为 6 类）。
+
+    0 POROSITY 气孔
+    1 SLAG 夹渣/夹杂
+    2 INCOMPLETE_PENETRATION 未焊透
+    3 LACK_OF_FUSION 未熔合
+    4 CRACK 裂纹
+    5 UNDERCUT 咬边/内凹（ADR-010 新增：竞赛评分项 + SWRD 第 6 类）
+    """
 
     POROSITY = 0
     SLAG = 1
     INCOMPLETE_PENETRATION = 2
     LACK_OF_FUSION = 3
     CRACK = 4
+    UNDERCUT = 5
 
 
 class DefectShape(Enum):
@@ -67,6 +79,7 @@ class Detection:
     uncertainty: float
     shape: DefectShape | None = None
     mask_ref: str | None = None
+    deep_hole: bool = False  # 深孔（黑度>母材，§6.2 直判 IV）；由检测器/管线提供，默认 False
 
 
 @dataclass(frozen=True)
@@ -92,6 +105,9 @@ class GradeResult:
     need_review: bool
     standard_id: str
     standard_version: str
+    # 标准来源免责声明（工业过渡路径，T1）：authorized_copy=false 时为强声明，
+    # 提示"数值转录自公开解读、非授权正本、不替代责任工程师法定评定"。
+    disclaimer: str | None = None
 
 
 @dataclass(frozen=True)
@@ -102,6 +118,7 @@ class IQIResult:
     achieved: str | None
     required: str
     passed: bool
+    grade: str | None = None  # A/AB/B 影像质量等级（厚度+可达丝号映射，None=未定/无厚度）
 
 
 @dataclass(frozen=True)
@@ -111,3 +128,5 @@ class ImageMeta:
     modality: Modality
     pixel_spacing_mm: float | None = None
     base_metal_thickness_mm: float | None = None
+    bit_depth: int | None = None
+    density_array: np.ndarray | None = None

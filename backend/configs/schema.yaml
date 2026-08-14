@@ -6,18 +6,56 @@ server:
 model:
   default_uri: str
   backend: str   # onnx | torch | tensorrt
+  weights_dir: str   # 模型注册表扫描目录（§7.4，M4）
+  registry_state_file: str  # 活跃模型指针持久化路径
 security:
   encrypt: bool
+eval:
+  golden_dir: str               # 固定版本化评估集（禁止用于训练）；缺失则 evaluate 返回 409
+  drift_baseline_path: str      # 漂移监控参考基线（尺寸/置信度/类别分布），首跑自动建立
+  experiments_dir: str          # 实验追踪 JSONL 落盘目录（§7.4，MLflow 可演进）
+  auto_on_activate: bool        # 模型激活后自动跑 Golden Set 评估（使 metric_map 有值）
+sync:
+  kind: str                     # local | http（§7.6 端边云同步适配器选择）
+  http_endpoint: str | None     # kind=http 时的推送 URL
+  http_token: str | None        # 可选 Bearer Token（建议走环境变量注入，勿入版本库）
+annotator:
+  enabled: bool                 # 随主应用同进程启动标注器（默认关）
+  host: str
+  port: int
 paths:
   data_dir: str
   tmp_dir: str
+  db_path: str        # SQLite 数据库文件（§7.1）
+  images_dir: str     # 原图副本目录（报告缺陷图谱数据源）
+  reports_dir: str    # PDF 报告输出目录（§7.2）
 density:
   low: float   # AB 级黑度下限（默认 2.0）
   high: float  # AB 级黑度上限（默认 4.5）
 iqi:
+  type: str                       # wire | hole（线型/孔型像质计，§4.2）
   wire_diameters_mm: list[float]  # 线型像质计丝号1..N 直径(mm)，递增（公开参考，待官方复核）
   required_wire_no: int           # 工艺要求的最细丝号（越大越难）
+  hole_diameters_mm: list[float]  # 孔型像质计孔径(mm)，递增（公开参考，待官方复核）
+  required_hole_no: int           # 工艺要求的可见最小孔号（越大越难）
   min_contrast_ratio: float       # 可见性阈值：峰对比度/噪声
+  auto_locate: bool               # 自动定位像质计（模板匹配）；False 则须前端/人工给 ROI
+  locate_threshold: float         # 像质计带垂直周期性强度下限（低于视为未找到）
+  sensitivity: list[list]         # A/AB/B 等级→丝号参考表 [厚度上限mm, A, AB, B]（待复核）
+pseudo_defect:
+  hough_threshold: int            # HoughLinesP 累加阈值
+  scratch_min_ratio: float        # 划痕最小长度 / 图像对角线
+  scratch_grating_min_lines: int  # 长直线段数 ≥ 此值视为周期性光栅（像质计），非孤立划痕
+  canny_lo: int                   # Canny 低阈值
+  canny_hi: int                   # Canny 高阈值
+  uniformity_low_freq: float      # 低频核占比（相对短边）
+  uniformity_max_ratio: float     # 低频漂移 σ / 局部纹理 σ 上限
+  dust_tophat_k: int              # 尘点 top-hat 核（奇数）
+  dust_min_area: int              # 尘点最小面积（px，过滤本底噪声小斑）
+  dust_max_count: int             # 尘点连通域上限
+  block_on_scratch: bool          # 长直划痕是否阻断评片
+  block_on_uniformity: bool       # 显影不均是否阻断（默认否，焊件灰度梯度大）
+  block_on_dust: bool             # 尘点密集是否阻断（默认否）
 preprocess:
   bilateral_d: int                # 双边滤波直径
   bilateral_sigma_color: float    # 双边色彩σ
@@ -28,14 +66,68 @@ preprocess:
   canny_kernel: int               # Canny 前高斯核（奇数）
   morph_k_open: int               # 开运算核
   morph_k_close: int              # 闭运算核
+  gamma: float                    # 缺省伽马（1.0 = 不做伽马校正）
+  enabled: bool                  # run_inspection 中是否应用降噪+增强
+quality:
+  w_noise: float                  # 子分权重（噪声）
+  w_sharp: float                  # 子分权重（锐度）
+  w_contrast: float               # 子分权重（对比度）
+  w_dynamic: float                # 子分权重（动态范围）
+  w_uniform: float                # 子分权重（均匀性）
+  w_artifact: float               # 子分权重（伪缺陷）
+  min_score: float                # RQI 门限（0–100），已按真实底片标定=70.0
+  block_on_quality: bool          # True=不合格阻断评片；False=仅告警+need_review
+  noise_good: float              # 噪声σ ≤ 此值满分（现 4.0）
+  noise_bad: float                # 噪声σ ≥ 此值 0 分（现 14.0）
+  sharp_good: float              # 平均梯度幅值满分阈值（现 1.5，真实底片 ~0.7–8.7）
+  contrast_good: float           # 信号对比度（中值滤波后 std）满分阈值（现 25.0）
+  dr_good: float                  # 动态范围利用率满分阈值（现 0.6）
+  uniformity_low_freq: float     # 低频核占比（相对短边）
+  uniformity_max_ratio: float    # 低频漂移 σ / 局部 σ 上限
+  dust_tophat_k: int             # 尘点 top-hat 核（奇数）
+  dust_min_area: int             # 尘点最小面积（px）
+  dust_max_count: int            # 尘点连通域上限
+  # 三类硬门禁（反证测试后补强；任一触发即判不合格，不扰动已标定 RQI）
+  blur_lap_bad: float            # Laplacian 方差低于此值判失焦/模糊（现 30.0，真实底片 ≥45）
+  exposure_entropy_bad: float    # 直方图熵(归一化)低于此值判过/欠曝（现 0.62，真实底片 ≥0.73）
+  stain_smooth_bad: float        # 平滑异常斑块占比高于此值判污渍（现 0.15，真实底片 ≤0.14）
 detect:
   baseline_enabled: bool          # M4a 基线检测器开关（训练模型就绪后置 false）
+  allow_baseline_fallback: bool   # 训练模型加载失败时是否降级基线（false=启动即失败）
+  infer_conf: float               # 推理置信度阈值
+  infer_iou: float                # NMS IoU 阈值
+  class_conf: dict[int, float]    # 逐类置信度阈值（键=DefectClass.value，未列出类回落 infer_conf）
+  round_aspect_max: float         # 圆形/条形长宽比分界（L/W<=该值记为圆形）
   min_area_px: int                # 连通域最小面积
   max_area_px: int                # 连通域最大面积
   min_size_px: int                # 连通域最小边长
   noise_sigma_ratio: float        # 二值化阈值=背景±k×原图噪声
   abs_threshold: float            # 绝对阈值下限（低噪声图兜底）
   dark_only: bool                 # 只检暗缺陷（True）或暗+亮（False）
+  review_conf: float              # 检测不确定性阈值，超过则 need_review（人工兜底）
+mask_refine:
+  enabled: bool                  # False=退化为包围盒近似（与 BBoxQuantifier 等价）
+  blur_k: int                    # ROI 高斯平滑核（奇数）
+  adaptive_block: int            # 自适应阈值窗口（奇数，≤ROI 短边）
+  adaptive_c: float              # 自适应阈值常数 C（0–255 量纲，越大越保守）
+  min_mask_abs_area_px: int      # 轮廓面积小于此值丢弃
+  min_mask_rel_area: float       # 掩膜面积须 ≥ 此比例×框面积，否则回退包围盒（抗误检）
+  close_k: int                   # 形态学闭运算核（填补断裂）
+  round_aspect_max: float        # 圆形/条形分界（L/W<=3 为圆形）
+upload:
+  max_bytes: int                  # 单文件上传字节上限（超限 413）
+  allowed_suffixes: list[str]     # 允许的影像扩展名白名单（其余 415）
 standard:
   default_id: str                 # 默认评级标准（如 NB/T47013.2-2015）
   tables_filename: str            # 对应数值表文件（tables/ 下）
+review:
+  kappa_threshold: float          # Cohen's κ 高度一致阈值（§15.3）；低于则升级仲裁
+batch:
+  workers: int                    # 批量并行 worker 数（§12.1）
+  max_per_batch: int              # 单批最大图数
+  per_image_estimate_sec: float   # 单图预估耗时（预计时间展示用）
+auth:
+  token_ttl_minutes: int          # 访问令牌有效期（分钟，默认 1440=24h）
+  bootstrap_username_env: str     # 首启动引导管理员用户名环境变量名
+  bootstrap_password_env: str     # 首启动引导管理员密码环境变量名
+  bootstrap_default_username: str # 未设环境变量时的默认管理员用户名

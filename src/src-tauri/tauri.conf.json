@@ -2,20 +2,28 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "ScanDetection",
   "version": "0.1.0",
-  "identifier": "com.scandetection.app",
+  "identifier": "com.scandetection.sd",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://127.0.0.1:5173",
     "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build"
+    "beforeBuildCommand": "pnpm build:pkg"
   },
   "app": {
-    "windows": [{ "title": "ScanDetection", "width": 1280, "height": 800 }],
+    "windows": [{ "title": "ScanDetection", "width": 1280, "height": 800, "label": "main" }],
     "security": { "csp": null }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
-    "externalBin": []
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "shortDescription": "射线焊缝缺陷智能检测系统（AI 辅助评片）",
+    "longDescription": "ScanDetection 是基于 YOLO/ONNX 深度学习模型的工业射线焊缝无损检测（NDT）桌面软件。AI 辅助定位气孔、夹渣、未焊透、未熔合、裂纹五类缺陷并给出 NB/T47013 评级建议，所有判定仅供辅助预筛、不具合规效力，最终须由持证人员人工复核。",
+    "publisher": "ScanDetection",
+    "resources": {
+      "../../backend": "backend",
+      "../python_embed": "python_embed",
+      "../../backend/models/weights": "models/weights"
+    }
   }
 }

@@ -1,21 +1,154 @@
 /**
  * 唯一 API 客户端（§T6）。
  * 所有请求必须经此文件；字段与后端 openapi.json 对齐（§14）。
- * TODO(T6 收尾)：由 openapi 生成客户端，替换手写实现。
+ * 响应数据一律来自真实后端，前端不做任何构造/模拟。
  */
-import type { HealthResponse } from "../types/api";
+import type {
+  ActiveExportIn,
+  ActiveExportOut,
+  ActivePoolOut,
+  ActiveSampleIn,
+  ActiveSampleOut,
+  HealthResponse,
+  LoginIn,
+  LoginOut,
+  RecordsResponse,
+  ReportOut,
+  ReviewIn,
+  ReviewOut,
+  UserOut,
+} from "../types/api";
+import { authHeaders, clearToken, setToken } from "./auth";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "/api/v1";
 
+/** 后端统一错误包（§13.4）：{error:{code,message,detail}} 或 HTTPException 的 {detail:{code,message}}。 */
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly detail: unknown;
+
+  constructor(status: number, code: string, message: string, detail: unknown) {
+    super(`${code}: ${message}`);
+    this.name = "ApiRequestError";
+    this.status = status;
+    this.code = code;
+    this.detail = detail;
+  }
+}
+
+/** 令牌失效统一信号：request() 遇 401 派发，供 App 切回登录态。 */
+export const AUTH_UNAUTHORIZED_EVENT = "auth:unauthorized";
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, init);
+  const headers = { ...authHeaders(), ...(init?.headers ?? {}) };
+  const res = await fetch(`${BASE}${path}`, { ...init, headers });
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`API ${res.status}: ${body}`);
+    let code = "HTTP_ERROR";
+    let message = res.statusText || `HTTP ${res.status}`;
+    let detail: unknown = null;
+    try {
+      const body = (await res.json()) as {
+        error?: { code?: string; message?: string; detail?: unknown };
+        detail?: { code?: string; message?: string };
+      };
+      if (body?.error) {
+        code = body.error.code ?? code;
+        message = body.error.message ?? message;
+        detail = body.error.detail ?? null;
+      } else if (body?.detail) {
+        // HTTPException 默认包体为 {detail:{code,message}}（401/403 等）
+        code = body.detail.code ?? code;
+        message = body.detail.message ?? message;
+      }
+    } catch {
+      /* 非 JSON 响应：保留 statusText */
+    }
+    if (res.status === 401) {
+      // 令牌无效/过期：清除本地令牌并广播，驱动 UI 返回登录态（不静默保留失效会话）
+      clearToken();
+      window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT));
+    }
+    throw new ApiRequestError(res.status, code, message, detail);
   }
   return (await res.json()) as T;
 }
 
 export function getHealth(): Promise<HealthResponse> {
   return request<HealthResponse>("/health");
+}
+
+/** 登录：用户名+密码 → 存储令牌并返回当前用户（§T3）。 */
+export function login(body: LoginIn): Promise<LoginOut> {
+  return request<LoginOut>("/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then((out) => {
+    setToken(out.access_token);
+    return out;
+  });
+}
+
+/** 当前登录用户信息（§T3）。 */
+export function getMe(): Promise<UserOut> {
+  return request<UserOut>("/auth/me");
+}
+
+/** 退出登录：清除本地令牌（§T3）。 */
+export function logout(): void {
+  clearToken();
+}
+
+/** 新评片全链路：上传影像 + 表单参数 → 真实报告结果（同步流水线，等待期间为处理中）。 */
+export function createReport(form: FormData): Promise<ReportOut> {
+  return request<ReportOut>("/report", { method: "POST", body: form });
+}
+
+/** 档案检索：多条件过滤 + 分页 + 统计，全部来自后端 records 查询。 */
+export function listRecords(params?: {
+  level?: string;
+  workpiece?: string;
+  page?: number;
+  size?: number;
+}): Promise<RecordsResponse> {
+  const q = new URLSearchParams();
+  if (params?.level) q.set("level", params.level);
+  if (params?.workpiece) q.set("workpiece", params.workpiece);
+  q.set("page", String(params?.page ?? 1));
+  q.set("size", String(params?.size ?? 50));
+  const qs = q.toString();
+  return request<RecordsResponse>(`/records?${qs}`);
+}
+
+/** 提交一次人工复核（初评/复评/仲裁），结果由后端计算并返回。 */
+export function submitReview(body: ReviewIn): Promise<ReviewOut> {
+  return request<ReviewOut>("/review", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** 主动学习：从一次评片检出中采样高价值样本（优先人工标注，§5.6）。 */
+export function activeSample(body: ActiveSampleIn): Promise<ActiveSampleOut> {
+  return request<ActiveSampleOut>("/active/sample", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** 主动学习：人工确认缺陷回流训练池（YOLO 标注 + 版本指纹，§5.5）。 */
+export function activeExport(body: ActiveExportIn): Promise<ActiveExportOut> {
+  return request<ActiveExportOut>("/active/export", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** 主动学习：训练池状态（样本数 / 数据版本指纹 / 最近导出）。 */
+export function activePool(): Promise<ActivePoolOut> {
+  return request<ActivePoolOut>("/active/pool");
 }

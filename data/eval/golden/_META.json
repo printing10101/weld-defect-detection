@@ -1,0 +1,12 @@
+{
+  "synthetic": true,
+  "seed": 42,
+  "n_images": 12,
+  "size": 512,
+  "class_id": 0,
+  "classes": [
+    "POROSITY"
+  ],
+  "provenance": "合成缺陷图（暗团块），无真实患者/工业机密影像，无标准授权依赖；仅作评估回归基准，禁止用于训练。",
+  "generated_by": "scripts/make_golden_set.py"
+}

@@ -1,14 +1,134 @@
-"""报告生成（§7.2）。"""
+"""报告生成（§7.2，M6 真实实现）。
+
+两种模式（§14 POST /api/v1/report）：
+- 上传新影像 + 表单 → InspectionPipeline 全链路（校验→预处理→检测→判定→落库→PDF）；
+- 传 image_id → 对已入库检查重新生成报告（不重跑检测/判定）。
+PDF 下载：GET /api/v1/report/{report_id}/pdf。
+"""
+
 from __future__ import annotations
 
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from pathlib import Path
+from typing import Annotated
 
-from backend.app.routers._common import not_implemented
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
-router = APIRouter(tags=["report"])
+from backend.app.auth import CurrentUser, get_current_user
+from backend.app.dependencies import Registry, get_registry
+from backend.app.pipelines import InspectionPipeline
+from backend.app.routers._common import parse_roi, staged_upload
+
+router = APIRouter(tags=["report"], dependencies=[Depends(get_current_user)])
 
 
-@router.post("/report")
-def report() -> JSONResponse:
-    return not_implemented("M6: PDF/A 报告")
+class ReportOut(BaseModel):
+    report_id: str
+    image_id: str
+    joint_level: str | None
+    need_review: bool
+    evaluable: bool
+    defect_count: int
+    disclaimer: str | None = None
+    pdf_url: str
+
+
+@router.post("/report", response_model=ReportOut)
+async def report(
+    reg: Annotated[Registry, Depends(get_registry)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    image: Annotated[UploadFile | None, File()] = None,
+    image_id: Annotated[str | None, Form()] = None,
+    pixel_spacing_mm: Annotated[float | None, Form()] = None,
+    base_metal_thickness_mm: Annotated[float | None, Form()] = None,
+    standard_id: Annotated[str | None, Form()] = None,
+    iqi_roi: Annotated[str | None, Form()] = None,
+    workpiece_no: Annotated[str | None, Form()] = None,
+    weld_no: Annotated[str | None, Form()] = None,
+    signer: Annotated[str | None, Form()] = None,
+    template: Annotated[str | None, Form()] = None,
+    # 底片不合格时的强制出片开关：出片但不输出级别（默认阻断，返回 409 IQI_FAIL）
+    force: Annotated[bool, Form()] = False,
+) -> ReportOut:
+    pipeline = InspectionPipeline(reg)
+    tpl = template or "standard"
+    # 责任工程师签字默认取登录用户（闭合 T1/T2 占位）；显式提供时优先。
+    effective_signer = signer or current_user.username
+    actor = current_user.username  # 审计 actor = 登录操作员
+
+    if pixel_spacing_mm is not None and pixel_spacing_mm <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "INVALID_SPACING", "message": "pixel_spacing_mm 必须为正数"},
+        )
+    if base_metal_thickness_mm is not None and base_metal_thickness_mm <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "INVALID_THICKNESS", "message": "base_metal_thickness_mm 必须为正数"},
+        )
+
+    if image_id:
+        # 重生成模式：不重跑检测/判定。KeyError 需映射 404，否则落到全局 500。
+        try:
+            out = await run_in_threadpool(pipeline.regenerate_report, image_id, tpl)
+        except KeyError:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "NOT_FOUND", "message": f"image not found: {image_id}"},
+            ) from None
+    elif image is not None:
+        # 新评片模式：全链路（检测+渲染 PDF 为重同步任务，进线程池，§13.11）
+        roi = parse_roi(iqi_roi)
+        async with staged_upload(image, reg.config) as tmp_path:
+            out = await run_in_threadpool(
+                lambda: pipeline.run_inspection(
+                    tmp_path,
+                    pixel_spacing_mm=pixel_spacing_mm,
+                    base_metal_thickness_mm=base_metal_thickness_mm,
+                    standard_id=standard_id,
+                    iqi_roi=roi,
+                    workpiece_no=workpiece_no,
+                    weld_no=weld_no,
+                    signer=effective_signer,
+                    actor=actor,
+                    template=tpl,
+                    force=force,
+                )
+            )
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "MISSING_INPUT", "message": "需提供 image 文件或 image_id"},
+        )
+
+    return ReportOut(
+        report_id=out["report_id"],
+        image_id=out["image_id"],
+        joint_level=out["joint_level"],
+        need_review=bool(out["need_review"]),
+        evaluable=bool(out["evaluable"]),
+        defect_count=int(out["defect_count"]),
+        disclaimer=out.get("disclaimer"),
+        pdf_url=f"/api/v1/report/{out['report_id']}/pdf",
+    )
+
+
+@router.get("/report/{report_id}/pdf")
+def report_pdf(
+    report_id: str,
+    reg: Annotated[Registry, Depends(get_registry)],
+) -> FileResponse:
+    rep = reg.repository.get_report(report_id)
+    if rep is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": f"report not found: {report_id}"},
+        )
+    pdf = Path(str(rep["pdf_path"]))
+    if not pdf.exists():
+        raise HTTPException(
+            status_code=404, detail={"code": "NOT_FOUND", "message": "pdf file missing"}
+        )
+    return FileResponse(str(pdf), media_type="application/pdf", filename=f"{report_id}.pdf")
