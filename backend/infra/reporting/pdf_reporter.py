@@ -140,11 +140,14 @@ class PdfReporter:
         self._out.mkdir(parents=True, exist_ok=True)
         self._font = _register_font()
 
-    def build(self, image_id: str, template: str = "standard") -> str:
+    def build(self, image_id: str, template: str = "standard", gray=None) -> str:
         """生成 PDF/A-1b 报告，返回绝对路径。image_id 不存在抛 ValueError。
 
         §7.2 数字签名：按报告关键字段计算内容指纹（SHA-256），写入 PDF 页脚
         并持久化到 reports.report_hash / signed_at，供 verify 端点防篡改校验。
+
+        gray：可选，pipeline 已加载的灰度底片（numpy）。传入则复用，避免对整张
+        大底片二次解码（§优化 F12）；缺省时自行从 image["path"] 解码。
         """
         del template  # v1 统一模板（参数预留）
         image = self._repo.get_image(image_id)
@@ -160,8 +163,9 @@ class PdfReporter:
             image, defects, report, disclaimer=disclaimer or None, fingerprint=fingerprint
         )
 
-        # 原图只解码一次，原始图与标注图共用（原实现解码两次，大底片翻倍开销）
-        gray = _read_gray(image["path"])
+        # 原图解码：pipeline 已传入灰度图则复用，否则自行解码（F12 避免重复解码）
+        if gray is None:
+            gray = _read_gray(image["path"])
         orig_bytes = _encode_png(gray)
         graph_bytes = _annotate_png(gray, defects)
         pdf_path = self._out / f"{image_id}.pdf"

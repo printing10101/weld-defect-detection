@@ -4,7 +4,7 @@
  * 数据诚实性：仅处理用户真实选择的文件；预览为该文件的真实 objectURL；
  * 校验消息针对真实文件（扩展名/大小）。不包含任何预设样例。
  */
-import { computed, ref } from "vue";
+import { computed, onUnmounted, ref } from "vue";
 
 const emit = defineEmits<{
   fileChanged: [file: File | null];
@@ -87,6 +87,33 @@ const fileMeta = computed(() => {
   const kb = (file.value.size / 1024).toFixed(0);
   return `${file.value.name} · ${kb} KB`;
 });
+
+// F21：objectURL 必须在释放/卸载时回收，否则浏览器内存泄漏。
+function revokePreview(): void {
+  if (previewUrl.value) {
+    URL.revokeObjectURL(previewUrl.value);
+    previewUrl.value = null;
+  }
+}
+
+// 复位表单并回收预览 URL（供父组件在无重挂载场景下原地复用）。
+function reset(): void {
+  revokePreview();
+  file.value = null;
+  fileErr.value = null;
+  thicknessErr.value = null;
+  pixelSpacingMm.value = "0.1000";
+  baseMetalThicknessMm.value = "";
+  workpieceNo.value = "";
+  weldNo.value = "";
+  emit("fileChanged", null);
+}
+
+onUnmounted(() => {
+  revokePreview();
+});
+
+defineExpose({ reset });
 </script>
 
 <template>

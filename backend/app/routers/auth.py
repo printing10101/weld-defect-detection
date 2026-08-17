@@ -23,10 +23,14 @@ from backend.app.auth import (
     ROLE_ADMIN,
     CurrentUser,
     authenticate_user,
+    check_login_locked,
     create_access_token,
     get_current_user,
     hash_password,
+    register_login_failure,
+    register_login_success,
     require_roles,
+    revoke_token,
 )
 from backend.app.dependencies import Registry, get_registry
 
@@ -88,16 +92,54 @@ class LoginOut(BaseModel):
 @router.post("/auth/login", response_model=LoginOut)
 def login(body: LoginIn, reg: Annotated[Registry, Depends(get_registry)]) -> LoginOut:
     """用户名+密码登录；成功返回令牌与用户信息。失败 → 401（不暴露具体原因）。"""
+    # F5：登录前先检查账户是否因连续失败被锁定（防爆破）。
+    locked, retry_after = check_login_locked(body.username)
+    if locked:
+        raise HTTPException(
+            status_code=429,
+            headers={"Retry-After": str(retry_after)},
+            detail={
+                "code": "ACCOUNT_LOCKED",
+                "message": f"尝试次数过多，请 {retry_after}s 后重试",
+            },
+        )
     user = authenticate_user(reg.repository, body.username, body.password)
     if user is None:
+        register_login_failure(body.username)
         raise HTTPException(
             status_code=401, detail={"code": "INVALID_CREDENTIALS", "message": "用户名或密码错误"}
         )
+    register_login_success(body.username)
     reg.repository.update_last_login(user["username"])
     token = create_access_token(
         subject=user["username"], role=user["role"], display_name=user.get("display_name") or ""
     )
     return LoginOut(access_token=token, user=UserOut.model_validate(user))
+
+
+@router.post("/auth/logout")
+def logout(user: Annotated[CurrentUser, Depends(get_current_user)]) -> dict:
+    """注销当前令牌：将其 jti 加入吊销集，立即失效（F6）。"""
+    revoke_token(user.jti)
+    return {"ok": True}
+
+
+@router.post("/auth/refresh", response_model=LoginOut)
+def refresh(
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    reg: Annotated[Registry, Depends(get_registry)],
+) -> LoginOut:
+    """轮换令牌（F6）：签发新令牌（新 jti）并吊销旧令牌，避免旧令牌长期可用。"""
+    revoke_token(user.jti)
+    token = create_access_token(
+        subject=user.username, role=user.role, display_name=user.display_name
+    )
+    db_user = reg.repository.get_user_by_username(user.username)
+    out = UserOut.model_validate(db_user) if db_user else UserOut(
+        id=user.username, username=user.username, display_name=user.display_name,
+        role=user.role, disabled=False, created_at=None, created_by=None, last_login_at=None,
+    )
+    return LoginOut(access_token=token, user=out)
 
 
 @router.get("/auth/me", response_model=UserOut)

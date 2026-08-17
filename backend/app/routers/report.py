@@ -17,9 +17,10 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from backend.app.auth import CurrentUser, get_current_user
-from backend.app.dependencies import Registry, get_registry
+from backend.app.dependencies import Registry, get_registry, _resolve_path
 from backend.app.pipelines import InspectionPipeline
 from backend.app.routers._common import parse_roi, staged_upload
+from backend.infra.fs import safe_resolve
 
 router = APIRouter(tags=["report"], dependencies=[Depends(get_current_user)])
 
@@ -149,7 +150,11 @@ def report_pdf(
             status_code=404,
             detail={"code": "NOT_FOUND", "message": f"report not found: {report_id}"},
         )
-    pdf = Path(str(rep["pdf_path"]))
+    # 收敛到 reports_dir 之内，避免 DB 中若存了绝对路径导致的越界读取（§13.9）
+    pdf = safe_resolve(
+        Path(_resolve_path(reg.config.paths.reports_dir)),
+        Path(str(rep["pdf_path"])).name,
+    )
     if not pdf.exists():
         raise HTTPException(
             status_code=404, detail={"code": "NOT_FOUND", "message": "pdf file missing"}

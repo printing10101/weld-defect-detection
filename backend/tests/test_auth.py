@@ -235,3 +235,58 @@ def test_disabled_user_cannot_login() -> None:
         )
         assert r.status_code == 200, r.text
         assert _login(c, uname, pw).status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# F5：登录防爆破锁定
+# ---------------------------------------------------------------------------
+def test_login_lockout_after_repeated_failures() -> None:
+    with _client() as c:
+        victim = "lockout_candidate"
+        # 连续错误密码（同一用户名）达到阈值后触发锁定
+        for _ in range(5):
+            r = _login(c, victim, "wrong-pw")
+            assert r.status_code == 401, r.text
+        # 第 6 次（含后续）应被锁定，返回 429 且带 Retry-After
+        r = _login(c, victim, "wrong-pw")
+        assert r.status_code == 429
+        assert r.json()["detail"]["code"] == "ACCOUNT_LOCKED"
+        assert "Retry-After" in r.headers
+
+
+def test_login_lockout_reset_on_success() -> None:
+    with _client() as c:
+        # 少量失败不应锁定，且成功登录后计数清零
+        for _ in range(3):
+            assert _login(c, ADMIN_USER, "wrong").status_code == 401
+        assert _login(c, ADMIN_USER, ADMIN_PW).status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# F6：令牌吊销 + 轮换
+# ---------------------------------------------------------------------------
+def test_logout_revokes_token() -> None:
+    with _client() as c:
+        tok = _token(c, ADMIN_USER, ADMIN_PW)
+        # 注销前可访问
+        assert c.get("/api/v1/auth/me", headers=_auth(tok)).status_code == 200
+        # 注销
+        r = c.post("/api/v1/auth/logout", headers=_auth(tok))
+        assert r.status_code == 200 and r.json()["ok"] is True
+        # 注销后原令牌立即失效
+        r2 = c.get("/api/v1/auth/me", headers=_auth(tok))
+        assert r2.status_code == 401
+        assert r2.json()["detail"]["code"] == "TOKEN_REVOKED"
+
+
+def test_refresh_rotates_and_revokes_old() -> None:
+    with _client() as c:
+        tok1 = _token(c, ADMIN_USER, ADMIN_PW)
+        r = c.post("/api/v1/auth/refresh", headers=_auth(tok1))
+        assert r.status_code == 200, r.text
+        tok2 = r.json()["access_token"]
+        assert tok2 and tok2 != tok1
+        # 旧令牌已吊销
+        assert c.get("/api/v1/auth/me", headers=_auth(tok1)).status_code == 401
+        # 新令牌可用
+        assert c.get("/api/v1/auth/me", headers=_auth(tok2)).status_code == 200

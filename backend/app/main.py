@@ -63,6 +63,11 @@ async def lifespan(app: FastAPI):
     _start_annotator_if_enabled()
     _LOG.info("application startup complete (registry assembled)")
     yield
+    # F11：应用退出时优雅关停批量线程池（等运行中任务结束），避免 worker 被硬杀
+    try:
+        get_registry().batch_manager.shutdown()
+    except Exception as exc:  # noqa: BLE001 - 关停失败不应掩盖其它退出逻辑
+        _LOG.warning("batch_manager shutdown skipped: %s", exc)
 
 
 def _start_annotator_if_enabled() -> None:

@@ -19,6 +19,10 @@ const page = ref(1);
 const pageSize = ref(50);
 const total = ref(0);
 
+// 请求序号守卫（F20）：切回 active / 翻页 / 过滤可能并发多个 load()，
+// 旧请求晚到会覆盖新响应。仅接受最新一次请求的返回。
+let loadReqId = 0;
+
 // 主动学习训练池（M7）
 const poolLoading = ref(true);
 const pool = ref<ActivePoolOut | null>(null);
@@ -35,6 +39,7 @@ async function loadPool(): Promise<void> {
 }
 
 async function load(): Promise<void> {
+  const myId = ++loadReqId;
   loading.value = true;
   err.value = null;
   try {
@@ -44,12 +49,14 @@ async function load(): Promise<void> {
       page: page.value,
       size: pageSize.value,
     });
+    if (myId !== loadReqId) return; // 旧请求晚到，丢弃，避免覆盖最新响应
     resp.value = r;
     total.value = r.total;
   } catch (e) {
+    if (myId !== loadReqId) return; // 同上，非最新请求的错误不覆盖状态
     err.value = e instanceof Error ? e.message : String(e);
   } finally {
-    loading.value = false;
+    if (myId === loadReqId) loading.value = false;
   }
 }
 

@@ -72,3 +72,9 @@ Thumbs.db
 _read_docx.py
 data/m6_demo_report.pdf
 src/vite.build.config.ts.timestamp-*.mjs
+src/vite.config.ts.timestamp-*.mjs
+
+# 运行时密钥/吊销状态/内存（绝不入库）
+.dsh-memory/
+data/.auth_secret
+data/.revoked_tokens.json

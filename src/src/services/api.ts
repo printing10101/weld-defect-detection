@@ -50,9 +50,15 @@ export class ApiRequestError extends Error {
 
 /** 令牌失效统一信号：request() 遇 401 派发，供 App 切回登录态。 */
 export const AUTH_UNAUTHORIZED_EVENT = "auth:unauthorized";
+/** 后端离线信号：request() 遇连接不可达/超时派发，供 App 显示全局离线横幅（§优化 F18）。 */
+export const BACKEND_DOWN_EVENT = "backend:down";
+/** 后端恢复信号：任意成功响应派发，供 App 清除离线横幅。 */
+export const BACKEND_UP_EVENT = "backend:up";
 
 /** 单次请求超时（ms）：本地推理通常数秒，批量/复杂报告留 30s 余量（§D1）。 */
 const REQUEST_TIMEOUT_MS = 30_000;
+/** 上传/批量/报告生成：大底片或百张批量易超 30s，单独放宽超时（§优化 F19）。 */
+const UPLOAD_TIMEOUT_MS = 120_000;
 /** 仅对「后端不可达（连接被拒）」做指数退避重试；超时与 HTTP 错误不重试（避免重复提交）。 */
 const MAX_NETWORK_RETRIES = 2;
 const RETRY_BASE_MS = 400;
@@ -61,22 +67,24 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-async function rawRequest<T>(path: string, init: RequestInit): Promise<T> {
+async function rawRequest<T>(path: string, init: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
   const ctrl = new AbortController();
-  const timer = window.setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+  const timer = window.setTimeout(() => ctrl.abort(), timeoutMs);
   let res: Response;
   try {
     res = await fetch(`${BASE}${path}`, { ...init, signal: ctrl.signal });
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") {
+      window.dispatchEvent(new CustomEvent(BACKEND_DOWN_EVENT));
       throw new ApiRequestError(
         0,
         "TIMEOUT",
-        `请求超时（>${REQUEST_TIMEOUT_MS / 1000}s），后端可能未响应或正在处理`,
+        `请求超时（>${timeoutMs / 1000}s），后端可能未响应或正在处理`,
         null,
       );
     }
     // TypeError（连接被拒等网络层错误）：给出可操作的「后端未启动」提示
+    window.dispatchEvent(new CustomEvent(BACKEND_DOWN_EVENT));
     throw new ApiRequestError(
       0,
       "BACKEND_UNREACHABLE",
@@ -86,6 +94,8 @@ async function rawRequest<T>(path: string, init: RequestInit): Promise<T> {
   } finally {
     window.clearTimeout(timer);
   }
+  // 任意成功响应（含 4xx/5xx 已被上层转换为错误前）都说明后端在线，清除离线态
+  window.dispatchEvent(new CustomEvent(BACKEND_UP_EVENT));
 
   if (!res.ok) {
     let code = "HTTP_ERROR";
@@ -118,14 +128,14 @@ async function rawRequest<T>(path: string, init: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
   const headers = { ...authHeaders(), ...(init?.headers ?? {}) };
   const merged: RequestInit = { ...init, headers };
   let lastErr: unknown;
   // 仅后端不可达时重试（连接刚启动时短暂抖动）；超时/HTTP 错误直接抛，不重试。
   for (let attempt = 0; attempt <= MAX_NETWORK_RETRIES; attempt++) {
     try {
-      return await rawRequest<T>(path, merged);
+      return await rawRequest<T>(path, merged, timeoutMs);
     } catch (e) {
       lastErr = e;
       const retryable = e instanceof ApiRequestError && e.code === "BACKEND_UNREACHABLE";
@@ -162,9 +172,10 @@ export function logout(): void {
   clearToken();
 }
 
-/** 新评片全链路：上传影像 + 表单参数 → 真实报告结果（同步流水线，等待期间为处理中）。 */
+/** 新评片全链路：上传影像 + 表单参数 → 真实报告结果（同步流水线，等待期间为处理中）。
+ *  大底片处理可能超过 30s，使用上传专用超时（§优化 F19）。 */
 export function createReport(form: FormData): Promise<ReportOut> {
-  return request<ReportOut>("/report", { method: "POST", body: form });
+  return request<ReportOut>("/report", { method: "POST", body: form }, UPLOAD_TIMEOUT_MS);
 }
 
 /** 档案检索：多条件过滤 + 分页 + 统计，全部来自后端 records 查询。 */
@@ -217,9 +228,10 @@ export function activePool(): Promise<ActivePoolOut> {
 
 /* ── 批量处理（§12.1）：多图/文件夹导入 → 异步队列 → 进度 → 取消/重试 ── */
 
-/** 提交批量评片：FormData 含 images[]（多文件）+ 公共参数 → batch_id（异步执行）。 */
+/** 提交批量评片：FormData 含 images[]（多文件）+ 公共参数 → batch_id（异步执行）。
+ *  百张大底片批量易超 30s，使用上传专用超时（§优化 F19）。 */
 export function submitBatch(form: FormData): Promise<BatchSubmitOut> {
-  return request<BatchSubmitOut>("/batch", { method: "POST", body: form });
+  return request<BatchSubmitOut>("/batch", { method: "POST", body: form }, UPLOAD_TIMEOUT_MS);
 }
 
 /** 批次进度与逐任务结果。 */

@@ -96,6 +96,7 @@ class BatchManager:
         self._batch_dir = Path(batch_dir)
         self._batch_dir.mkdir(parents=True, exist_ok=True)
         self._pool = ThreadPoolExecutor(max_workers=self._workers, thread_name_prefix="batch")
+        self._closed = False
         self._lock = threading.Lock()
         self._batches: dict[str, dict[str, Any]] = {}
 
@@ -104,6 +105,7 @@ class BatchManager:
     # ------------------------------------------------------------------
     def submit(self, items: list[BatchItem]) -> str:
         """提交一批任务，返回 batch_id。"""
+        self._ensure_pool()
         if not items:
             raise ValueError("batch 至少需要一张影像")
         batch_id = uuid.uuid4().hex
@@ -132,7 +134,7 @@ class BatchManager:
         }
         with self._lock:
             self._batches[batch_id] = batch
-            self._persist(batch)
+        self._persist(batch)
         for item, task in zip(items, tasks):
             self._pool.submit(self._run_one, batch_id, task.task_id, item)
         return batch_id
@@ -154,8 +156,9 @@ class BatchManager:
             if batch["status"] == "finished":
                 return True  # 已完成批次无需取消
             batch["cancelled_flag"] = True
-            self._persist(batch)
-            return True
+            self._maybe_finish(batch)  # 取消后若所有任务已终态则标记 finished（纯状态变更）
+        self._persist(batch)
+        return True
 
     def retry(self, batch_id: str) -> int:
         """断点续跑：将本批 failed/cancelled 任务重新入队，返回重跑任务数。
@@ -163,6 +166,7 @@ class BatchManager:
         原图依赖「有 failed/cancelled 即保留暂存目录」的清理策略（_cleanup_staging），
         故重跑时原图仍在；重跑完成后 _maybe_finish 再触发目录清理。
         """
+        self._ensure_pool()
         with self._lock:
             batch = self._batches.get(batch_id)
             if batch is None:
@@ -180,7 +184,7 @@ class BatchManager:
                 return 0
             batch["status"] = "running"
             batch["finished_at"] = None
-            self._persist(batch)
+        self._persist(batch)
         for task_id, image_path, image_name, options in pending:
             self._pool.submit(
                 self._run_one,
@@ -222,34 +226,50 @@ class BatchManager:
     def shutdown(self) -> None:
         """应用退出时释放线程池（等运行中任务结束）。"""
         self._pool.shutdown(wait=True)
+        self._closed = True
+
+    def _ensure_pool(self) -> None:
+        """若线程池已随 shutdown() 关闭（如测试生命周期中 lifespan 多次启停），
+        惰性重建，使单例 BatchManager 在进程内可继续接收提交（生产真实退出后
+        不再有新提交，不受影响）。"""
+        if self._closed:
+            self._pool = ThreadPoolExecutor(
+                max_workers=self._workers, thread_name_prefix="batch"
+            )
+            self._closed = False
 
     # ------------------------------------------------------------------
     # 内部
     # ------------------------------------------------------------------
     def _run_one(self, batch_id: str, task_id: str, item: BatchItem) -> None:
+        # 锁仅保护状态变更；落盘（序列化整批 JSON + 写盘，I/O 较重）移到锁外，
+        # 避免每次状态变更阻塞全部 worker（§优化 F10：消除持锁全量写盘的吞吐瓶颈）。
+        with self._lock:
+            batch = self._batches[batch_id]
+            if batch["cancelled_flag"]:
+                self._mark(batch, task_id, "cancelled", error="batch cancelled")
+                self._maybe_finish(batch)
+                self._persist(batch)
+                return
+            self._mark(batch, task_id, "running")
+        pipeline = self._pipeline_factory()
+        options = dict(item.options)
+        options.setdefault("image_path", item.image_path)
         try:
-            with self._lock:
-                batch = self._batches[batch_id]
-                if batch["cancelled_flag"]:
-                    self._mark(batch, task_id, "cancelled", error="batch cancelled")
-                    return
-                self._mark(batch, task_id, "running")
-            pipeline = self._pipeline_factory()
-            options = dict(item.options)
-            options.setdefault("image_path", item.image_path)
             result = pipeline.run_inspection(**options)
-            with self._lock:
-                batch = self._batches[batch_id]
-                self._mark(batch, task_id, "done", result=result)
         except Exception as exc:  # noqa: BLE001  # 失败隔离：单图异常不拖垮整批
             _LOG.exception("batch task failed batch=%s task=%s", batch_id, task_id)
             with self._lock:
                 batch = self._batches[batch_id]
                 self._mark(batch, task_id, "failed", error=str(exc))
-        finally:
-            with self._lock:
-                batch = self._batches[batch_id]
                 self._maybe_finish(batch)
+            self._persist(batch)
+            return
+        with self._lock:
+            batch = self._batches[batch_id]
+            self._mark(batch, task_id, "done", result=result)
+            self._maybe_finish(batch)
+        self._persist(batch)
 
     def _mark(self, batch: dict, task_id: str, status: str, *, error=None, result=None) -> None:
         for t in batch["tasks"]:
@@ -262,7 +282,7 @@ class BatchManager:
         batch["done"] = sum(1 for t in batch["tasks"] if t["status"] == "done")
         batch["failed"] = sum(1 for t in batch["tasks"] if t["status"] == "failed")
         batch["cancelled"] = sum(1 for t in batch["tasks"] if t["status"] == "cancelled")
-        self._persist(batch)
+        # 注意：落盘由调用方在锁外执行（§优化 F10），此处仅变更内存状态。
 
     def _maybe_finish(self, batch: dict) -> None:
         if batch["status"] == "finished":
@@ -271,7 +291,6 @@ class BatchManager:
         if all(t["status"] in terminal for t in batch["tasks"]):
             batch["status"] = "finished"
             batch["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
-            self._persist(batch)
             self._cleanup_staging(batch)
 
     def _cleanup_staging(self, batch: dict) -> None:
@@ -313,10 +332,32 @@ class BatchManager:
             _LOG.warning("batch snapshot persist failed: %s", batch["batch_id"])
 
     def _load_existing(self) -> None:
-        """启动时恢复历史批次快照（断点续跑的可查部分）。"""
+        """启动时恢复历史批次快照（断点续跑的可查部分）。
+
+        F11：进程崩溃/重启时处于 running/pending 的任务实际已中断，若原样恢复会
+        永久显示「运行中」且永不重跑。这里把它们标记为 failed（interrupted），
+        用户可经 retry 重新入队（retry 兼容 failed/cancelled）。
+        """
         for path in self._batch_dir.glob("*.json"):
             try:
                 batch = json.loads(path.read_text(encoding="utf-8"))
                 self._batches[batch["batch_id"]] = batch
             except (OSError, ValueError, KeyError):
                 _LOG.warning("skip corrupted batch snapshot: %s", path.name)
+        for batch in self._batches.values():
+            changed = False
+            for t in batch.get("tasks", []):
+                if t.get("status") in ("running", "pending"):
+                    t["status"] = "failed"
+                    t["error"] = "interrupted by restart; retry available"
+                    changed = True
+            if changed:
+                batch["done"] = sum(1 for t in batch["tasks"] if t["status"] == "done")
+                batch["failed"] = sum(1 for t in batch["tasks"] if t["status"] == "failed")
+                batch["cancelled"] = sum(1 for t in batch["tasks"] if t["status"] == "cancelled")
+                if batch["status"] != "finished":
+                    batch["status"] = "finished"
+                    batch["finished_at"] = batch.get("finished_at") or time.strftime(
+                        "%Y-%m-%dT%H:%M:%S"
+                    )
+                self._persist(batch)

@@ -63,6 +63,7 @@ testpaths = ["backend/tests"]
 addopts = "--cov=backend --cov-report=term-missing --cov-fail-under=70"
 markers = [
     "ml: 需要 ML 推理依赖与权重的真实检测器（YoloDetector）测试；CI 默认 skip，本机装 ML 依赖后运行",
+    "ml_smoke: 仅需 onnxruntime（无需权重）的真实检测器接口/导入冒烟；CI ml-smoke 作业必过",
 ]
 
 [tool.coverage.run]

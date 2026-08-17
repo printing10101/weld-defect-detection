@@ -1,23 +1,28 @@
 # ScanDetection 生产运行时依赖全集（与 pyproject.toml 的
 # [project].dependencies + [project.optional-dependencies].{ml,report} 并集一致）。
 # 安装方式：在虚拟环境中执行  pip install -r requirements.txt
-# torch 使用 CPU 版以减小体积；如需 GPU 版请移除下方 --extra-index-url 行。
+#
+# 版本策略（F4）：全部锁定 `==` 精确版本，避免无声升级到不兼容的主版本；
+# torch 使用 CPU 版以减小体积，经由下方 --extra-index-url 指定 CPU 轮子源。
+# 完整可复现（含传递依赖哈希）由 uv.lock 提供，见 F29 / CI。
+# 注意：ultralytics / opencv-python-headless 的实际版本以本机 ML 运行环境为准，
+# 若与下方锁定不符，请据此文件重新 `pip install -r requirements.txt` 同步。
 --extra-index-url https://download.pytorch.org/whl/cpu
 
-fastapi>=0.115
-uvicorn[standard]>=0.30
-pydantic>=2.7
-pydantic-settings>=2.2
-sqlalchemy>=2.0
-pyyaml>=6.0
-pydicom>=2.4
-numpy>=1.26
-scikit-image>=0.22
+fastapi==0.141.1
+uvicorn[standard]==0.52.1
+pydantic==2.13.4
+pydantic-settings==2.15.0
+sqlalchemy==2.0.51
+pyyaml==6.0.3
+pydicom==3.0.2
+numpy==2.5.1
+scikit-image==0.26.0
 # §7.5 静态加密（AES-256-GCM，默认开启）运行时必需
-cryptography>=42
-opencv-python-headless>=4.9
-torch>=2.2
-ultralytics>=8.2
-onnxruntime>=1.17
-reportlab>=4.0
-pypdf>=4.0
+cryptography==50.0.0
+opencv-python-headless==4.9.0.80
+torch==2.13.0
+ultralytics==8.2.9
+onnxruntime==1.28.0
+reportlab==5.0.0
+pypdf==6.15.0

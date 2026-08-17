@@ -373,7 +373,8 @@ class InspectionPipeline:
         )
 
         # 7. 报告 PDF（Reporter 契约；读库拿数据 → 渲染 → 回填路径）
-        pdf_path = reg.reporter.build(image_id, template)
+        #    F12：复用已加载的灰度底片 gray，避免 pdf_reporter 对整张大底片二次解码
+        pdf_path = reg.reporter.build(image_id, template, gray=gray)
         reg.repository.update_report(report_id, pdf_path=pdf_path)
 
         dt = time.perf_counter() - t0

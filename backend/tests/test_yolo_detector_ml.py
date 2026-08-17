@@ -27,8 +27,6 @@ pytest.importorskip("onnxruntime")
 
 from backend.domain.detect.yolo_detector import YoloDetector
 
-pytestmark = pytest.mark.ml
-
 _ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_MODEL = os.environ.get(
     "SCAN_ML_SMOKE_MODEL", str(_ROOT / "models" / "weights" / "best.onnx")
@@ -47,12 +45,18 @@ def _load_detector() -> YoloDetector:
     return det
 
 
+@pytest.mark.ml_smoke
 def test_yolo_detector_interface_contract() -> None:
-    """接口契约：YoloDetector 必须实现 load / infer（ADR-002 主干可热替换）。"""
+    """接口契约：YoloDetector 必须实现 load / infer（ADR-002 主干可热替换）。
+
+    无需权重：仅校验检测器模块可被 onnxruntime 加载、接口存在——CI 装 onnxruntime
+    后即必过，恢复对真实检测器代码路径的真实门禁覆盖（修复 continue-on-error 虚假信心）。
+    """
     assert hasattr(YoloDetector, "load")
     assert hasattr(YoloDetector, "infer")
 
 
+@pytest.mark.ml
 def test_yolo_detector_smoke_infer() -> None:
     """冒烟：真实加载 ONNX 并对合成底片跑 infer，返回 Detection 列表。"""
     det = _load_detector()
@@ -61,6 +65,7 @@ def test_yolo_detector_smoke_infer() -> None:
     assert isinstance(out, list), "infer 必须返回 list[Detection]"
 
 
+@pytest.mark.ml
 def test_yolo_detector_infer_blank_no_crash() -> None:
     """回归防护：纯背景图不应使 infer 抛未捕获异常（纵使检出为空）。"""
     det = _load_detector()
