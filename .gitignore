@@ -23,6 +23,8 @@ backend/.venv/
 data/tmp/
 data/.dvc/tmp/
 data/scan.db
+data/scan.db-shm
+data/scan.db-wal
 data/images/
 data/reports/
 data/real_label/
@@ -73,6 +75,10 @@ _read_docx.py
 data/m6_demo_report.pdf
 src/vite.build.config.ts.timestamp-*.mjs
 src/vite.config.ts.timestamp-*.mjs
+
+# 根目录一次性验证/错误产物（可重跑脚本再生，不入库）
+_verify_model_result*.json
+git_commit_err.txt
 
 # 运行时密钥/吊销状态/内存（绝不入库）
 .dsh-memory/
