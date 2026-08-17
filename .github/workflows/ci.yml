@@ -22,6 +22,8 @@ jobs:
         run: ruff format --check backend
       - name: Import-linter (layering contract)
         run: lint-imports
+      - name: Pyright (type check)
+        run: pyright backend
       - name: Pytest (unit + contract + API + eval gate) with coverage
         run: pytest backend/tests
       - name: Evaluation regression gate (Golden Set)
@@ -40,3 +42,21 @@ jobs:
       - run: cd src && yarn install --frozen-lockfile
       - run: cd src && yarn typecheck
       - run: cd src && yarn build
+
+  # 真实检测器（YoloDetector）测试层：CI 默认无 ML 依赖，整模块 skip；
+  # 本作业仅装 onnxruntime（轻量，避开 torch/ultralytics），使真实推理路径有机会执行。
+  # 非阻塞：模型权重若未随仓库（大文件）则不触发，测试优雅 skip。
+  ml-tests:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install (dev + onnxruntime)
+        run: pip install -e ".[dev]" onnxruntime
+      - name: Pytest (real detector tier)
+        run: pytest backend/tests -m ml -o addopts="" -q

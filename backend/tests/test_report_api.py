@@ -190,6 +190,11 @@ def test_report_regenerate_by_image_id(tmp_path) -> None:
     assert body["image_id"] == first["image_id"]
     assert body["report_id"]  # 新报告（同影像重新生成）
     assert body["joint_level"] == first["joint_level"]
+    # P0-E：合规处置建议随报告输出（新评片与重新生成两条路径都应有）
+    for resp in (first, body):
+        assert resp["disposition"] in {"accept", "conditional", "rework", "recheck"}
+        assert isinstance(resp["disposition_label"], str) and resp["disposition_label"]
+        assert isinstance(resp["disposition_actions"], list) and resp["disposition_actions"]
 
 
 def test_report_missing_input() -> None:

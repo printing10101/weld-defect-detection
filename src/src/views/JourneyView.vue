@@ -27,23 +27,56 @@ function onSubmit(fd: FormData): void {
 
     <!-- 阶段1：上传 -->
     <div v-if="phase === 'upload'">
-      <h1 class="title-zine" data-t="开始一次检测">开始一次检测</h1>
-      <div class="lede">UPLOAD · 三步完成 · 全程本地处理</div>
-      <UploadPanel @file-changed="onFileChanged" @submit="onSubmit" />
+      <h1
+        class="title-zine"
+        data-t="开始一次检测"
+      >
+        开始一次检测
+      </h1>
+      <div class="lede">
+        UPLOAD · 三步完成 · 全程本地处理
+      </div>
+      <UploadPanel
+        @file-changed="onFileChanged"
+        @submit="onSubmit"
+      />
     </div>
 
     <!-- 阶段2：处理中 -->
     <div v-else-if="phase === 'processing'">
-      <h1 class="title-zine" data-t="正在处理">正在处理</h1>
-      <div class="lede">PROCESSING · 影像已提交至本地流水线</div>
-      <PipelineTrack status="running" :elapsed-ms="elapsedMs" :error-message="null" />
+      <h1
+        class="title-zine"
+        data-t="正在处理"
+      >
+        正在处理
+      </h1>
+      <div class="lede">
+        PROCESSING · 影像已提交至本地流水线
+      </div>
+      <PipelineTrack
+        status="running"
+        :elapsed-ms="elapsedMs"
+        :error-message="null"
+      />
     </div>
 
     <!-- 阶段3：结果（失败分支） -->
     <div v-else-if="phase === 'result' && error !== null">
-      <h1 class="title-zine" data-t="处理失败">处理失败</h1>
-      <div class="lede">RESULT · 后端返回了真实错误信息</div>
-      <PipelineTrack status="error" :elapsed-ms="elapsedMs" :error-message="error" @retry="reset()" />
+      <h1
+        class="title-zine"
+        data-t="处理失败"
+      >
+        处理失败
+      </h1>
+      <div class="lede">
+        RESULT · 后端返回了真实错误信息
+      </div>
+      <PipelineTrack
+        status="error"
+        :elapsed-ms="elapsedMs"
+        :error-message="error"
+        @retry="reset()"
+      />
     </div>
 
     <!-- 阶段3：结果（成功 / 需复核 / 不可评片，均为后端真实输出） -->

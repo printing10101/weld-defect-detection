@@ -26,31 +26,63 @@ const STATUS_BADGE: Record<string, string> = {
   <div class="bp">
     <div class="bp-head">
       <div class="bp-bar">
-        <div class="bp-fill" :style="{ width: `${Math.round(status.progress * 100)}%` }"></div>
+        <div
+          class="bp-fill"
+          :style="{ width: `${Math.round(status.progress * 100)}%` }"
+        />
       </div>
       <div class="bp-meta">
         <span class="bp-pct">{{ Math.round(status.progress * 100) }}%</span>
         <span class="bp-counts">
           完成 {{ status.done }} / {{ status.total }}
-          <em v-if="status.failed" class="bp-fail">失败 {{ status.failed }}</em>
+          <em
+            v-if="status.failed"
+            class="bp-fail"
+          >失败 {{ status.failed }}</em>
           <em v-if="status.cancelled">取消 {{ status.cancelled }}</em>
         </span>
-        <span v-if="status.status === 'running'" class="bp-est">
+        <span
+          v-if="status.status === 'running'"
+          class="bp-est"
+        >
           预计剩余 ≈ {{ status.estimated_sec }}s
         </span>
-        <span v-else-if="status.status === 'finished'" class="bp-fin">已结束</span>
+        <span
+          v-else-if="status.status === 'finished'"
+          class="bp-fin"
+        >已结束</span>
       </div>
     </div>
 
     <div class="bp-tasks">
-      <div v-for="t in status.tasks" :key="t.task_id" class="bp-task">
-        <span class="bp-name" :title="t.error ?? undefined">{{ t.image_name }}</span>
-        <span class="bp-level" v-if="t.joint_level">级别 {{ t.joint_level }}</span>
-        <span class="bp-rev" v-else-if="t.need_review">需复核</span>
-        <span class="badge" :class="STATUS_BADGE[t.status] ?? 'badge-muted'">
+      <div
+        v-for="t in status.tasks"
+        :key="t.task_id"
+        class="bp-task"
+      >
+        <span
+          class="bp-name"
+          :title="t.error ?? undefined"
+        >{{ t.image_name }}</span>
+        <span
+          v-if="t.joint_level"
+          class="bp-level"
+        >级别 {{ t.joint_level }}</span>
+        <span
+          v-else-if="t.need_review"
+          class="bp-rev"
+        >需复核</span>
+        <span
+          class="badge"
+          :class="STATUS_BADGE[t.status] ?? 'badge-muted'"
+        >
           {{ TASK_STATUS_LABEL[t.status] ?? t.status }}
         </span>
-        <span v-if="t.error" class="bp-err" :title="t.error">⚠ {{ t.error }}</span>
+        <span
+          v-if="t.error"
+          class="bp-err"
+          :title="t.error"
+        >⚠ {{ t.error }}</span>
       </div>
     </div>
 
@@ -71,7 +103,13 @@ const STATUS_BADGE: Record<string, string> = {
       >
         重试失败 {{ status.failed }} 项 →
       </button>
-      <button type="button" class="btn ghost" @click="emit('archive')">去档案检索</button>
+      <button
+        type="button"
+        class="btn ghost"
+        @click="emit('archive')"
+      >
+        去档案检索
+      </button>
     </div>
   </div>
 </template>

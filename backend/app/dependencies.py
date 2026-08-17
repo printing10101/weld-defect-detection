@@ -295,8 +295,7 @@ class Registry:
                     pp = self.preprocessor
                     gamma = self.config.preprocess.gamma
 
-                    def pp_fn(gray):
-                        return pp.enhance(pp.denoise(gray), gamma)
+                    pp_fn = lambda gray: pp.enhance(pp.denoise(gray), gamma)
 
                 run_golden_evaluation(
                     model_id,

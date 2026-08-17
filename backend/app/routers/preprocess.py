@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from backend.app.auth import get_current_user
 from backend.app.dependencies import Registry, get_registry
 from backend.app.routers._common import staged_upload
-from backend.domain.preprocess.metrics import assess_quality, estimate_noise, psnr, ssim
+from backend.domain.preprocess.metrics import QualityCfg, assess_quality, estimate_noise, psnr, ssim
 from backend.infra.image_loader import load_image
 
 router = APIRouter(tags=["preprocess"], dependencies=[Depends(get_current_user)])
@@ -67,7 +67,7 @@ def _preprocess_sync(
         "noise_out": round(estimate_noise(enhanced), 3),
     }
     # §4.4 质量度量门禁（无参考）：BRISQUE 特征 + 复合 RQI 分。
-    quality = assess_quality(gray, reg.config.quality)
+    quality = assess_quality(gray, QualityCfg(**reg.config.quality.model_dump()))
     thumb = _thumbnail(enhanced)
     return PreprocessResponse(
         image_id=name,

@@ -53,10 +53,10 @@ class Nb47013Grader:
         needs_human = any(d.uncertainty > self.review_uncertainty for d in defects)
 
         if any(d.class_id in _ZERO_TOLERANCE for d in defects):
-            per = tuple(JointLevel.IV for _ in defects)
+            per_all = tuple(JointLevel.IV for _ in defects)
             return self._result(
                 JointLevel.IV,
-                per,
+                per_all,
                 ("NB/T47013.2-2015：裂纹/未熔合/未焊透在 I-III 级不允许（零容忍）",),
                 need_review=True,
             )
@@ -66,10 +66,10 @@ class Nb47013Grader:
         # 不依赖尺寸/点数（深孔属重大缺陷，与零容忍同级对待）。
         deep_holes = [d for d in defects if d.deep_hole]
         if deep_holes:
-            per = tuple(JointLevel.IV for _ in defects)
+            per_all = tuple(JointLevel.IV for _ in defects)
             return self._result(
                 JointLevel.IV,
-                per,
+                per_all,
                 ("NB/T47013.2-2015：深孔（黑度>母材）直判 IV（§6.2）",),
                 need_review=True,
             )

@@ -7,14 +7,20 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 from pathlib import Path
+from typing import Any
+
+_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 import yaml
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 
 _BASE = Path(__file__).resolve().parents[1] / "configs"
+_LOG = logging.getLogger("scandetection.config")
 
 
 class ServerCfg(BaseModel):
@@ -231,7 +237,9 @@ class MaskRefineCfg(BaseModel):
 
 
 class DetectCfg(BaseModel):
-    baseline_enabled: bool = True  # M4a 基线检测器开关（训练模型就绪后置 false）
+    # 安全默认 = 训练模型路径（缺失权重时按 allow_baseline_fallback 策略显式回退并记日志）。
+    # 原默认 True：一旦 default.yaml 缺键，会静默落 blob 基线而无人告警（§部署硬化 配置漂移）。
+    baseline_enabled: bool = False  # M4a 基线检测器开关；训练模型就绪后保持 false
     allow_baseline_fallback: bool = True  # 训练模型加载失败时是否回退基线（False=启动即失败）
     infer_conf: float = 0.3  # 推理置信度阈值（§T8：禁硬编码，统一入口）
     infer_iou: float = 0.5  # NMS IoU 阈值
@@ -358,6 +366,10 @@ def load_config() -> AppConfig:
             # 仅合并叶子字段（排除 'paths' 这类段级路径，避免把整段覆盖成字符串导致启动崩溃）
             if len(path) >= 2 and path in known:
                 _apply_env(raw, list(path), value)
+    # §部署硬化：启动期捕获配置漂移（schema 与 default.yaml 不一致 → 静默落默认的高危场景）
+    drift = validate_config_against_schema(raw)
+    if drift:
+        _LOG.error("配置漂移检测（%d 项）:\n  - %s", len(drift), "\n  - ".join(drift))
     return AppConfig(**raw)
 
 
@@ -386,6 +398,54 @@ def _apply_env(target: dict, keys: list[str], value: str) -> None:
             cur[k] = nxt
         cur = nxt
     cur[keys[-1]] = value
+
+
+def _leaf_paths(node: Any, prefix: tuple[str, ...] = ()) -> set[tuple[str, ...]]:
+    """递归收集配置树的叶子字段路径（如 ('detect','baseline_enabled')）。
+
+    分支判定：dict 且**所有键均为合法标识符**（即"配置段"，键为字段名）→ 继续下钻；
+    否则（标量 / list / 非标识符键的映射如 class_conf 的 {0:0.30,...}）→ 视为单个叶子。
+
+    这避免了 schema.yaml（用 `bool`/`str` 等类型注解作叶值）与 default.yaml
+    （用真实值，class_conf 是 int 键映射）在形状上的结构性误报：两侧都按
+    "标识符键=配置段、其余=单叶子" 归一化，路径精确对齐。
+    """
+    if isinstance(node, dict) and all(
+        isinstance(k, str) and _IDENT_RE.match(k) for k in node
+    ):
+        out: set[tuple[str, ...]] = set()
+        for k, v in node.items():
+            out |= _leaf_paths(v, prefix + (str(k),))
+        return out
+    # 叶子：标量 / list / 非标识符键映射（dict-of-scalars）一并视作单个配置键
+    return {prefix} if prefix else set()
+
+
+def validate_config_against_schema(raw: dict) -> list[str]:
+    """schema.yaml 是权威契约（§T8 三处同步）；与合并后的 raw 比对，返回漂移问题列表。
+
+    捕获两类漂移：
+    - ① schema 要求但 default.yaml 缺失 → 将静默落 pydantic 默认（如 baseline_enabled
+      缺键会无声发 blob 检测器），属高危；
+    - ② default.yaml 有但 schema 未登记 → 可能是新增键漏补 schema，仅告警。
+
+    非致命：仅返回问题列表由调用方记录（启动期 ERROR 可见，不阻断启动）。
+    新增键未补 schema 属渐进过程，不在此阻断；高危的①类缺失会被上层启动检查捕获。
+    """
+    schema_file = _BASE / "schema.yaml"
+    if not schema_file.exists():
+        return []
+    schema = yaml.safe_load(schema_file.read_text(encoding="utf-8")) or {}
+    expected = _leaf_paths(schema)
+    actual = _leaf_paths(raw)
+    issues: list[str] = []
+    for p in sorted(expected - actual):
+        issues.append(
+            f"schema 要求但 default.yaml 缺失: {'.'.join(p)} (将静默落 pydantic 默认)"
+        )
+    for p in sorted(actual - expected):
+        issues.append(f"default.yaml 存在但 schema.yaml 未登记: {'.'.join(p)} (新增键未补 schema?)")
+    return issues
 
 
 # 安装根目录锚点：backend/infra/config.py -> parents[2] = 安装根目录

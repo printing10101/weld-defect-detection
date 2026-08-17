@@ -20,6 +20,7 @@ const status = ref<BatchStatusOut | null>(null);
 const files = ref<File[]>([]);
 const activeBatchId = ref<string | null>(null);
 const submitError = ref<string | null>(null);
+const submitting = ref(false);
 const history = ref<BatchSummaryOut[]>([]);
 
 const pixelSpacingMm = ref("0.1000");
@@ -29,6 +30,17 @@ const weldNo = ref("");
 const force = ref(true);
 
 let timer: number | null = null;
+
+// 轮询健壮性（§D3）：连续失败退避 + 后端离线态，避免后端宕机时无限空转。
+const POLL_BASE_MS = 2000;
+const MAX_OFFLINE_STRIKES = 3;
+const pollErrorCount = ref(0);
+const backendDown = ref(false);
+
+function pollIntervalMs(): number {
+  // 连续失败指数退避：2s → 4s → 8s（上限），恢复即回 2s
+  return Math.min(POLL_BASE_MS * 2 ** pollErrorCount.value, 8000);
+}
 
 /* ── 历史批次 ── */
 async function refreshHistory(): Promise<void> {
@@ -115,6 +127,8 @@ function onSubmit(): void {
 }
 
 async function doSubmit(fd: FormData): Promise<void> {
+  if (submitting.value) return; // 防双击重复提交（§D2）
+  submitting.value = true;
   try {
     const out = await submitBatch(fd);
     activeBatchId.value = out.batch_id;
@@ -122,12 +136,20 @@ async function doSubmit(fd: FormData): Promise<void> {
     startPolling(out.batch_id);
   } catch (e) {
     submitError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    submitting.value = false;
   }
 }
 
-function startPolling(id: string): void {
+function scheduleTick(id: string): void {
   stopPolling();
-  timer = window.setInterval(() => void tick(id), 2000);
+  timer = window.setInterval(() => void tick(id), pollIntervalMs());
+}
+
+function startPolling(id: string): void {
+  backendDown.value = false;
+  pollErrorCount.value = 0;
+  scheduleTick(id);
   void tick(id);
 }
 
@@ -142,14 +164,27 @@ async function tick(id: string): Promise<void> {
   try {
     const s = await getBatchStatus(id);
     status.value = s;
+    pollErrorCount.value = 0;
+    backendDown.value = false;
     if (s.status === "finished") {
       stopPolling();
       phase.value = "result";
       void refreshHistory();
     }
   } catch {
-    /* 单次轮询失败忽略，下轮重试 */
+    // 单次轮询失败：累计并退避；超过阈值判定后端离线，停止空转并提示。
+    pollErrorCount.value += 1;
+    if (pollErrorCount.value >= MAX_OFFLINE_STRIKES) {
+      backendDown.value = true;
+      stopPolling();
+    } else {
+      scheduleTick(id); // 以更长间隔重排
+    }
   }
+}
+
+function retryConnection(): void {
+  if (activeBatchId.value) startPolling(activeBatchId.value);
 }
 
 async function onCancel(): Promise<void> {
@@ -200,23 +235,42 @@ onUnmounted(() => {
 
 <template>
   <div>
-    <h1 class="title-zine" data-t="批量检测">批量检测</h1>
-    <div class="lede">BATCH · 多底片导入 · 并行推理 · 断点续跑</div>
+    <h1
+      class="title-zine"
+      data-t="批量检测"
+    >
+      批量检测
+    </h1>
+    <div class="lede">
+      BATCH · 多底片导入 · 并行推理 · 断点续跑
+    </div>
 
     <!-- 阶段1：选择文件与参数 -->
     <div v-if="phase === 'upload'">
       <div class="guide">
         <div class="g">
-          <div class="n">一 · 导入底片</div>
-          <div class="t">选择多个文件或整个文件夹（.dcm / .png / .tif / .tiff），单批 ≤ {{ MAX_PER_BATCH }} 张。</div>
+          <div class="n">
+            一 · 导入底片
+          </div>
+          <div class="t">
+            选择多个文件或整个文件夹（.dcm / .png / .tif / .tiff），单批 ≤ {{ MAX_PER_BATCH }} 张。
+          </div>
         </div>
         <div class="g">
-          <div class="n">二 · 公共参数</div>
-          <div class="t">母材厚度 T 必填，应用到批内所有底片；不合格底片默认强制出片并标记「需复核」。</div>
+          <div class="n">
+            二 · 公共参数
+          </div>
+          <div class="t">
+            母材厚度 T 必填，应用到批内所有底片；不合格底片默认强制出片并标记「需复核」。
+          </div>
         </div>
         <div class="g">
-          <div class="n">三 · 异步执行</div>
-          <div class="t">提交后立即返回批次号，多 worker 并行推理，页面实时显示进度。</div>
+          <div class="n">
+            三 · 异步执行
+          </div>
+          <div class="t">
+            提交后立即返回批次号，多 worker 并行推理，页面实时显示进度。
+          </div>
         </div>
       </div>
 
@@ -227,10 +281,19 @@ onUnmounted(() => {
             <span class="chip on">PNG</span>
             <span class="chip on">TIFF</span>
           </div>
-          <div class="hint">文件夹导入会递归收集子目录影像；非影像文件自动跳过。</div>
-          <div class="drop" @click="openFilePicker">
-            <div class="big">拖入请点此：选择底片文件</div>
-            <div class="hint">支持 Ctrl/Shift 多选；影像只在本机处理</div>
+          <div class="hint">
+            文件夹导入会递归收集子目录影像；非影像文件自动跳过。
+          </div>
+          <div
+            class="drop"
+            @click="openFilePicker"
+          >
+            <div class="big">
+              拖入请点此：选择底片文件
+            </div>
+            <div class="hint">
+              支持 Ctrl/Shift 多选；影像只在本机处理
+            </div>
           </div>
           <input
             id="pick-files"
@@ -239,8 +302,12 @@ onUnmounted(() => {
             multiple
             style="display: none"
             @change="pickFiles(($event.target as HTMLInputElement).files)"
-          />
-          <button type="button" class="btn ghost" @click="openDirPicker">
+          >
+          <button
+            type="button"
+            class="btn ghost"
+            @click="openDirPicker"
+          >
             或选择整个文件夹…
           </button>
           <input
@@ -250,41 +317,78 @@ onUnmounted(() => {
             multiple
             style="display: none"
             @change="pickFiles(($event.target as HTMLInputElement).files)"
-          />
-          <div v-if="files.length" class="preview show">
-            <div class="meta">{{ fileSummary() }}</div>
+          >
+          <div
+            v-if="files.length"
+            class="preview show"
+          >
+            <div class="meta">
+              {{ fileSummary() }}
+            </div>
             <div class="meta faint">
               {{ files.slice(0, 8).map((f) => f.name).join("、") }}<span v-if="files.length > 8">…</span>
             </div>
           </div>
-          <div v-if="submitError" class="err show">⚠ {{ submitError }}</div>
+          <div
+            v-if="submitError"
+            class="err show"
+          >
+            ⚠ {{ submitError }}
+          </div>
         </div>
 
         <div class="grow">
           <div class="field">
             <label for="spacing">像素标定（mm/px）</label>
-            <input id="spacing" v-model="pixelSpacingMm" />
-            <div class="why">默认 0.1000 mm/px；用于把像素尺寸换算为真实当量。</div>
+            <input
+              id="spacing"
+              v-model="pixelSpacingMm"
+            >
+            <div class="why">
+              默认 0.1000 mm/px；用于把像素尺寸换算为真实当量。
+            </div>
           </div>
           <div class="field">
             <label for="thick">母材厚度 T（mm）<span class="req">*</span></label>
-            <input id="thick" v-model="baseMetalThicknessMm" placeholder="如 20" />
-            <div class="why">评级必须（NB/T47013.2 按 T 分档评定区与限值），应用到批内所有底片。</div>
+            <input
+              id="thick"
+              v-model="baseMetalThicknessMm"
+              placeholder="如 20"
+            >
+            <div class="why">
+              评级必须（NB/T47013.2 按 T 分档评定区与限值），应用到批内所有底片。
+            </div>
           </div>
           <div class="field">
             <label for="wp">工件号（可选）</label>
-            <input id="wp" v-model="workpieceNo" placeholder="如 WP-7781" />
+            <input
+              id="wp"
+              v-model="workpieceNo"
+              placeholder="如 WP-7781"
+            >
           </div>
           <div class="field">
             <label for="wn">焊口编号（可选）</label>
-            <input id="wn" v-model="weldNo" placeholder="如 W-12" />
+            <input
+              id="wn"
+              v-model="weldNo"
+              placeholder="如 W-12"
+            >
           </div>
           <label class="check">
-            <input v-model="force" type="checkbox" />
+            <input
+              v-model="force"
+              type="checkbox"
+            >
             强制出片（不合格底片标记「需复核」并继续，不阻断整批）
           </label>
-          <button class="btn" type="button" :disabled="files.length === 0" @click="onSubmit">
-            提交批量检测 →
+          <button
+            class="btn"
+            type="button"
+            :disabled="files.length === 0 || submitting"
+            @click="onSubmit"
+          >
+            {{ submitting ? "提交中…" : "提交批量检测 →" }}
           </button>
         </div>
       </div>
@@ -292,10 +396,31 @@ onUnmounted(() => {
 
     <!-- 阶段2/3：进度与结果 -->
     <div v-else>
-      <div class="sec-label" data-t="BATCH {{ activeBatchId ? activeBatchId.slice(0, 8) : '' }}">
+      <div
+        v-if="backendDown"
+        class="err show"
+      >
+        ⚠ 后端无响应，已暂停进度轮询。<button
+          class="btn link"
+          type="button"
+          @click="retryConnection"
+        >
+          重试连接
+        </button>
+      </div>
+      <div
+        class="sec-label"
+        data-t="BATCH {{ activeBatchId ? activeBatchId.slice(0, 8) : '' }}"
+      >
         批次 {{ activeBatchId ? activeBatchId.slice(0, 8) : "" }}
-        <span v-if="phase === 'running'" class="sec-state run">执行中</span>
-        <span v-else class="sec-state fin">已结束</span>
+        <span
+          v-if="phase === 'running'"
+          class="sec-state run"
+        >执行中</span>
+        <span
+          v-else
+          class="sec-state fin"
+        >已结束</span>
       </div>
       <BatchProgress
         v-if="status"
@@ -304,15 +429,36 @@ onUnmounted(() => {
         @retry="onRetry"
         @archive="emit('archive')"
       />
-      <div v-if="phase === 'result'" class="row" style="margin-top: 14px">
-        <button type="button" class="btn" @click="reset()">新批次 →</button>
-        <button type="button" class="btn ghost" @click="emit('archive')">去档案检索</button>
+      <div
+        v-if="phase === 'result'"
+        class="row"
+        style="margin-top: 14px"
+      >
+        <button
+          type="button"
+          class="btn"
+          @click="reset()"
+        >
+          新批次 →
+        </button>
+        <button
+          type="button"
+          class="btn ghost"
+          @click="emit('archive')"
+        >
+          去档案检索
+        </button>
       </div>
     </div>
 
     <!-- 历史批次（断点续跑入口） -->
-    <div v-if="history.length" class="hist">
-      <div class="section-h">历史批次</div>
+    <div
+      v-if="history.length"
+      class="hist"
+    >
+      <div class="section-h">
+        历史批次
+      </div>
       <div class="hist-list">
         <button
           v-for="row in history"
@@ -326,9 +472,15 @@ onUnmounted(() => {
           <span class="h-time">{{ row.created_at }}</span>
           <span class="h-prog">{{ Math.round(row.progress * 100) }}%</span>
           <span class="h-counts">
-            {{ row.done }}/{{ row.total }}<em v-if="row.failed" class="h-fail"> 败{{ row.failed }}</em>
+            {{ row.done }}/{{ row.total }}<em
+              v-if="row.failed"
+              class="h-fail"
+            > 败{{ row.failed }}</em>
           </span>
-          <span class="h-status" :class="row.status">{{ row.status === "finished" ? "完成" : "进行中" }}</span>
+          <span
+            class="h-status"
+            :class="row.status"
+          >{{ row.status === "finished" ? "完成" : "进行中" }}</span>
         </button>
       </div>
     </div>

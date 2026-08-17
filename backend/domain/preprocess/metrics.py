@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 import cv2
 import numpy as np
@@ -125,7 +126,7 @@ def _ggd_params(x: np.ndarray) -> tuple[float, float]:
         return (_gamma(2.0 / a) ** 2) / (_gamma(1.0 / a) * _gamma(3.0 / a)) - r
 
     try:
-        alpha = brentq(_f, 0.2, 10.0)
+        alpha = cast(float, brentq(_f, 0.2, 10.0))
     except ValueError:
         alpha = 1.0
     return float(alpha), float(np.sqrt(m2))
@@ -157,7 +158,7 @@ def _aggd_params(x: np.ndarray) -> tuple[float, float, float, float]:
         return (u * u + 3.0 * v * v) / 4.0 * g3 - sigma2
 
     try:
-        alpha = brentq(_solve_alpha, 0.2, 10.0)
+        alpha = cast(float, brentq(_solve_alpha, 0.2, 10.0))
     except ValueError:
         alpha = 1.0
     g2 = _gamma(2.0 / alpha) / _gamma(1.0 / alpha)
@@ -275,7 +276,7 @@ def _artifact_score(gray: np.ndarray, cfg: QualityCfg) -> float:
         g, cv2.MORPH_TOPHAT, np.ones((cfg.dust_tophat_k, cfg.dust_tophat_k), np.uint8)
     )
     _, b = cv2.threshold(tophat, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    n, _, stats, _ = cv2.connectedComponentsWithStats(b, 8)
+    n, _, stats, _ = cv2.connectedComponentsWithStats(b, connectivity=8)
     count = sum(1 for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= cfg.dust_min_area)
     if count <= cfg.dust_max_count:
         return 1.0 - 0.5 * _clip01(count / cfg.dust_max_count)

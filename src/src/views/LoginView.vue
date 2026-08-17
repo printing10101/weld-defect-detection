@@ -29,13 +29,28 @@ async function submit() {
 
 <template>
   <div class="login-wrap">
-    <form class="login-card" @submit.prevent="submit">
-      <div class="brand"><span class="mark" aria-hidden="true"></span> 射线评片</div>
-      <p class="sub">焊缝缺陷智能检测 · NB/T47013.2-2015</p>
+    <form
+      class="login-card"
+      @submit.prevent="submit"
+    >
+      <div class="brand">
+        <span
+          class="mark"
+          aria-hidden="true"
+        /> 射线评片
+      </div>
+      <p class="sub">
+        焊缝缺陷智能检测 · NB/T47013.2-2015
+      </p>
 
       <label class="field">
         <span>用户名</span>
-        <input v-model="username" type="text" autocomplete="username" :disabled="busy" />
+        <input
+          v-model="username"
+          type="text"
+          autocomplete="username"
+          :disabled="busy"
+        >
       </label>
       <label class="field">
         <span>密码</span>
@@ -44,12 +59,20 @@ async function submit() {
           type="password"
           autocomplete="current-password"
           :disabled="busy"
-        />
+        >
       </label>
 
-      <p v-if="error" class="err">{{ error }}</p>
+      <p
+        v-if="error"
+        class="err"
+      >
+        {{ error }}
+      </p>
 
-      <button type="submit" :disabled="busy || !username || !password">
+      <button
+        type="submit"
+        :disabled="busy || !username || !password"
+      >
         {{ busy ? "登录中…" : "登 录" }}
       </button>
     </form>

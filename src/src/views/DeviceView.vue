@@ -121,31 +121,62 @@ onMounted(() => {
 
 <template>
   <div>
-    <h1 class="title-zine" data-t="设备标定">设备标定</h1>
-    <div class="lede">DEVICE · 标定档案 · 跨设备一致率 ≤ 5%</div>
+    <h1
+      class="title-zine"
+      data-t="设备标定"
+    >
+      设备标定
+    </h1>
+    <div class="lede">
+      DEVICE · 标定档案 · 跨设备一致率 ≤ 5%
+    </div>
 
     <div class="guide">
       <div class="g">
-        <div class="n">一 · 注册设备</div>
-        <div class="t">登记检测设备（名称/型号/序列号），作为标定档案主体。</div>
+        <div class="n">
+          一 · 注册设备
+        </div>
+        <div class="t">
+          登记检测设备（名称/型号/序列号），作为标定档案主体。
+        </div>
       </div>
       <div class="g">
-        <div class="n">二 · 标定录入</div>
-        <div class="t">实测像素标定与标定件参考值比对，系统计算相对偏差：≤5% 达标，超差标记「over」。</div>
+        <div class="n">
+          二 · 标定录入
+        </div>
+        <div class="t">
+          实测像素标定与标定件参考值比对，系统计算相对偏差：≤5% 达标，超差标记「over」。
+        </div>
       </div>
       <div class="g">
-        <div class="n">三 · 一致性档案</div>
-        <div class="t">每次标定留档（操作员/时间/偏差），跨设备筛查前可核对设备状态。</div>
+        <div class="n">
+          三 · 一致性档案
+        </div>
+        <div class="t">
+          每次标定留档（操作员/时间/偏差），跨设备筛查前可核对设备状态。
+        </div>
       </div>
     </div>
 
-    <div v-if="error" class="err show">⚠ {{ error }}</div>
-    <div v-if="info" class="ok show">{{ info }}</div>
+    <div
+      v-if="error"
+      class="err show"
+    >
+      ⚠ {{ error }}
+    </div>
+    <div
+      v-if="info"
+      class="ok show"
+    >
+      {{ info }}
+    </div>
 
     <div class="row">
       <!-- 左：设备列表 + 注册 -->
       <div class="grow">
-        <div class="section-h">设备</div>
+        <div class="section-h">
+          设备
+        </div>
         <div class="dev-list">
           <button
             v-for="d in devices"
@@ -164,29 +195,63 @@ onMounted(() => {
             >
               {{ d.last_calibration.status === "over" ? "超差" : "达标" }}
             </span>
-            <span v-else class="cal-badge none">未标定</span>
+            <span
+              v-else
+              class="cal-badge none"
+            >未标定</span>
           </button>
-          <div v-if="devices.length === 0" class="hint">尚未注册设备。</div>
+          <div
+            v-if="devices.length === 0"
+            class="hint"
+          >
+            尚未注册设备。
+          </div>
         </div>
 
-        <div class="section-h" style="margin-top: 18px">注册设备</div>
+        <div
+          class="section-h"
+          style="margin-top: 18px"
+        >
+          注册设备
+        </div>
         <div class="field">
           <label for="dn">设备名称 <span class="req">*</span></label>
-          <input id="dn" v-model="regName" placeholder="如 CR-01" />
+          <input
+            id="dn"
+            v-model="regName"
+            placeholder="如 CR-01"
+          >
         </div>
         <div class="field">
           <label for="dm">型号</label>
-          <input id="dm" v-model="regModel" placeholder="如 X-Ray 3000" />
+          <input
+            id="dm"
+            v-model="regModel"
+            placeholder="如 X-Ray 3000"
+          >
         </div>
         <div class="field">
           <label for="ds">序列号</label>
-          <input id="ds" v-model="regSerial" placeholder="如 SN-001" />
+          <input
+            id="ds"
+            v-model="regSerial"
+            placeholder="如 SN-001"
+          >
         </div>
         <div class="field">
           <label for="dnotes">备注</label>
-          <input id="dnotes" v-model="regNotes" />
+          <input
+            id="dnotes"
+            v-model="regNotes"
+          >
         </div>
-        <button class="btn" type="button" @click="doRegister">注册设备 →</button>
+        <button
+          class="btn"
+          type="button"
+          @click="doRegister"
+        >
+          注册设备 →
+        </button>
       </div>
 
       <!-- 右：选中设备详情 + 标定向导 -->
@@ -196,7 +261,10 @@ onMounted(() => {
             {{ detail.name }}
             <span class="sub">{{ detail.model || "" }} {{ detail.serial_no || "" }}</span>
           </div>
-          <div class="cal-status" :class="detail.calibration_count ? 'has' : ''">
+          <div
+            class="cal-status"
+            :class="detail.calibration_count ? 'has' : ''"
+          >
             标定 {{ detail.calibration_count }} 次
             <template v-if="lastCal()">
               · 最近 {{ lastCal()!.calibrated_at }} 由 {{ lastCal()!.calibrator }}
@@ -207,48 +275,107 @@ onMounted(() => {
             </template>
           </div>
 
-          <div class="section-h" style="margin-top: 16px">录入标定</div>
+          <div
+            class="section-h"
+            style="margin-top: 16px"
+          >
+            录入标定
+          </div>
           <div class="field">
             <label for="cal1">标定员 <span class="req">*</span></label>
-            <input id="cal1" v-model="calCalibrator" placeholder="姓名/工号" />
+            <input
+              id="cal1"
+              v-model="calCalibrator"
+              placeholder="姓名/工号"
+            >
           </div>
           <div class="field">
             <label for="cal2">实测像素标定（mm/px）<span class="req">*</span></label>
-            <input id="cal2" v-model="calPixelSpacing" placeholder="如 0.1000" />
-            <div class="why">该设备的实测标定值；检测提交时作为像素标定默认参考。</div>
+            <input
+              id="cal2"
+              v-model="calPixelSpacing"
+              placeholder="如 0.1000"
+            >
+            <div class="why">
+              该设备的实测标定值；检测提交时作为像素标定默认参考。
+            </div>
           </div>
           <div class="field">
             <label for="cal3">标定件参考值（mm/px）</label>
-            <input id="cal3" v-model="calRefSpacing" placeholder="如 0.1000" />
-            <div class="why">跨设备一致性基准；填后自动计算相对偏差并判定 ≤5%。</div>
+            <input
+              id="cal3"
+              v-model="calRefSpacing"
+              placeholder="如 0.1000"
+            >
+            <div class="why">
+              跨设备一致性基准；填后自动计算相对偏差并判定 ≤5%。
+            </div>
           </div>
           <div class="field">
             <label for="cal4">黑度校验值（可选）</label>
-            <input id="cal4" v-model="calDensity" placeholder="如 2.4" />
+            <input
+              id="cal4"
+              v-model="calDensity"
+              placeholder="如 2.4"
+            >
           </div>
           <div class="field">
             <label for="cal5">备注</label>
-            <input id="cal5" v-model="calNotes" />
+            <input
+              id="cal5"
+              v-model="calNotes"
+            >
           </div>
-          <button class="btn" type="button" @click="doCalibrate">记录标定 →</button>
+          <button
+            class="btn"
+            type="button"
+            @click="doCalibrate"
+          >
+            记录标定 →
+          </button>
 
-          <div class="section-h" style="margin-top: 18px">标定档案</div>
+          <div
+            class="section-h"
+            style="margin-top: 18px"
+          >
+            标定档案
+          </div>
           <div class="hist-list">
-            <div v-for="c in detail.calibrations" :key="c.calibration_id" class="cal-row">
+            <div
+              v-for="c in detail.calibrations"
+              :key="c.calibration_id"
+              class="cal-row"
+            >
               <span class="c-time">{{ c.calibrated_at }}</span>
               <span class="c-who">{{ c.calibrator }}</span>
               <span class="c-val">{{ c.pixel_spacing_mm }} mm/px</span>
-              <span v-if="c.deviation_pct !== null" class="c-dev" :class="c.status">
+              <span
+                v-if="c.deviation_pct !== null"
+                class="c-dev"
+                :class="c.status"
+              >
                 偏差 {{ c.deviation_pct }}%
               </span>
-              <span class="c-badge" :class="c.status">
+              <span
+                class="c-badge"
+                :class="c.status"
+              >
                 {{ c.status === "over" ? "超差" : "达标" }}
               </span>
             </div>
-            <div v-if="detail.calibrations.length === 0" class="hint">尚无标定记录。</div>
+            <div
+              v-if="detail.calibrations.length === 0"
+              class="hint"
+            >
+              尚无标定记录。
+            </div>
           </div>
         </template>
-        <div v-else class="hint" style="margin-top: 20px">
+        <div
+          v-else
+          class="hint"
+          style="margin-top: 20px"
+        >
           从左侧选择设备查看档案，或先注册一台设备。
         </div>
       </div>

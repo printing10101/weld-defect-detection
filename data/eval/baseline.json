@@ -1,14 +1,44 @@
 {
-  "mAP50": 0.4747,
-  "recall": 0.7879,
-  "precision": 0.1086,
-  "gt_total": 33,
+  "mAP50": 0.1496,
+  "recall": 0.3289,
+  "precision": 0.0151,
+  "gt_total": 76,
   "by_class": {
     "0": {
-      "ap50": 0.4747,
-      "recall": 0.7879,
-      "precision": 0.1086,
-      "gt_count": 33
+      "ap50": 0.3789,
+      "recall": 0.8333,
+      "precision": 0.0382,
+      "gt_count": 30
+    },
+    "5": {
+      "ap50": 0.0,
+      "recall": 0.0,
+      "precision": 0.0,
+      "gt_count": 10
+    },
+    "3": {
+      "ap50": 0.0,
+      "recall": 0.0,
+      "precision": 0.0,
+      "gt_count": 7
+    },
+    "4": {
+      "ap50": 0.0,
+      "recall": 0.0,
+      "precision": 0.0,
+      "gt_count": 11
+    },
+    "1": {
+      "ap50": 0.0,
+      "recall": 0.0,
+      "precision": 0.0,
+      "gt_count": 6
+    },
+    "2": {
+      "ap50": 0.0,
+      "recall": 0.0,
+      "precision": 0.0,
+      "gt_count": 12
     }
   }
 }

@@ -169,7 +169,7 @@ def _locate_template(
     rows = np.where(mask > 0)[0]
     if rows.size == 0:
         return None
-    y0, y1 = rows.min(), rows.max()  # numpy ints; 下游切片/算术均兼容
+    y0, y1 = int(rows.min()), int(rows.max())  # numpy ints; 下游切片/算术均兼容
     if (y1 - y0) < 2:
         return None
     if kind == "hole":

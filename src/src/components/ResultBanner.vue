@@ -45,8 +45,13 @@ const reason = computed<string>(() => {
 </script>
 
 <template>
-  <div class="banner" :class="tone">
-    <div class="lv">{{ levelText }}</div>
+  <div
+    class="banner"
+    :class="tone"
+  >
+    <div class="lv">
+      {{ levelText }}
+    </div>
     <div class="con">
       <b>{{ conclusion }}</b>
       <span class="why">{{ reason }}</span>

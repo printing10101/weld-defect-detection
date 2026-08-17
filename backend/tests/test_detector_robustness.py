@@ -41,6 +41,7 @@ def test_imagemeta_density_array_annotation_resolves() -> None:
     assert np.ndarray in args
     assert type(None) in args
     meta = ImageMeta(modality=Modality.GENERIC, density_array=np.zeros((4, 4), np.uint16))
+    assert meta.density_array is not None
     assert meta.density_array.shape == (4, 4)
 
 

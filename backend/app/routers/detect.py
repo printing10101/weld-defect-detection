@@ -21,6 +21,7 @@ from backend.app.auth import get_current_user
 from backend.app.dependencies import Registry, get_registry
 from backend.app.routers._common import staged_upload
 from backend.domain.quantify import MaskQuantifier, refine_detections
+from backend.domain.quantify import MaskRefineCfg as DomainMaskRefineCfg
 from backend.infra.image_loader import load_image
 
 router = APIRouter(tags=["detect"], dependencies=[Depends(get_current_user)])
@@ -94,7 +95,7 @@ def _detect_sync(
         enhanced = pp.enhance(pp.denoise(gray), pp_cfg.gamma)
     spacing = pixel_spacing_mm or meta.pixel_spacing_mm or 1.0
     detections = reg.detector.infer(enhanced, conf=conf_v, iou=iou_v, class_conf=dc.class_conf)
-    mrc = reg.config.mask_refine
+    mrc = DomainMaskRefineCfg(**reg.config.mask_refine.model_dump())
     refined = refine_detections(enhanced, detections, mrc)
     mq = MaskQuantifier()
 

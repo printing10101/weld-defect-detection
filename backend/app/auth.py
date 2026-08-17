@@ -25,7 +25,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Request
 
@@ -89,6 +89,11 @@ def resolve_auth_secret(data_dir: str) -> str:
         key = secrets.token_hex(32)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(key, encoding="utf-8")
+        # 密钥文件强制 0600，避免同机其它用户读取后伪造令牌
+        try:
+            os.chmod(p, 0o600)
+        except OSError:
+            pass
         _LOG.warning("生成持久化鉴权密钥 %s（首次启动；生产请用 SCAN_AUTH_SECRET 注入）", p)
         return key
     except Exception:  # noqa: BLE001 - 密钥文件不可用则降为临时密钥（重启失效，仅开发）
@@ -225,7 +230,7 @@ def require_roles(*roles: str):
 # ---------------------------------------------------------------------------
 # 鉴权辅助（app 层）
 # ---------------------------------------------------------------------------
-def authenticate_user(repository, username: str, password: str) -> dict | None:
+def authenticate_user(repository, username: str, password: str) -> dict[str, Any] | None:
     """校验用户名+密码；成功返回用户 dict，失败/禁用返回 None（恒定时间对外不暴露原因）。"""
     user = repository.get_user_by_username(username)
     if user is None or user.get("disabled"):

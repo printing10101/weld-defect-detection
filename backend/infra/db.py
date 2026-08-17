@@ -64,6 +64,9 @@ class ImageRecord(Base):
     need_review: Mapped[bool] = mapped_column(default=False)
     standard_id: Mapped[str | None] = mapped_column(String(64), default=None)
     standard_version: Mapped[str | None] = mapped_column(String(16), default=None)
+    batch_no: Mapped[str | None] = mapped_column(
+        String(64), default=None, index=True
+    )  # 批量追溯（P1-F）：所属批次号（batch 导入/复评批次）
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
@@ -92,6 +95,9 @@ class DefectRecord(Base):
     reviewed_by: Mapped[str | None] = mapped_column(String(64), default=None)
     standard_id: Mapped[str | None] = mapped_column(String(64), default=None)
     standard_version: Mapped[str | None] = mapped_column(String(16), default=None)
+    disposition: Mapped[str | None] = mapped_column(
+        String(16), default=None
+    )  # 处置建议（P0-E/P1-F）：accept | conditional | rework | recheck（机器可读）
 
 
 class ReportRecord(Base):

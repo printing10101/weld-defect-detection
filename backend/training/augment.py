@@ -44,6 +44,42 @@ def build_xray_augment() -> object:
     )
 
 
+def build_multiscale_augment(
+    min_scale: float = 0.6,
+    max_scale: float = 1.4,
+    target_hw: tuple[int, int] = (640, 640),
+    p: float = 0.5,
+) -> object:
+    """多尺度训练增强（P1-A，借鉴 LF-YOLO 多尺度策略）。
+
+    随机缩放（0.6~1.4x）+ 中心裁剪/填充回固定训练尺寸，迫使网络学习
+    尺度不变的缺陷表征（尤其小目标气孔与细长裂纹），再叠加常规 X 光增强。
+    供离线预增强或诊断使用；YOLO bbox 标签随变换自动更新。
+    """
+    try:
+        import albumentations as A
+    except ImportError as e:  # pragma: no cover
+        raise RuntimeError("请先安装 albumentations: pip install albumentations") from e
+    h, w = target_hw
+    return A.Compose(
+        [
+            A.RandomScale(scale_limit=(min_scale - 1.0, max_scale - 1.0), p=p),
+            A.PadIfNeeded(
+                min_height=h,
+                min_width=w,
+                border_mode=cv2.BORDER_CONSTANT,
+                value=114,
+            ),
+            A.RandomCrop(height=h, width=w, p=1.0),
+            A.CLAHE(clip_limit=2.0, tile_grid_size=(8, 8), p=0.5),
+            A.GaussianBlur(blur_limit=(3, 5), p=0.3),
+            A.GaussNoise(var_limit=(5.0, 30.0), p=0.4),
+            A.HorizontalFlip(p=0.5),
+        ],
+        bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"]),
+    )
+
+
 def _read_gray(path: Path | str):
     """稳健读取为 2D 灰度。
 
@@ -154,7 +190,11 @@ def generate_copy_paste(
             if not all_labels:
                 continue
             out_name = f"cp_{made:06d}_{src_img.stem}_x_{tgt_path.stem}.png"
-            cv2.imwrite(str(out_img / out_name), out)
+            # cv2.imwrite 在含中文的绝对路径下会静默失败（与 _read_gray 对称的中文路径安全写入）
+            ok, buf = cv2.imencode(".png", out)
+            if not ok:
+                continue
+            (out_img / out_name).write_bytes(buf.tobytes())
             (out_lbl / (Path(out_name).stem + ".txt")).write_text("\n".join(all_labels))
             made += 1
     print(f"[augment] copy-paste 生成 {made} 张 → {out_dir}")
@@ -272,7 +312,11 @@ def generate_rare_copy_paste(
             if not all_labels:
                 continue
             out_name = f"rcp_{made:06d}_{src_img.stem}_x_{tgt_path.stem}.png"
-            cv2.imwrite(str(out_img / out_name), out)
+            # cv2.imwrite 在含中文的绝对路径下会静默失败（与 _read_gray 对称的中文路径安全写入）
+            ok, buf = cv2.imencode(".png", out)
+            if not ok:
+                continue
+            (out_img / out_name).write_bytes(buf.tobytes())
             (out_lbl / (Path(out_name).stem + ".txt")).write_text("\n".join(all_labels))
             made += 1
     print(f"[augment] rare copy-paste 生成 {made} 张 → {out_dir}")

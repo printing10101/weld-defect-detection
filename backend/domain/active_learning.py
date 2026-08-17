@@ -145,7 +145,8 @@ def export_training_labels(
     for d in detections:
         cid = class_overrides.get(d.id) if class_overrides else None
         lines.append(to_yolo_label(d, image_w, image_h, class_id_override=cid))
-    out = root / f"{image_stem}.txt"
+    # 仅取文件名成分，杜绝 image_stem 含 ".."/绝对路径导致的目录穿越（纵深防御）
+    out = root / f"{Path(image_stem).name}.txt"
     out.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
     return out
 

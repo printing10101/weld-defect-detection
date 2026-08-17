@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """将已训练模型导出为 ONNX 并放入安装包的模型加载路径。
 
-- 源：data/real_label/runs/real_synth2/weights/best.pt（6 类，中文类名，与 DefectClass 对齐）
+- 源：data/real_label/runs/yolo8n_real_rare/train2/weights/best.pt（6 类，方案A 部署模型）
 - 目标：_pkg/ScanDetection/models/weights/best.onnx 与 _pkg/ScanDetection/backend/models/weights/best.onnx
 - 沿用 backend/models/train.py 的 legacy 导出器 monkeypatch，规避 torch>=2.9 dynamo 卡死。
 
@@ -24,7 +24,9 @@ except Exception:
     pass
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_SRC = ROOT / "data" / "real_label" / "runs" / "yolo8n_real_rare" / "train" / "weights" / "best.pt"
+# 默认源：方案A 验收通过并实际部署的模型（yolo8n_real_rare/train2，"合成最大化"重训，
+# 裂纹 0→17）。早期 train/ 版本裂纹候选为 0，已废弃，勿再作为默认源。
+DEFAULT_SRC = ROOT / "data" / "real_label" / "runs" / "yolo8n_real_rare" / "train2" / "weights" / "best.pt"
 DEFAULT_PKG = ROOT / "_pkg" / "ScanDetection"
 
 

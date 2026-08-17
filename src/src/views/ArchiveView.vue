@@ -15,6 +15,9 @@ const err = ref<string | null>(null);
 const resp = ref<RecordsResponse | null>(null);
 const level = ref("");
 const workpiece = ref("");
+const page = ref(1);
+const pageSize = ref(50);
+const total = ref(0);
 
 // 主动学习训练池（M7）
 const poolLoading = ref(true);
@@ -35,12 +38,14 @@ async function load(): Promise<void> {
   loading.value = true;
   err.value = null;
   try {
-    resp.value = await listRecords({
+    const r = await listRecords({
       level: level.value || undefined,
       workpiece: workpiece.value || undefined,
-      page: 1,
-      size: 50,
+      page: page.value,
+      size: pageSize.value,
     });
+    resp.value = r;
+    total.value = r.total;
   } catch (e) {
     err.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -65,6 +70,14 @@ watch(
 );
 
 function onFilter(): void {
+  page.value = 1; // 重新过滤回到首页
+  void load();
+}
+
+function gotoPage(p: number): void {
+  const last = Math.max(1, Math.ceil(total.value / pageSize.value));
+  if (p < 1 || p > last) return;
+  page.value = p;
   void load();
 }
 
@@ -73,14 +86,33 @@ const levelOptions = ["", "I", "II", "III", "IV"] as const;
 
 <template>
   <div>
-    <h1 class="title-zine" data-t="档案检索">档案检索</h1>
-    <div class="lede">RECORDS · 处理结果自动归档，可随时回来查看（真实后端数据）</div>
+    <h1
+      class="title-zine"
+      data-t="档案检索"
+    >
+      档案检索
+    </h1>
+    <div class="lede">
+      RECORDS · 处理结果自动归档，可随时回来查看（真实后端数据）
+    </div>
 
     <!-- 主动学习训练池（M7） -->
     <section class="pool">
-      <h2 class="pool-title">主动学习训练池</h2>
-      <p v-if="poolLoading" class="hint">加载中…</p>
-      <p v-else-if="!pool" class="hint">训练池暂不可用（后端未装配或目录不存在）。</p>
+      <h2 class="pool-title">
+        主动学习训练池
+      </h2>
+      <p
+        v-if="poolLoading"
+        class="hint"
+      >
+        加载中…
+      </p>
+      <p
+        v-else-if="!pool"
+        class="hint"
+      >
+        训练池暂不可用（后端未装配或目录不存在）。
+      </p>
       <template v-else>
         <div class="pool-meta">
           <span>样本数：<b>{{ pool.sample_count }}</b></span>
@@ -95,16 +127,57 @@ const levelOptions = ["", "I", "II", "III", "IV"] as const;
     </section>
 
     <div class="search">
-      <input v-model="workpiece" placeholder="检索 工件号…" @keyup.enter="onFilter" />
-      <select v-model="level" @change="onFilter">
-        <option v-for="l in levelOptions" :key="l" :value="l">{{ l ? `${l} 级` : "全部级别" }}</option>
+      <input
+        v-model="workpiece"
+        placeholder="检索 工件号…"
+        @keyup.enter="onFilter"
+      >
+      <select
+        v-model="level"
+        @change="onFilter"
+      >
+        <option
+          v-for="l in levelOptions"
+          :key="l"
+          :value="l"
+        >
+          {{ l ? `${l} 级` : "全部级别" }}
+        </option>
       </select>
-      <button class="btn ghost" type="button" style="margin-top: 0" @click="onFilter">查询</button>
+      <button
+        class="btn ghost"
+        type="button"
+        style="margin-top: 0"
+        @click="onFilter"
+      >
+        查询
+      </button>
     </div>
 
-    <p v-if="loading" class="hint">加载中…</p>
-    <p v-else-if="err" class="err show">⚠ 加载失败：{{ err }}　<button class="btn link" type="button" @click="onFilter">重试</button></p>
-    <p v-else-if="!resp || resp.items.length === 0" class="empty">暂无记录 —— 完成一次检测后，结果会自动归档到这里。</p>
+    <p
+      v-if="loading"
+      class="hint"
+    >
+      加载中…
+    </p>
+    <p
+      v-else-if="err"
+      class="err show"
+    >
+      ⚠ 加载失败：{{ err }}　<button
+        class="btn link"
+        type="button"
+        @click="onFilter"
+      >
+        重试
+      </button>
+    </p>
+    <p
+      v-else-if="!resp || resp.items.length === 0"
+      class="empty"
+    >
+      暂无记录 —— 完成一次检测后，结果会自动归档到这里。
+    </p>
     <template v-else>
       <table>
         <thead>
@@ -118,19 +191,72 @@ const levelOptions = ["", "I", "II", "III", "IV"] as const;
           </tr>
         </thead>
         <tbody>
-          <tr v-for="item in resp.items" :key="item.image_id">
+          <tr
+            v-for="item in resp.items"
+            :key="item.image_id"
+          >
             <td>{{ item.image_id }}</td>
             <td>{{ item.workpiece_no ?? "—" }}</td>
-            <td><span v-if="item.joint_level" class="lv">{{ item.joint_level }}</span><span v-else class="need">—</span></td>
+            <td>
+              <span
+                v-if="item.joint_level"
+                class="lv"
+              >{{ item.joint_level }}</span><span
+                v-else
+                class="need"
+              >—</span>
+            </td>
             <td>{{ item.evaluable ? "是" : "否" }}</td>
-            <td><span v-if="item.need_review" class="need">待复核</span><span v-else>—</span></td>
+            <td>
+              <span
+                v-if="item.need_review"
+                class="need"
+              >待复核</span><span v-else>—</span>
+            </td>
             <td>{{ item.created_at ?? "—" }}</td>
           </tr>
         </tbody>
       </table>
       <p class="stat">
-        共 <b>{{ resp.total }}</b> 条 · 级别分布：{{ Object.entries(resp.stats.by_level).map(([k, v]) => `${k}:${v}`).join(" ") || "—" }}
+        共 <b>{{ total }}</b> 条 · 级别分布：{{ Object.entries(resp.stats.by_level).map(([k, v]) => `${k}:${v}`).join(" ") || "—" }}
       </p>
+      <div
+        v-if="total > pageSize"
+        class="pager"
+      >
+        <button
+          class="btn ghost"
+          type="button"
+          :disabled="page <= 1"
+          @click="gotoPage(page - 1)"
+        >
+          ← 上一页
+        </button>
+        <span class="pg">第 {{ page }} / {{ Math.max(1, Math.ceil(total / pageSize)) }} 页</span>
+        <button
+          class="btn ghost"
+          type="button"
+          :disabled="page >= Math.ceil(total / pageSize)"
+          @click="gotoPage(page + 1)"
+        >
+          下一页 →
+        </button>
+        <select
+          v-model.number="pageSize"
+          class="ps"
+          @change="onFilter"
+        >
+          <option :value="50">
+            50/页
+          </option>
+          <option :value="100">
+            100/页
+          </option>
+          <option :value="200">
+            200/页
+          </option>
+        </select>
+      </div>
     </template>
   </div>
 </template>
@@ -157,5 +283,24 @@ const levelOptions = ["", "I", "II", "III", "IV"] as const;
 .fp {
   font-size: 12px;
   opacity: 0.75;
+}
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: #44577a;
+}
+.pager .pg {
+  font-variant-numeric: tabular-nums;
+}
+.pager .ps {
+  margin-left: auto;
+  padding: 4px 6px;
+  border: 1px solid rgba(120, 140, 180, 0.3);
+  border-radius: 6px;
+  background: transparent;
+  color: #22355c;
 }
 </style>

@@ -93,8 +93,8 @@ def _build_report_with_env(tmp_path: Path, monkeypatch, key: str | None) -> tupl
         monkeypatch.delenv("SCAN_CRYPTO_KEY", raising=False)
 
     deps._registry = None
-    # authorized 测试表（须先写盘，grader 装配时读取）
-    src = Path("backend/domain/standards/tables/nb47013.yaml")
+    # authorized 测试表（须先写盘，grader 装配时读取）。锚定仓库根，避免依赖 pytest CWD。
+    src = Path(__file__).resolve().parents[2] / "backend" / "domain" / "standards" / "tables" / "nb47013.yaml"
     text = src.read_text(encoding="utf-8").replace("authorized: false", "authorized: true")
     (tmp_path / "nb.yaml").write_text(text, encoding="utf-8")
     reg = deps.get_registry()

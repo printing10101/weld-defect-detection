@@ -50,7 +50,7 @@ class YoloDetector:
 
     def _load_torch(self, model_uri: str) -> None:
         try:
-            from ultralytics import YOLO
+            from ultralytics import YOLO  # type: ignore[import-not-found]
         except ImportError as e:  # pragma: no cover
             raise RuntimeError("未安装 ultralytics，无法加载 torch/yolo 权重") from e
         self._yolo_model = YOLO(model_uri)
@@ -136,6 +136,67 @@ class YoloDetector:
             )
         return dets
 
+    def infer_tta(
+        self,
+        image: np.ndarray,
+        conf: float,
+        iou: float,
+        class_conf: dict[int, float] | None = None,
+        scales: tuple[float, ...] = (0.8, 1.0, 1.25),
+    ) -> list[Detection]:
+        """多尺度推理 TTA（P1-A，借鉴 LF-YOLO 多尺度策略）。
+
+        在各尺度（0.8 / 1.0 / 1.25）下分别 letterbox 推理，坐标还原到原图后
+        跨尺度 NMS 去重。小幅提升小目标（气孔）与细长缺陷（裂纹）召回；
+        代价是推理耗时 ×len(scales)，默认关闭（调用方显式开启）。
+
+        约定：`infer` 内部 letterbox 到固定尺寸并还原坐标到**输入图**坐标系，
+        故按均匀缩放 s 预缩放输入后，输出坐标除以 s 即回到原图坐标系。
+        """
+        if image is None or image.size == 0:
+            return []
+        if len(scales) <= 1:
+            return self.infer(image, conf, iou, class_conf)
+        h, w = image.shape[:2]
+        results: list[Detection] = []
+        for s in scales:
+            resized = cv2.resize(image, (max(1, int(w * s)), max(1, int(h * s))))
+            dets = self.infer(resized, conf, iou, class_conf)
+            for d in dets:
+                results.append(
+                    Detection(
+                        id=f"{d.id}@s{s}",
+                        bbox=BBox(
+                            x=float(d.bbox.x) / s,
+                            y=float(d.bbox.y) / s,
+                            w=float(d.bbox.w) / s,
+                            h=float(d.bbox.h) / s,
+                        ),
+                        class_id=d.class_id,
+                        score=d.score,
+                        uncertainty=d.uncertainty,
+                        shape=d.shape,
+                        deep_hole=d.deep_hole,
+                    )
+                )
+        if not results:
+            return []
+        # 跨尺度 NMS：相同区域的多尺度检出合并为一条（保留最高置信候选）
+        raw = [
+            (
+                d.bbox.x,
+                d.bbox.y,
+                d.bbox.x + d.bbox.w,
+                d.bbox.y + d.bbox.h,
+                d.score,
+                d.class_id.value,
+            )
+            for d in results
+        ]
+        keep = self._nms(raw, iou)
+        merged = [results[i] for i in keep]
+        return sorted(merged, key=lambda d: d.score, reverse=True)
+
     @staticmethod
     def _to_rgb(image: np.ndarray) -> np.ndarray:
         if image.ndim == 2 or (image.ndim == 3 and image.shape[2] == 1):
@@ -150,6 +211,7 @@ class YoloDetector:
         rgb = self._to_rgb(image)
         # ultralytics 仅支持单一 conf；逐类阈值时先以"最低类别阈值"取全部候选，再逐类后过滤。
         pred_conf = min(min(class_conf.values()), conf) if class_conf else conf
+        assert self._yolo_model is not None
         res = self._yolo_model(rgb, conf=pred_conf, iou=iou, verbose=False)[0]
         # ultralytics 已做 NMS；直接转 (x, y, w, h, cls, score)
         raw: list[tuple[float, float, float, float, int, float]] = []
@@ -184,7 +246,9 @@ class YoloDetector:
         )
         blob = padded.transpose(2, 0, 1)[None].astype(np.float32) / 255.0
 
-        out = sess.run(None, {self._onnx_input: blob})[0]  # [1, 4+nc, 8400] 或 [1, 8400, 4+nc]
+        out = np.asarray(
+            sess.run(None, {self._onnx_input: blob})[0]
+        )  # [1, 4+nc, 8400] 或 [1, 8400, 4+nc]
         # 鲁棒定向：归一为 (anchors, 4+nc)。
         # 本环境导出的 ONNX 为通道优先布局 [1, 4+nc, anchors]（如 [1,10,8400]），
         # 此时 shape[1]==4+nc 应转置；若为 [1, anchors, 4+nc] 则无需转置。
@@ -246,10 +310,10 @@ class YoloDetector:
                 [[b[0], b[1], b[2] - b[0], b[3] - b[1]] for b in boxes], dtype=np.float32
             )
             scores = np.array([b[4] for b in boxes], dtype=np.float32)
-            idxs = cv2.dnn.NMSBoxes(xywh, scores, 0.0, iou_thr)
+            idxs = cv2.dnn.NMSBoxes(xywh, scores, 0.0, iou_thr)  # type: ignore[arg-type]
             if isinstance(idxs, tuple):
                 idxs = idxs[0]
-            return [int(i) for i in idxs]
+            return [int(i) for i in idxs]  # type: ignore[reportGeneralTypeIssues]
         except (cv2.error, AttributeError):
             kept: list[int] = []
             order = sorted(range(len(boxes)), key=lambda i: boxes[i][4], reverse=True)

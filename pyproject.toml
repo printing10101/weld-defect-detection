@@ -61,6 +61,9 @@ per-file-ignores = { "backend/training/planB_run.py" = ["N999"] }
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
 addopts = "--cov=backend --cov-report=term-missing --cov-fail-under=70"
+markers = [
+    "ml: 需要 ML 推理依赖与权重的真实检测器（YoloDetector）测试；CI 默认 skip，本机装 ML 依赖后运行",
+]
 
 [tool.coverage.run]
 # 排除训练/打包/标注器等非核心运行路径与生成文件
@@ -84,8 +87,23 @@ exclude_lines = [
 ]
 
 [tool.pyright]
-pythonVersion = "3.12"
+pythonVersion = "3.13"
 include = ["backend"]
+# 指向项目 venv：让 pyright 解析 fastapi/pydantic/sqlalchemy 等第三方包，
+# 避免"类型门禁全红"却全是 reportMissingImports 的工具误报（上线前检查报告遗留项）。
+# CI 无此 venv 时 pyright 自动回退到当前解释器（pip install -e .[dev] 已装齐依赖）。
+venvPath = "backend"
+venv = ".venv"
+# 与 [tool.coverage.run].omit 对齐：训练/标注/打包/评估属非运行时工具脚本，
+# 不进类型门禁（其依赖 torch/ultralytics 等可选 ml 依赖，本地 venv 不装，
+# 强行纳入只会产生 reportMissingImports 噪音）。运行时代码 app/domain/infra + tests 仍全查。
+exclude = [
+    "backend/.venv",
+    "backend/training",
+    "backend/models",
+    "backend/annotator",
+    "backend/evaluation",
+]
 
 [tool.importlinter]
 root_package = "backend"

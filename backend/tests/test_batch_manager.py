@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Any
 
 from backend.app.batch_queue import BatchItem, BatchManager
 
@@ -31,14 +32,16 @@ def _factory() -> _FakePipeline:
     return _FakePipeline()
 
 
-def _wait_finished(bm: BatchManager, batch_id: str, timeout_s: float = 15.0) -> dict:
+def _wait_finished(bm: BatchManager, batch_id: str, timeout_s: float = 15.0) -> dict[str, Any]:
     deadline = time.monotonic() + timeout_s
     last = bm.status(batch_id)
     while time.monotonic() < deadline:
         last = bm.status(batch_id)
+        assert last is not None
         if last["status"] == "finished":
             return last
         time.sleep(0.05)
+    assert last is not None
     raise AssertionError(f"batch 未完成: {last}")
 
 
@@ -66,6 +69,7 @@ def test_batch_manager_failure_isolation_and_snapshot(tmp_path: Path) -> None:
         try:
             bm2._load_existing()
             restored = bm2.status(batch_id)
+            assert restored is not None
             assert restored["status"] == "finished"
             assert restored["done"] == 1
         finally:

@@ -23,6 +23,7 @@ import type {
   LoginOut,
   RecordsResponse,
   ReportOut,
+  ReportDetectionsOut,
   ReviewIn,
   ReviewOut,
   UserOut,
@@ -50,9 +51,42 @@ export class ApiRequestError extends Error {
 /** 令牌失效统一信号：request() 遇 401 派发，供 App 切回登录态。 */
 export const AUTH_UNAUTHORIZED_EVENT = "auth:unauthorized";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers = { ...authHeaders(), ...(init?.headers ?? {}) };
-  const res = await fetch(`${BASE}${path}`, { ...init, headers });
+/** 单次请求超时（ms）：本地推理通常数秒，批量/复杂报告留 30s 余量（§D1）。 */
+const REQUEST_TIMEOUT_MS = 30_000;
+/** 仅对「后端不可达（连接被拒）」做指数退避重试；超时与 HTTP 错误不重试（避免重复提交）。 */
+const MAX_NETWORK_RETRIES = 2;
+const RETRY_BASE_MS = 400;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function rawRequest<T>(path: string, init: RequestInit): Promise<T> {
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, { ...init, signal: ctrl.signal });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new ApiRequestError(
+        0,
+        "TIMEOUT",
+        `请求超时（>${REQUEST_TIMEOUT_MS / 1000}s），后端可能未响应或正在处理`,
+        null,
+      );
+    }
+    // TypeError（连接被拒等网络层错误）：给出可操作的「后端未启动」提示
+    throw new ApiRequestError(
+      0,
+      "BACKEND_UNREACHABLE",
+      "无法连接后端，请确认本地服务已启动（默认 127.0.0.1:18773）",
+      null,
+    );
+  } finally {
+    window.clearTimeout(timer);
+  }
+
   if (!res.ok) {
     let code = "HTTP_ERROR";
     let message = res.statusText || `HTTP ${res.status}`;
@@ -82,6 +116,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiRequestError(res.status, code, message, detail);
   }
   return (await res.json()) as T;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = { ...authHeaders(), ...(init?.headers ?? {}) };
+  const merged: RequestInit = { ...init, headers };
+  let lastErr: unknown;
+  // 仅后端不可达时重试（连接刚启动时短暂抖动）；超时/HTTP 错误直接抛，不重试。
+  for (let attempt = 0; attempt <= MAX_NETWORK_RETRIES; attempt++) {
+    try {
+      return await rawRequest<T>(path, merged);
+    } catch (e) {
+      lastErr = e;
+      const retryable = e instanceof ApiRequestError && e.code === "BACKEND_UNREACHABLE";
+      if (!retryable || attempt === MAX_NETWORK_RETRIES) break;
+      await delay(RETRY_BASE_MS * 2 ** attempt);
+    }
+  }
+  throw lastErr;
 }
 
 export function getHealth(): Promise<HealthResponse> {
@@ -223,4 +275,9 @@ export function addCalibration(deviceId: string, body: CalibrationIn): Promise<C
 /** 报告数字签名校验：重算内容指纹与签发时比对（防篡改）。 */
 export function verifyReport(reportId: string): Promise<VerifyOut> {
   return request<VerifyOut>(`/report/${reportId}/verify`, { method: "POST" });
+}
+
+/** 主动学习：取报告对应影像的缺陷明细（像素 bbox + 置信度/不确定性），供人工复核后回流训练池。 */
+export function getReportDetections(reportId: string): Promise<ReportDetectionsOut> {
+  return request<ReportDetectionsOut>(`/report/${reportId}/detections`);
 }

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from backend.infra.config import AppConfig, ensure_runtime_dirs
+from backend.infra.config import AppConfig, ModelCfg, PathsCfg, ensure_runtime_dirs
 from backend.infra.reporting import pdf_reporter
 
 
@@ -40,14 +40,14 @@ def test_annotator_root_anchored_to_install_root() -> None:
 def test_ensure_runtime_dirs_creates_all(tmp_path: Path) -> None:
     """干净环境传入绝对路径配置，ensure_runtime_dirs 必须创建全部运行时目录。"""
     cfg = AppConfig(
-        paths={
-            "data_dir": str(tmp_path / "data"),
-            "tmp_dir": str(tmp_path / "data" / "tmp"),
-            "db_path": str(tmp_path / "data" / "scan.db"),
-            "images_dir": str(tmp_path / "data" / "images"),
-            "reports_dir": str(tmp_path / "data" / "reports"),
-        },
-        model={"weights_dir": str(tmp_path / "models" / "weights")},
+        paths=PathsCfg(
+            data_dir=str(tmp_path / "data"),
+            tmp_dir=str(tmp_path / "data" / "tmp"),
+            db_path=str(tmp_path / "data" / "scan.db"),
+            images_dir=str(tmp_path / "data" / "images"),
+            reports_dir=str(tmp_path / "data" / "reports"),
+        ),
+        model=ModelCfg(weights_dir=str(tmp_path / "models" / "weights")),
     )
     created = ensure_runtime_dirs(cfg)
     expected = {

@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "build:pkg": "vite build --config vite.tauri.config.ts",
+    "build": "vue-tsc --noEmit && vite build",
+    "build:pkg": "vue-tsc --noEmit && vite build --config vite.tauri.config.ts",
     "typecheck": "vue-tsc --noEmit",
+    "lint": "eslint",
+    "format": "prettier --write \"src/**/*.{ts,vue}\"",
     "gen-api": "openapi-typescript http://127.0.0.1:18773/openapi.json -o src/types/generated.ts"
   },
   "dependencies": {

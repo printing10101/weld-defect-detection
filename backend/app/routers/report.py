@@ -9,7 +9,7 @@ PDF 下载：GET /api/v1/report/{report_id}/pdf。
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -32,7 +32,27 @@ class ReportOut(BaseModel):
     evaluable: bool
     defect_count: int
     disclaimer: str | None = None
+    # 合规处置建议（P0-E）：accept | conditional | rework | recheck
+    disposition: str | None = None
+    disposition_label: str | None = None
+    disposition_actions: list[str] = []
     pdf_url: str
+
+
+class ReportDetectionsOut(BaseModel):
+    """报告对应影像的缺陷明细（§5.5/§5.6 主动学习闭环回流用）。
+
+    前端凭此取得逐缺陷的像素 bbox/class_id/置信度/不确定性，经人工复核后
+    回流训练池（POST /active/export）。缺陷坐标为存储的 bbox_px 像素值；
+    image_w/h 由原图读取，原图不可读时退回缺陷框并集以保证归一化可用。
+    """
+
+    report_id: str
+    image_id: str
+    image_stem: str
+    image_w: int
+    image_h: int
+    defects: list[dict[str, Any]]  # 每项：id,class_id,bbox,confidence,uncertainty,reviewed,need_review
 
 
 @router.post("/report", response_model=ReportOut)
@@ -111,6 +131,9 @@ async def report(
         evaluable=bool(out["evaluable"]),
         defect_count=int(out["defect_count"]),
         disclaimer=out.get("disclaimer"),
+        disposition=out.get("disposition"),
+        disposition_label=out.get("disposition_label"),
+        disposition_actions=list(out.get("disposition_actions") or []),
         pdf_url=f"/api/v1/report/{out['report_id']}/pdf",
     )
 
@@ -132,3 +155,76 @@ def report_pdf(
             status_code=404, detail={"code": "NOT_FOUND", "message": "pdf file missing"}
         )
     return FileResponse(str(pdf), media_type="application/pdf", filename=f"{report_id}.pdf")
+
+
+def _image_dims(path: str | None) -> tuple[int, int]:
+    """从原图读取宽高（像素）；文件缺失/加密/损坏返回 (0, 0)。"""
+    if not path:
+        return (0, 0)
+    try:
+        import cv2
+
+        arr = cv2.imread(path)
+    except Exception:  # noqa: BLE001 - 读取失败不应阻断回流，交由调用方兜底
+        return (0, 0)
+    if arr is None:
+        return (0, 0)
+    return int(arr.shape[1]), int(arr.shape[0])
+
+
+@router.get("/report/{report_id}/detections", response_model=ReportDetectionsOut)
+def report_detections(
+    report_id: str,
+    reg: Annotated[Registry, Depends(get_registry)],
+) -> ReportDetectionsOut:
+    """报告对应影像的缺陷明细（主动学习回流数据源，§5.5/§5.6）。
+
+    闭环链路：评片 → 此处取明细 → 人工复核/改判 → POST /active/export 回流
+    训练池（YOLO 标注 + 数据版本指纹）→ 供训练脚本合并重训。
+    """
+    rep = reg.repository.get_report(report_id)
+    if rep is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": f"report not found: {report_id}"},
+        )
+    image_id = rep.get("image_id")
+    if not image_id:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": "report is not linked to any image"},
+        )
+    img = reg.repository.get_image(image_id)
+    if img is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": f"image not found: {image_id}"},
+        )
+    path = img.get("path")
+    image_w, image_h = _image_dims(path)
+    defects = [
+        {
+            "id": d["id"],
+            "class_id": int(d["class_id"]),
+            "bbox": [float(v) for v in (d.get("bbox_px") or [0.0, 0.0, 0.0, 0.0])],
+            "confidence": float(d.get("confidence", 0.0)),
+            "uncertainty": float(d.get("uncertainty", 1.0)),
+            "reviewed": bool(d.get("reviewed_by")),
+            "need_review": bool(d.get("need_review", False)),
+        }
+        for d in (img.get("defects") or [])
+    ]
+    # 原图不可读（加密/缺失）：以缺陷框并集 + 边距为归一化基准，保证回流可用
+    if (image_w <= 0 or image_h <= 0) and defects:
+        max_x = max((d["bbox"][0] + d["bbox"][2] for d in defects), default=0.0)
+        max_y = max((d["bbox"][1] + d["bbox"][3] for d in defects), default=0.0)
+        image_w = max(1, int(max_x) + 1)
+        image_h = max(1, int(max_y) + 1)
+    return ReportDetectionsOut(
+        report_id=report_id,
+        image_id=image_id,
+        image_stem=Path(path).stem if path else image_id,
+        image_w=image_w,
+        image_h=image_h,
+        defects=defects,
+    )

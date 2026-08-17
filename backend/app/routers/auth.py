@@ -97,7 +97,7 @@ def login(body: LoginIn, reg: Annotated[Registry, Depends(get_registry)]) -> Log
     token = create_access_token(
         subject=user["username"], role=user["role"], display_name=user.get("display_name") or ""
     )
-    return LoginOut(access_token=token, user=UserOut(**user))
+    return LoginOut(access_token=token, user=UserOut.model_validate(user))
 
 
 @router.get("/auth/me", response_model=UserOut)
@@ -134,7 +134,7 @@ def register(
         raise HTTPException(
             status_code=422, detail={"code": "REGISTER_FAILED", "message": str(exc)}
         ) from exc
-    return UserOut(**user)
+    return UserOut.model_validate(user)
 
 
 @router.get("/auth/users", response_model=list[UserOut])
@@ -143,7 +143,7 @@ def list_users(
     _: Annotated[CurrentUser, Depends(require_roles(ROLE_ADMIN))],
 ) -> list[UserOut]:
     """用户列表（仅管理员）。"""
-    return [UserOut(**u) for u in reg.repository.list_users()]
+    return [UserOut.model_validate(u) for u in reg.repository.list_users()]
 
 
 @router.post("/auth/users/{username}/role", response_model=UserOut)
@@ -164,7 +164,7 @@ def set_role(
         raise HTTPException(
             status_code=422, detail={"code": "BAD_ROLE", "message": str(exc)}
         ) from exc
-    return UserOut(**reg.repository.get_user_by_username(username))
+    return UserOut.model_validate(reg.repository.get_user_by_username(username))
 
 
 @router.post("/auth/users/{username}/disable", response_model=UserOut)
@@ -181,7 +181,7 @@ def set_disabled(
         raise HTTPException(
             status_code=404, detail={"code": "NOT_FOUND", "message": str(exc)}
         ) from exc
-    return UserOut(**reg.repository.get_user_by_username(username))
+    return UserOut.model_validate(reg.repository.get_user_by_username(username))
 
 
 @router.post("/auth/change-password", response_model=dict)

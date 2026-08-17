@@ -13,11 +13,24 @@ const view = ref<ViewId>("journey");
 
 <template>
   <div class="app-shell">
-    <RailNav :active="view" @navigate="view = $event" />
+    <RailNav
+      :active="view"
+      @navigate="view = $event"
+    />
     <main class="main">
-      <JourneyView v-show="view === 'journey'" @archive="view = 'archive'" />
-      <ArchiveView v-show="view === 'archive'" :active="view === 'archive'" />
-      <BatchView v-show="view === 'batch'" :active="view === 'batch'" @archive="view = 'archive'" />
+      <JourneyView
+        v-show="view === 'journey'"
+        @archive="view = 'archive'"
+      />
+      <ArchiveView
+        v-show="view === 'archive'"
+        :active="view === 'archive'"
+      />
+      <BatchView
+        v-show="view === 'batch'"
+        :active="view === 'batch'"
+        @archive="view = 'archive'"
+      />
       <DeviceView v-show="view === 'device'" />
     </main>
   </div>

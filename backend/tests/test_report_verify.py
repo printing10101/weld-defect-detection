@@ -87,8 +87,9 @@ def test_report_verify_tamper_detected(tmp_path) -> None:
         from backend.app import dependencies as deps
 
         reg = deps.get_registry()
-        from backend.infra.db import ImageRecord
         from sqlalchemy.orm import Session
+
+        from backend.infra.db import ImageRecord
 
         with Session(reg.repository._engine) as session, session.begin():
             rec = session.get(ImageRecord, image_id)
@@ -115,8 +116,9 @@ def test_report_verify_legacy_when_no_hash(tmp_path) -> None:
         from backend.app import dependencies as deps
 
         reg = deps.get_registry()
-        from backend.infra.db import ReportRecord
         from sqlalchemy.orm import Session
+
+        from backend.infra.db import ReportRecord
 
         with Session(reg.repository._engine) as session, session.begin():
             rec = session.get(ReportRecord, report["report_id"])

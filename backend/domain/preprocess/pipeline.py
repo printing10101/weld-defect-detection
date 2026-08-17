@@ -91,7 +91,7 @@ class OpencvPreprocessor:
         )
         # CLAHE 仅支持 CV_8UC1 / CV_16UC1
         if look.dtype not in (np.uint8, np.uint16):
-            look = cv2.normalize(look, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+            look = cv2.normalize(look, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)  # type: ignore[arg-type]
         return clahe.apply(look)
 
     def edges(
@@ -113,7 +113,7 @@ class OpencvPreprocessor:
         patch8 = (
             patch
             if patch.dtype == np.uint8
-            else cv2.normalize(patch, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+            else cv2.normalize(patch, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)  # type: ignore[arg-type]
         )
         k = self.canny_kernel if self.canny_kernel % 2 == 1 else self.canny_kernel + 1
         k = max(3, min(k, 31))

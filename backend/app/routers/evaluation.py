@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from backend.app.auth import get_current_user
 from backend.app.dependencies import Registry, get_registry
 from backend.evaluation.drift import estimate_drift
+from backend.infra.fs import safe_resolve
 
 router = APIRouter(tags=["evaluation"], dependencies=[Depends(get_current_user)])
 
@@ -43,8 +44,21 @@ def evaluate_drift(
     body: DriftRequest,
     reg: Annotated[Registry, Depends(get_registry)],
 ) -> DriftResponse:
-    baseline_path = body.baseline_path or reg.config.eval.drift_baseline_path
-    p = Path(baseline_path)
+    # 基线必须位于评估目录之内（防任意文件读取）；用户可指定相对名，缺省用配置基线。
+    eval_dir = Path(reg.config.eval.drift_baseline_path).resolve().parent
+    if body.baseline_path:
+        try:
+            p = safe_resolve(eval_dir, body.baseline_path)
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "INVALID_BASELINE_PATH",
+                    "message": "baseline_path 必须位于评估目录内",
+                },
+            )
+    else:
+        p = Path(reg.config.eval.drift_baseline_path).resolve()
     if not p.exists():
         raise HTTPException(
             status_code=409,
@@ -55,11 +69,11 @@ def evaluate_drift(
         )
     try:
         baseline: dict[str, Any] = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError):
         raise HTTPException(
             status_code=500,
-            detail={"code": "BASELINE_CORRUPT", "message": f"基线文件损坏: {exc}"},
-        ) from exc
+            detail={"code": "BASELINE_CORRUPT", "message": "基线文件损坏，无法解析"},
+        )
 
     samples = [s.model_dump() for s in body.samples]
     result = estimate_drift(samples, baseline)
@@ -78,8 +92,8 @@ def get_drift_baseline(
         )
     try:
         return json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError):
         raise HTTPException(
             status_code=500,
-            detail={"code": "BASELINE_CORRUPT", "message": f"基线文件损坏: {exc}"},
-        ) from exc
+            detail={"code": "BASELINE_CORRUPT", "message": "基线文件损坏，无法解析"},
+        )

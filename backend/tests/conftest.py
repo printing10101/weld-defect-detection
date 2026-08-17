@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -45,10 +46,13 @@ def _test_env(auth_table: Path) -> None:
     os.environ["SCAN_PATHS__REPORTS_DIR"] = str(_TMP_ROOT / "reports")
     # P2-9：测试禁用限流（TestClient 共享计数会误伤套件）；安全头中间件保持生效
     os.environ.setdefault("SCAN_RATE_LIMIT", "0")
-    # 检测器确定性：强制 M4a 基线（blob），不依赖开发机是否存在训练权重。
+    # 检测器确定性：默认强制 M4a 基线（blob），不依赖开发机是否存在训练权重。
     # 集成测试用合成底片断言 ≥N 缺陷，训练 YOLO 在合成图上 0 检出；
-    # 训练模型路径由 test_model_registry 等单测直接实例化 YoloDetector 覆盖。
-    os.environ["SCAN_DETECT__BASELINE_ENABLED"] = "true"
+    # 训练模型路径由 test_yolo_detector_ml（@pytest.mark.ml）等直接实例化 YoloDetector 覆盖。
+    # 设 SCAN_TEST_REAL_DETECTOR=1 可关闭强制，改用真实 YOLO（需 ML 依赖+权重），
+    # 用于本地验证真实检测链路——此时部分集成测试（断言 ≥N 缺陷）可能需相应调整。
+    if not os.environ.get("SCAN_TEST_REAL_DETECTOR"):
+        os.environ["SCAN_DETECT__BASELINE_ENABLED"] = "true"
     # T3：确定性鉴权环境——固定签名密钥 + 引导管理员凭据，使 bootstrap 播种可复现，
     # 既保证 test_auth.py 能稳定登录，也避免每次运行生成随机管理员密码污染日志。
     os.environ["SCAN_AUTH_SECRET"] = "test-auth-secret-please-change-in-prod-0123456789"
@@ -57,7 +61,7 @@ def _test_env(auth_table: Path) -> None:
 
 
 @pytest.fixture(scope="function", autouse=True)
-def _auth_override() -> None:
+def _auth_override() -> Iterator[None]:
     """让既有集成测试在无令牌时以 admin 身份通过（T3 已给所有 /api/v1 路由加登录依赖）。
 
     采用 function 级（每个测试前重设），以抵御个别测试 teardown 调用

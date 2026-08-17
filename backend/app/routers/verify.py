@@ -90,7 +90,7 @@ def _verify_sync(
         min_contrast_ratio=reg.config.iqi.min_contrast_ratio,
         auto_locate=reg.config.iqi.auto_locate,
         locate_threshold=reg.config.iqi.locate_threshold,
-        sensitivity=tuple(tuple(r) for r in reg.config.iqi.sensitivity),
+        sensitivity=tuple(reg.config.iqi.sensitivity),
     )
     iqi = verify_iqi(gray, iqi_cfg, roi=roi, iqi_type=iqi_type)
     # 用透照厚度 + 参考表补全 A/AB/B 等级（厚度缺失则 grade=None，不臆造）。

@@ -21,7 +21,7 @@ def _gt(bbox, class_id: int) -> dict:
 
 
 def test_iou_basic() -> None:
-    a = [0, 0, 10, 10]
+    a = [0.0, 0.0, 10.0, 10.0]
     assert harness.iou(a, a) == 1.0
     assert harness.iou(a, [10, 0, 10, 10]) == 0.0  # 无交叠
     assert harness.iou(a, [5, 0, 10, 10]) > 0.0  # 半重叠
@@ -89,6 +89,7 @@ def test_eval_report_roundtrip(tmp_path: Path) -> None:
     )
     assert path.exists()
     report = harness.load_eval_report("best::abc123", tmp_path)
+    assert report is not None
     assert report["metrics"]["mAP50"] == 0.85
     assert report["golden_set"] == "fp123"
     assert harness.load_eval_report("missing", tmp_path) is None
@@ -137,7 +138,9 @@ def test_experiment_tracker(tmp_path: Path) -> None:
     assert runs[0]["params"]["epochs"] == 80
     assert runs[0]["metrics"]["mAP50"] == 0.86
     assert any("best.pt" in a for a in runs[0]["artifacts"])
-    assert tracker.get_run(run_id)["run_id"] == run_id
+    got = tracker.get_run(run_id)
+    assert got is not None
+    assert got["run_id"] == run_id
 
 
 def test_build_model_card() -> None:

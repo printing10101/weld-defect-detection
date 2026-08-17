@@ -22,6 +22,7 @@ from backend.domain.active_learning import (
     training_pool_manifest,
 )
 from backend.domain.dto import BBox, DefectClass, Detection
+from backend.infra.fs import safe_resolve
 
 router = APIRouter(tags=["active"], dependencies=[Depends(get_current_user)])
 
@@ -120,9 +121,18 @@ def active_export(
     manifest（指纹随标注内容变化 → 训练侧可据此判断是否需重训）。
     """
     pool = _pool_dir(reg)
+    # 防路径穿越：image_stem 只取文件名成分，且必须解析到 pool 之下（越界即 422）
+    safe_stem = Path(req.image_stem).name
+    try:
+        safe_resolve(pool, f"{safe_stem}.txt")
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "INVALID_IMAGE_STEM", "message": "image_stem 含非法路径字符"},
+        )
     detections = [_to_detection(d) for d in req.defects]
     label = export_training_labels(
-        req.image_stem,
+        safe_stem,
         detections,
         float(req.image_w),
         float(req.image_h),

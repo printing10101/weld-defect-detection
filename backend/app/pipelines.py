@@ -18,12 +18,14 @@ from pathlib import Path
 
 from backend.app.dependencies import Registry
 from backend.domain.density import check_density, estimate_density
-from backend.domain.dto import DefectShape, Detection, ImageMeta, Modality
+from backend.domain.dto import BBox, DefectClass, DefectShape, Detection, ImageMeta, Modality
 from backend.domain.errors import GradingAmbiguousError, IQIFailError
 from backend.domain.iqi import IqiConfig, enrich_grade, verify_iqi
+from backend.domain.preprocess.metrics import QualityCfg as DomainQualityCfg
 from backend.domain.preprocess.metrics import assess_quality
 from backend.domain.pseudo_defect import PseudoDefectCfg, screen_pseudo_defects
 from backend.domain.quantify import BBoxQuantifier
+from backend.domain.recommend import recommend
 from backend.domain.review import ReviewDecision, ReviewRole, resolve_review
 from backend.domain.standards.tables.loader import disclaimer_for
 from backend.infra.image_loader import load_image
@@ -160,7 +162,7 @@ class InspectionPipeline:
             min_contrast_ratio=reg.config.iqi.min_contrast_ratio,
             auto_locate=reg.config.iqi.auto_locate,
             locate_threshold=reg.config.iqi.locate_threshold,
-            sensitivity=tuple(tuple(r) for r in reg.config.iqi.sensitivity),
+            sensitivity=tuple(reg.config.iqi.sensitivity),
         )
         iqi = verify_iqi(gray, iqi_cfg, roi=iqi_roi, iqi_type=reg.config.iqi.type)
         # 用透照厚度 + 参考表补全 A/AB/B 等级（厚度缺失则 grade=None，不臆造）。
@@ -186,7 +188,7 @@ class InspectionPipeline:
         pd = screen_pseudo_defects(gray, pd_domain)
         # §4.4 质量度量门禁：在原始底片上评估（反映底片本身质量，与增强无关）。
         q_cfg = reg.config.quality
-        quality = assess_quality(gray, q_cfg)
+        quality = assess_quality(gray, DomainQualityCfg(**q_cfg.model_dump()))
         quality_fail_block = bool(q_cfg.block_on_quality and not quality.passed)
         quality_warn = bool((not quality.passed) and not q_cfg.block_on_quality)
         evaluable = bool(density_ok and iqi.passed and pd.passed and not quality_fail_block)
@@ -267,7 +269,20 @@ class InspectionPipeline:
         std_id = standard_id or reg.config.standard.default_id
         # 工业过渡路径（T1）：免责声明只依赖标准表（standard-level），与判定结果无关，
         # 故无论评级成功或熔断均统一生成（authorized_copy=false 时为强声明）。
-        disclaimer = disclaimer_for(reg.grader.tables)
+        disclaimer = disclaimer_for(reg.grader.tables)  # type: ignore[attr-defined]
+
+        # 合规处置建议（P0-E）：消费评级输出，独立适配器（domain/recommend），
+        # 不参与判定；熔断时降级为「需人工复核」，永不阻塞出片。
+        rec = recommend(
+            joint_level,
+            detections,
+            need_review=need_review,
+            standard_id=std_id,
+            disclaimer=disclaimer,
+        )
+        disposition = rec.disposition
+        disposition_label = rec.disposition_label
+        disposition_actions = list(rec.actions)
 
         # 6. 落库（images + defects + reports，一个事务）
         image_row = {
@@ -385,6 +400,9 @@ class InspectionPipeline:
             "iqi_pass": bool(iqi.passed),
             "defect_count": len(quantified),
             "disclaimer": disclaimer,
+            "disposition": disposition,
+            "disposition_label": disposition_label,
+            "disposition_actions": disposition_actions,
             "pdf_path": pdf_path,
         }
 
@@ -404,14 +422,38 @@ class InspectionPipeline:
             report_id = uuid.uuid4().hex
             repo.create_report_row(report_id, image_id)
             repo.update_report(report_id, pdf_path=pdf_path)
+        stored_defects = image.get("defects") or []
+        # 合规处置建议（P0-E）：由库里存的级别+缺陷类别重算（不重跑判定）。
+        # 重建最小 Detection 仅需 class_id（零容忍判定），bbox 用占位零框。
+        rec_defects = [
+            Detection(
+                id=str(d.get("id", "")),
+                bbox=BBox(0.0, 0.0, 1.0, 1.0),
+                class_id=DefectClass(int(d["class_id"])),
+                score=float(d.get("confidence", 0.0)),
+                uncertainty=float(d.get("uncertainty", 1.0)),
+            )
+            for d in stored_defects
+            if "class_id" in d
+        ]
+        rec = recommend(
+            image.get("joint_level"),
+            rec_defects,
+            need_review=bool(image.get("need_review", False)),
+            standard_id=str(image.get("standard_id") or "NB/T47013.2-2015"),
+            disclaimer=disclaimer_for(self._reg.grader.tables),  # type: ignore[attr-defined]
+        )
         return {
             "image_id": image_id,
             "report_id": report_id,
             "joint_level": image.get("joint_level"),
             "need_review": bool(image.get("need_review", False)),
             "evaluable": bool(image.get("evaluable", True)),
-            "defect_count": len(image.get("defects") or []),
-            "disclaimer": disclaimer_for(self._reg.grader.tables),
+            "defect_count": len(stored_defects),
+            "disclaimer": disclaimer_for(self._reg.grader.tables),  # type: ignore[attr-defined]
+            "disposition": rec.disposition,
+            "disposition_label": rec.disposition_label,
+            "disposition_actions": list(rec.actions),
             "pdf_path": pdf_path,
         }
 

@@ -24,11 +24,32 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 _LOG = logging.getLogger("scandetection.batch")
+
+
+@contextmanager
+def _native_delete_scope():
+    """临时用 Windows 原生删除替换 os.unlink/os.remove，退出即还原。
+
+    绕 safe-delete shim（仅删本批次暂存目录），但限定作用域、不再进程级
+    永久覆盖，避免污染审计/仓储等其它删除路径。非 Windows 下不替换。
+    """
+    try:
+        import nt  # Windows 原生删除
+    except ImportError:
+        yield
+        return
+    saved_unlink, saved_remove = os.unlink, os.remove
+    os.unlink, os.remove = nt.unlink, nt.remove
+    try:
+        yield
+    finally:
+        os.unlink, os.remove = saved_unlink, saved_remove
 
 
 @dataclass
@@ -269,11 +290,7 @@ class BatchManager:
                 batch["batch_id"],
             )
             return
-        import nt  # Windows 原生删除（绕 genie-safe-delete shim）
-
-        try:
-            os.unlink = nt.unlink
-            os.remove = nt.remove
+        with _native_delete_scope():
             import shutil as _sh
 
             for raw in batch.get("cleanup_dirs", []):
@@ -286,8 +303,6 @@ class BatchManager:
                     _LOG.info("batch staging cleaned: %s", path)
                 except OSError as exc:
                     _LOG.warning("batch staging cleanup failed %s: %s", path, exc)
-        except Exception as exc:  # noqa: BLE001  # 清理是尽力而为，失败不阻断
-            _LOG.warning("batch staging cleanup error: %s", exc)
 
     def _persist(self, batch: dict) -> None:
         """状态快照落盘（断点续跑：重启后可查历史与未完成标记）。"""

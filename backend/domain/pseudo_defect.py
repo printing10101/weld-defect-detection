@@ -140,7 +140,7 @@ def _dust_count(gray: np.ndarray, cfg: PseudoDefectCfg) -> int:
     count = 0
     for surf in (tophat, blackhat):
         _, b = cv2.threshold(surf, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        _, _, stats, _ = cv2.connectedComponentsWithStats(b, 8)
+        _, _, stats, _ = cv2.connectedComponentsWithStats(b, connectivity=8)
         # 跳过极小噪点（<dust_min_area px）与背景（label 0）
         for s in stats[1:]:
             if s[cv2.CC_STAT_AREA] >= cfg.dust_min_area:

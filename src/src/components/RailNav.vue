@@ -19,10 +19,15 @@ const NAV: { id: ViewId; label: string }[] = [
 <template>
   <aside class="rail">
     <div class="brand">
-      <span class="mark" aria-hidden="true"></span>
+      <span
+        class="mark"
+        aria-hidden="true"
+      />
       <span class="name">射线评片</span>
     </div>
-    <div class="sub">焊缝缺陷智能检测<br />NB/T47013.2-2015 · 本地优先</div>
+    <div class="sub">
+      焊缝缺陷智能检测<br>NB/T47013.2-2015 · 本地优先
+    </div>
     <nav>
       <button
         v-for="item in NAV"
@@ -31,19 +36,31 @@ const NAV: { id: ViewId; label: string }[] = [
         type="button"
         @click="emit('navigate', item.id)"
       >
-        <span class="dot" aria-hidden="true"></span>{{ item.label }}
+        <span
+          class="dot"
+          aria-hidden="true"
+        />{{ item.label }}
       </button>
     </nav>
     <div class="foot">
-      上传 → 处理 → 报告解读<br />
-      极简 ZINE · 单一钴蓝锚<br />
+      上传 → 处理 → 报告解读<br>
+      极简 ZINE · 单一钴蓝锚<br>
       内容均来自真实检测数据
-      <div v-if="auth.isAuthenticated.value" class="user">
+      <div
+        v-if="auth.isAuthenticated.value"
+        class="user"
+      >
         <span class="who">
           {{ auth.state.user?.display_name || auth.state.user?.username }}
           <em class="role">{{ auth.state.user?.role }}</em>
         </span>
-        <button type="button" class="logout" @click="auth.logout()">退出</button>
+        <button
+          type="button"
+          class="logout"
+          @click="auth.logout()"
+        >
+          退出
+        </button>
       </div>
     </div>
   </aside>

@@ -16,9 +16,9 @@ from backend.training.swrd_converter import _flatten_points
 
 def test_unhandled_handler_returns_internal_envelope():
     """任意未捕获异常必须返回统一 INTERNAL 错误包，而非裸 traceback。"""
-    resp = asyncio.run(_unhandled_handler(None, RuntimeError("boom")))
+    resp = asyncio.run(_unhandled_handler(None, RuntimeError("boom")))  # type: ignore[arg-type]
     assert resp.status_code == 500
-    body = json.loads(resp.body)
+    body = json.loads(bytes(resp.body))
     assert body["error"]["code"] == "INTERNAL"
     assert body["error"]["message"] == "服务器内部错误"
     assert "detail" in body["error"]

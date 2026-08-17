@@ -61,6 +61,11 @@ export interface ReportOut {
   defect_count: number;
   /** 标准来源免责声明（工业过渡路径）：authorized_copy=false 时为强声明 */
   disclaimer: string | null;
+  /** 合规处置建议（P0-E）：accept | conditional | rework | recheck */
+  disposition: string | null;
+  disposition_label: string | null;
+  /** readonly：useJourney 的 readonly() 深度只读化后保持可赋值 */
+  disposition_actions: readonly string[];
   pdf_url: string;
 }
 
@@ -325,4 +330,25 @@ export interface VerifyOut {
   signer: string | null;
   generated_at: string | null;
   reason: string | null;
+}
+
+/** 主动学习回流用：单条缺陷明细（镜像后端 GET /report/{id}/detections） */
+export interface ReportDetection {
+  id: string;
+  class_id: number;
+  bbox: [number, number, number, number];
+  confidence: number;
+  uncertainty: number;
+  reviewed: boolean;
+  need_review: boolean;
+}
+
+/** GET /api/v1/report/{id}/detections → ReportDetectionsOut（§5.5/§5.6 主动学习回流数据源） */
+export interface ReportDetectionsOut {
+  report_id: string;
+  image_id: string;
+  image_stem: string;
+  image_w: number;
+  image_h: number;
+  defects: ReportDetection[];
 }

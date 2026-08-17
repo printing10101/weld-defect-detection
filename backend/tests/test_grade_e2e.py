@@ -11,15 +11,17 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from backend.domain.dto import BBox, DefectClass, Detection, ImageMeta, JointLevel, Modality
 from backend.domain.errors import GradingAmbiguousError
 from backend.domain.grade.nb47013 import Nb47013Grader
-from backend.domain.standards.tables.loader import load_standard_tables
+from backend.domain.standards.tables.loader import StandardTables, load_standard_tables
 
 
-def _tables() -> object:
+def _tables() -> StandardTables:
     t = load_standard_tables("NB/T47013.2-2015", filename="nb47013.yaml")
     assert t.authorized is True, "发运表应已授权（authorized=true）"
     return t
@@ -33,7 +35,7 @@ def _ctx(t: float, spacing: float = 0.1) -> ImageMeta:
     )
 
 
-def _det(class_id: DefectClass, w_px: float, h_px: float, **kw: object) -> Detection:
+def _det(class_id: DefectClass, w_px: float, h_px: float, **kw: Any) -> Detection:
     return Detection(
         id="d",
         bbox=BBox(0, 0, w_px, h_px),

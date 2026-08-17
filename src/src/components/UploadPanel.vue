@@ -93,16 +93,28 @@ const fileMeta = computed(() => {
   <div>
     <div class="guide">
       <div class="g">
-        <div class="n">一 · 准备底片</div>
-        <div class="t">拖入或选择射线底片。支持 DICOM(.dcm) / PNG / TIFF，建议 ≥500×500 的 8/16bit 灰度影像。</div>
+        <div class="n">
+          一 · 准备底片
+        </div>
+        <div class="t">
+          拖入或选择射线底片。支持 DICOM(.dcm) / PNG / TIFF，建议 ≥500×500 的 8/16bit 灰度影像。
+        </div>
       </div>
       <div class="g">
-        <div class="n">二 · 填写参数</div>
-        <div class="t">像素标定有默认值；母材厚度 T 是评级依据，必填。缺省时仅出图谱、评级锁定。</div>
+        <div class="n">
+          二 · 填写参数
+        </div>
+        <div class="t">
+          像素标定有默认值；母材厚度 T 是评级依据，必填。缺省时仅出图谱、评级锁定。
+        </div>
       </div>
       <div class="g">
-        <div class="n">三 · 查看报告</div>
-        <div class="t">提交后等待真实处理（15–30 秒），得到级别结论、缺陷解读与操作建议。</div>
+        <div class="n">
+          三 · 查看报告
+        </div>
+        <div class="t">
+          提交后等待真实处理（15–30 秒），得到级别结论、缺陷解读与操作建议。
+        </div>
       </div>
     </div>
 
@@ -113,10 +125,21 @@ const fileMeta = computed(() => {
           <span class="chip on">PNG</span>
           <span class="chip on">TIFF</span>
         </div>
-        <div class="hint">仅接受 8/16bit 灰度；彩色影像请先转为灰度。文件 ≤ 50MB。</div>
-        <div class="drop" @click="onClick" @dragover.prevent @drop="onDrop">
-          <div class="big">拖入底片，或点击选择</div>
-          <div class="hint">影像只在本机处理，不上传任何外部服务器</div>
+        <div class="hint">
+          仅接受 8/16bit 灰度；彩色影像请先转为灰度。文件 ≤ 50MB。
+        </div>
+        <div
+          class="drop"
+          @click="onClick"
+          @dragover.prevent
+          @drop="onDrop"
+        >
+          <div class="big">
+            拖入底片，或点击选择
+          </div>
+          <div class="hint">
+            影像只在本机处理，不上传任何外部服务器
+          </div>
         </div>
         <input
           ref="inputEl"
@@ -124,36 +147,85 @@ const fileMeta = computed(() => {
           accept=".dcm,.png,.tif,.tiff"
           style="display: none"
           @change="onInput"
-        />
-        <div v-if="file" class="preview show">
-          <img v-if="!isDicom" :src="previewUrl ?? undefined" alt="影像预览" class="thumb" />
-          <span v-else class="thumb">DICOM</span>
-          <div class="meta">{{ fileMeta }}</div>
+        >
+        <div
+          v-if="file"
+          class="preview show"
+        >
+          <img
+            v-if="!isDicom"
+            :src="previewUrl ?? undefined"
+            alt="影像预览"
+            class="thumb"
+          >
+          <span
+            v-else
+            class="thumb"
+          >DICOM</span>
+          <div class="meta">
+            {{ fileMeta }}
+          </div>
         </div>
-        <div v-if="fileErr" class="err show">⚠ {{ fileErr }}</div>
+        <div
+          v-if="fileErr"
+          class="err show"
+        >
+          ⚠ {{ fileErr }}
+        </div>
       </div>
 
       <div class="grow">
         <div class="field">
           <label for="spacing">像素标定（mm/px）</label>
-          <input id="spacing" v-model="pixelSpacingMm" />
-          <div class="why">默认 0.1000 mm/px；若底片带标尺可覆盖。用于把像素尺寸换算为真实当量。</div>
+          <input
+            id="spacing"
+            v-model="pixelSpacingMm"
+          >
+          <div class="why">
+            默认 0.1000 mm/px；若底片带标尺可覆盖。用于把像素尺寸换算为真实当量。
+          </div>
         </div>
         <div class="field">
           <label for="thick">母材厚度 T（mm）<span class="req">*</span></label>
-          <input id="thick" v-model="baseMetalThicknessMm" placeholder="如 20" />
-          <div class="why">评级必须（NB/T47013.2 按 T 分档评定区与限值）。</div>
-          <div v-if="thicknessErr" class="err show">⚠ {{ thicknessErr }}</div>
+          <input
+            id="thick"
+            v-model="baseMetalThicknessMm"
+            placeholder="如 20"
+          >
+          <div class="why">
+            评级必须（NB/T47013.2 按 T 分档评定区与限值）。
+          </div>
+          <div
+            v-if="thicknessErr"
+            class="err show"
+          >
+            ⚠ {{ thicknessErr }}
+          </div>
         </div>
         <div class="field">
           <label for="wp">工件号（可选）</label>
-          <input id="wp" v-model="workpieceNo" placeholder="如 WP-7781" />
+          <input
+            id="wp"
+            v-model="workpieceNo"
+            placeholder="如 WP-7781"
+          >
         </div>
         <div class="field">
           <label for="wn">焊口编号（可选）</label>
-          <input id="wn" v-model="weldNo" placeholder="如 W-12" />
+          <input
+            id="wn"
+            v-model="weldNo"
+            placeholder="如 W-12"
+          >
         </div>
-        <button class="btn" type="button" :disabled="!file" @click="onSubmit">开始检测 →</button>
+        <button
+          class="btn"
+          type="button"
+          :disabled="!file"
+          @click="onSubmit"
+        >
+          开始检测 →
+        </button>
       </div>
     </div>
   </div>

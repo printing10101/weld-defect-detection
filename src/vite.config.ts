@@ -1,8 +1,8 @@
 import { defineConfig } from "vite";
-import vue from "@vitejs/plugin-vue";
+import { sharedVue } from "./vite.shared";
 
 export default defineConfig({
-  plugins: [vue()],
+  ...sharedVue,
   server: {
     host: "127.0.0.1",
     port: 5173,
