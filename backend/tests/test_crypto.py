@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import cv2
@@ -126,8 +127,14 @@ def _build_report_with_env(tmp_path: Path, monkeypatch, key: str | None) -> tupl
         with TestClient(app) as client:
             pdf_resp = client.get(pdf_url)
         assert pdf_resp.status_code == 200, pdf_resp.text
+        images_dir_env = os.environ.get("SCAN_PATHS__IMAGES_DIR", "<unset>")
+        listed = sorted(p.name for p in Path(tmp_path).rglob("*") if p.is_file())[:20]
         copies = list(Path(tmp_path / "images").glob(f"{image_id}.*"))
-        assert copies, "影像副本应已落盘"
+        assert copies, (
+            f"影像副本应已落盘：images_dir_env={images_dir_env} "
+            f"cfg_images_dir={deps.get_registry().config.paths.images_dir} "
+            f"tmp_files={listed}"
+        )
         return copies[0], pdf_resp.content
     finally:
         reg.config.density.low = orig_low
