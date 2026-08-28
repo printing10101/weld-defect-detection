@@ -1,4 +1,4 @@
-"""SWRD → YOLO 格式转换（M4b，零训练前的 ingestion）。
+"""SWRD → YOLO 格式转换（，零训练前的 ingestion）。
 
 SWRD 官方标注为**多边形实例级**（porosity/inclusion/crack/undercut/
 lack_of_fusion/lack_of_penetration）。本模块把任意常见格式归一为 YOLO txt：
@@ -31,7 +31,7 @@ def _flatten_points(pts: list) -> list[float]:
 
     pts 可能是成对坐标 [[x,y],...]（labelme/COCO 多边形）或展平坐标 [x,y,x,y,...]。
     旧实现误用未定义变量 p 且只取首点两点 → 成对格式下 NameError 且结果错误，
-    这里抽取为纯函数便于单元测试（§回归防护）。
+    这里抽取为纯函数便于单元测试。
     """
     if pts and isinstance(pts[0], (list, tuple)):
         return [float(coord) for pt in pts for coord in pt]

@@ -2,7 +2,7 @@
 
 流程：
 1. 生成更真实、更大规模的合成 X 光焊缝数据集（约 N 张，640×640，6 类缺陷 + 背景）。
-2. dataset_builder.build_dataset() 重建 8:1:1 划分与 data.yaml。
+2. dataset_builder.build_dataset 重建 8:1:1 划分与 data.yaml。
 3. 从零训练 YOLOv8n（yolov8n.yaml，无预训练权重下载，离线安全）。
 4. 在 test 划分上评估 → mAP@0.5 / mAP@0.5:0.95 / 各类 AP / P / R。
 5. 指标落盘 data/runs/planB_metrics.json 并打印摘要。

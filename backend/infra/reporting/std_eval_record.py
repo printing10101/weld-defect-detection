@@ -1,7 +1,7 @@
 """附录A 评价记录表 PDF 生成（DB50/T 1807-2025 表A.1，reportlab）。
 
 与评片报告（pdf_reporter.py）同一技术栈与字体策略；输出经 pdfa.postprocess_to_pdfa
-转写 PDF/A-1b（长期归档）。资质不符合/FRR 未测时在表内明示"参考值"（比标准严）。
+转写 PDF/A-1b（长期归档）。资质不符合/FRR 未测时在表内明示"参考值"。
 """
 
 from __future__ import annotations
@@ -93,7 +93,7 @@ def build_record_pdf(record: dict[str, Any], out_pdf: str | Path) -> Path:
         [P("KDR 重点关注缺陷识别率"), P(f'{met["kdr"]:.2%}'), P("WDR 综合缺陷识别率"), P(f'{met["wdr"]:.2%}'), P("TDR 综合正检率"), P(f'{met["tdr"]:.2%}')],
         [P("严格口径（IOU≥0.3）"), P(f'KDR={met["kdr_strict"]:.2%}；WDR={met["wdr_strict"]:.2%}；TDR={met["tdr_strict"]:.2%}；FRR={met["frr_strict"]:.2%}'), P(""), P(""), P(""), P("")],
         [P("底片误报率 FRR"), P(f'{met["frr"]:.2%}'), P("标准分级"), P(grad["level_standard"] or "未定级"), P("严格口径分级"), P(grad["level_strict"] or "未定级")],
-        [P("系统分级结果"), P(f'{_chk(level, "L1")} L1　{_chk(level, "L2")} L2　{_chk(level, "L3")} L3　{_chk(level, "L4")} L4　{("（记录值，取严）" if level else "（未定级）")}')],
+        [P("系统分级结果"), P(f'{_chk(level, "L1")} L1　{_chk(level, "L2")} L2　{_chk(level, "L3")} L3　{_chk(level, "L4")} L4　{("（记录值，取较差口径）" if level else "（未定级）")}')],
         [P("风险分析结果"), P(
             f'漏检风险：{_risk_chk(risks, "miss", "Ⅰ类")} Ⅰ类　{_risk_chk(risks, "miss", "Ⅱ类")} Ⅱ类　　'
             f'误检风险：{_risk_chk(risks, "false_detect", "Ⅰ类")} Ⅰ类　{_risk_chk(risks, "false_detect", "Ⅱ类")} Ⅱ类　　'

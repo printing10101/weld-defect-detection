@@ -1,15 +1,15 @@
-"""NB/T47013.2-2015 标准判定引擎（§6，M5 实现）。
+"""NB/T47013.2-2015 标准判定引擎。
 
-实现冻结的 StandardGrader 契约。规则框架基于公开解读（§6.2）：
+实现冻结的 StandardGrader 契约。规则框架基于公开解读：
 - 零容忍：裂纹/未熔合/未焊透在 I-III 级均不允许 → 存在即 IV 级；
 - 圆形缺陷：按 T 选评定区 → 区内点数求和 → 对照点数上限分级；
   长径 > T/2 直判 IV；小于不计点数阈值的不计；
 - 条形缺陷：单个最大长度对照限值（II ≤T/3(min4)且≤20；III ≤2T/3(min6)且≤30）；
 - 综合评级：圆形级别 + 条形级别 − 1（≤IV）。
 
-熔断（§T8）：tables.authorized=false 时**不输出任何级别**，抛
+熔断：tables.authorized=false 时**不输出任何级别**，抛
 GradingAmbiguousError（应用层转 422，前端视为"需人工复核"）。
-⚠️ 数值全部来自表（YAML，公开参考占位）；正式使用须以授权原文复核并置 authorized=true。
+ 数值全部来自表（YAML，公开参考占位）；正式使用须以授权原文复核并置 authorized=true。
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ class Nb47013Grader:
         spacing = context.pixel_spacing_mm
         if spacing is None or spacing <= 0:
             raise GradingAmbiguousError("缺少有效像素标定 pixel_spacing_mm，无法换算物理尺寸")
-        # 人工兜底：任一检测不确定性超阈值则升级人工复核（M4b + ADR-010）
+        # 人工兜底：任一检测不确定性超阈值则升级人工复核（ + ）
         needs_human = any(d.uncertainty > self.review_uncertainty for d in defects)
 
         if any(d.class_id in _ZERO_TOLERANCE for d in defects):
@@ -59,7 +59,7 @@ class Nb47013Grader:
                 need_review=True,
             )
 
-        # §6.2 深孔（黑度>母材）直判 IV：检测器/管线标注的深孔缺陷一律 IV。
+        # 深孔（黑度>母材）直判 IV：检测器/管线标注的深孔缺陷一律 IV。
         # 特征来源（deep_hole 字段）由检测侧提供；本规则保证"标注即直判"，
         # 不依赖尺寸/点数（深孔属重大缺陷，与零容忍同级对待）。
         deep_holes = [d for d in defects if d.deep_hole]
@@ -83,7 +83,7 @@ class Nb47013Grader:
 
         if round_defs and linear_defs:
             ro, lo = _ORDER[round_level], _ORDER[linear_level]
-            # §6.2 综合评级：round_level + linear_level − 1（≤IV）
+            # 综合评级：round_level + linear_level − 1（≤IV）
             combined = min(4, ro + lo - 1)
             joint = _from_order(combined)
             combined_basis = (
@@ -114,7 +114,7 @@ class Nb47013Grader:
             else:
                 per.append(self._grade_linear([d], t, spacing))
 
-        # §6.4 尺寸临界（长径≈T/2、点数压线、条形长度压线）→ 需人工复核
+        # 尺寸临界（长径≈T/2、点数压线、条形长度压线）→ 需人工复核
         near_critical = self._near_critical(defects, round_defs, t, spacing)
         return self._result(
             joint, tuple(per), basis, need_review=bool(needs_human or near_critical or concav_defs)
@@ -141,7 +141,7 @@ class Nb47013Grader:
         if not scored:
             return self._limits_level(t, 0)
         # 以每个缺陷为评定区左上锚点滑窗，取区内点数最大者定为该区域级别；
-        # 同步统计窗口内不计点数缺陷数量（§6.2 降级条件）。
+        # 同步统计窗口内不计点数缺陷数量。
         worst_points = 0
         worst_ignored = 0
         for ax, ay, _, _ in scored:
@@ -158,7 +158,7 @@ class Nb47013Grader:
             worst_points = max(worst_points, pts)
             worst_ignored = max(worst_ignored, ignored)
         level = self._limits_level(t, worst_points)
-        # §6.2：I 级及 T≤5mm 的 II 级评定区内不计点缺陷>10 个 → 降一级
+        # I 级及 T≤5mm 的 II 级评定区内不计点缺陷>10 个 → 降一级
         if (level is JointLevel.I or (t <= 5 and level is JointLevel.II)) and worst_ignored > 10:
             return _from_order(min(4, _ORDER[level] + 1))
         return level
@@ -166,7 +166,7 @@ class Nb47013Grader:
     def _grade_linear(self, linear_defs: list[Detection], t: float, spacing: float) -> JointLevel:
         if not linear_defs:
             return JointLevel.I
-        # §6.2 同线间距≤小缺陷长度 → 合并（先合并再判单条/组累计，防止割裂计数）
+        # 同线间距≤小缺陷长度 → 合并（先合并再判单条/组累计，防止割裂计数）
         merged = self._merge_collinear(linear_defs, spacing)
         worst = max(e - s for s, e in merged)
         lim2, lim3 = self._linear_limits(t)
@@ -176,7 +176,7 @@ class Nb47013Grader:
             single = JointLevel.III
         else:
             return JointLevel.IV
-        # §6.2 组内(12T区)累计：II 级累计 ≤2T/3(最小6)且≤30（组表缺失时按单条判定）
+        # 组内(12T区)累计：II 级累计 ≤2T/3(最小6)且≤30（组表缺失时按单条判定）
         group = self.tables.data["linear_limits"].get("group")
         if group is None:
             return single
@@ -195,7 +195,7 @@ class Nb47013Grader:
         return max(single, group_level, key=lambda L: _ORDER[L])
 
     def _linear_limits(self, t: float) -> tuple[float, float]:
-        """条形单条限值 (lim2, lim3)（§6.2）。"""
+        """条形单条限值 (lim2, lim3)。"""
         l2 = self.tables.data["linear_limits"]["level2"]
         l3 = self.tables.data["linear_limits"]["level3"]
         lim2 = min(max(t * l2["t_factor"], l2["min_mm"]), l2["max_mm"])
@@ -209,7 +209,7 @@ class Nb47013Grader:
         t: float,
         spacing: float,
     ) -> bool:
-        """§6.4 尺寸临界判定：长径≈T/2、条形长度压线、点数压线 → True。
+        """ 尺寸临界判定：长径≈T/2、条形长度压线、点数压线 → True。
 
         与 uncertainty 高触发同义（任一命中即 need_review），保证临界缺陷
         即便高置信也进入人工复核。
@@ -271,7 +271,7 @@ class Nb47013Grader:
         )
 
     def _merge_collinear(self, defs: list[Detection], spacing: float) -> list[tuple[float, float]]:
-        """同线间距≤小缺陷长度 → 合并（§6.2）。
+        """同线间距≤小缺陷长度 → 合并。
 
         简化：缺陷长轴方向即投影轴（水平 bbox 投 x，垂直投 y）——假设焊缝方向
         与检测框长轴一致，故所有条形缺陷沿各自长轴一维投影；排序后贪心合并，

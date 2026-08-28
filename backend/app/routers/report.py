@@ -1,6 +1,6 @@
-"""报告生成（§7.2，M6 真实实现）。
+"""报告生成。
 
-两种模式（§14 POST /api/v1/report）：
+两种模式：
 - 上传新影像 + 表单 → InspectionPipeline 全链路（校验→预处理→检测→判定→落库→PDF）；
 - 传 image_id → 对已入库检查重新生成报告（不重跑检测/判定）。
 PDF 下载：GET /api/v1/report/{report_id}/pdf。
@@ -32,7 +32,7 @@ class ReportOut(BaseModel):
     evaluable: bool
     defect_count: int
     disclaimer: str | None = None
-    # 合规处置建议（P0-E）：accept | conditional | rework | recheck
+    # 合规处置建议：accept | conditional | rework | recheck
     disposition: str | None = None
     disposition_label: str | None = None
     disposition_actions: list[str] = []
@@ -40,7 +40,7 @@ class ReportOut(BaseModel):
 
 
 class ReportDetectionsOut(BaseModel):
-    """报告对应影像的缺陷明细（§5.5/§5.6 主动学习闭环回流用）。
+    """报告对应影像的缺陷明细。
 
     前端凭此取得逐缺陷的像素 bbox/class_id/置信度/不确定性，经人工复核后
     回流训练池（POST /active/export）。缺陷坐标为存储的 bbox_px 像素值；
@@ -76,7 +76,7 @@ async def report(
 ) -> ReportOut:
     pipeline = InspectionPipeline(reg)
     tpl = template or "standard"
-    # 责任工程师签字默认取操作员（闭合 T1/T2 占位）；显式提供时优先。
+    # 责任工程师签字默认取操作员（闭合 / 占位）；显式提供时优先。
     effective_signer = signer or operator
     actor = operator  # 审计 actor = 操作员（X-Operator-Name 头）
 
@@ -101,7 +101,7 @@ async def report(
                 detail={"code": "NOT_FOUND", "message": f"image not found: {image_id}"},
             ) from None
     elif image is not None:
-        # 新评片模式：全链路（检测+渲染 PDF 为重同步任务，进线程池，§13.11）
+        # 新评片模式：全链路（检测+渲染 PDF 为重同步任务，进线程池，）
         roi = parse_roi(iqi_roi)
         async with staged_upload(image, reg.config) as tmp_path:
             out = await run_in_threadpool(
@@ -151,7 +151,7 @@ def report_pdf(
             status_code=404,
             detail={"code": "NOT_FOUND", "message": f"report not found: {report_id}"},
         )
-    # 收敛到 reports_dir 之内，避免 DB 中若存了绝对路径导致的越界读取（§13.9）
+    # 收敛到 reports_dir 之内，避免 DB 中若存了绝对路径导致的越界读取
     pdf = safe_resolve(
         Path(_resolve_path(reg.config.paths.reports_dir)),
         Path(str(rep["pdf_path"])).name,
@@ -183,7 +183,7 @@ def report_detections(
     report_id: str,
     reg: Annotated[Registry, Depends(get_registry)],
 ) -> ReportDetectionsOut:
-    """报告对应影像的缺陷明细（主动学习回流数据源，§5.5/§5.6）。
+    """报告对应影像的缺陷明细（主动学习回流数据源，）。
 
     闭环链路：评片 → 此处取明细 → 人工复核/改判 → POST /active/export 回流
     训练池（YOLO 标注 + 数据版本指纹）→ 供训练脚本合并重训。

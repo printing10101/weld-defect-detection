@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 批量进度面板（§12.1）：进度条 + 计数 + 逐任务状态 + 取消/重试操作。 */
+/** 批量进度面板：进度条 + 计数 + 逐任务状态 + 取消/重试操作。 */
 import type { BatchStatusOut } from "../types/api";
 
 defineProps<{ status: BatchStatusOut }>();

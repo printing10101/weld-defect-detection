@@ -116,7 +116,7 @@ class TestTrainOnlySources:
         test = {p.name for p in (out / "test" / "images").iterdir()}
         # 伪标签全部进 train
         assert {"p1.png", "p2.png", "p3.png", "p4.png", "p5.png", "p6.png"} <= train
-        # 伪标签绝不进 val/test
+        # 伪标签不进 val/test
         assert not ({"p1.png", "p2.png", "p3.png", "p4.png", "p5.png", "p6.png"} & (val | test))
 
     def test_discover_finds_pseudo(self, tmp_path: Path):

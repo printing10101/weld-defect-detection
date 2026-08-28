@@ -1,13 +1,13 @@
-"""评估 Harness 与回归门禁（§15.6 / §7.4，M6 实现）。
+"""评估 Harness 与回归门禁。
 
-规格书要求：
-- Golden Set：固定、版本化、禁止用于训练；每次提交自动评估（§15.6）；
+设计文档要求：
+- Golden Set：固定、版本化、禁止用于训练；每次提交自动评估；
 - 回归门禁：PR 不得使 mAP@0.5 下降 >1.0 点，否则阻断合并；
-- 评估 Harness：固定测试集 + 持续评估脚本（§7.4）。
+- 评估 Harness：固定测试集 + 持续评估脚本。
 
 本模块提供**纯 numpy 实现**的检测评估（IoU 匹配 → AP/mAP@0.5/召回/精确），
 不依赖 sklearn/onnxruntime，可离线单测；Golden Set 以"目录 + 内容哈希指纹"
-轻量实现（DVC 的数据版本语义的本地替代，见 §7.4 数据版本）。
+轻量实现（DVC 的数据版本语义的本地替代，见  数据版本）。
 
 输入协议（preds/targets）：
 - 预测: list[dict]  {bbox:[x,y,w,h], class_id:int, score:float}
@@ -26,7 +26,7 @@ import numpy as np
 
 @dataclass(frozen=True)
 class GateResult:
-    """回归门禁结果（§15.6）：任一指标超差即阻断。"""
+    """回归门禁结果：任一指标超差即阻断。"""
 
     passed: bool
     deltas: dict[str, float]  # 当前 - 基线（负=退化）
@@ -99,7 +99,7 @@ def detection_metrics(
     targets: list[dict[str, Any]],
     iou_threshold: float = 0.5,
 ) -> dict[str, Any]:
-    """计算 mAP@0.5 / 召回 / 精确（逐类加权，§15.6 门禁依据）。"""
+    """计算 mAP@0.5 / 召回 / 精确（逐类加权， 门禁依据）。"""
     by_class: dict[int, dict[str, list]] = {}
     for p in preds:
         by_class.setdefault(p["class_id"], {"preds": [], "targets": []})["preds"].append(p)
@@ -146,7 +146,7 @@ def check_regression(
     recall_tolerance: float = 0.02,
     precision_tolerance: float = 0.02,
 ) -> GateResult:
-    """回归门禁：当前 vs 基线，任一指标退化超容差即阻断（§15.6）。"""
+    """回归门禁：当前 vs 基线，任一指标退化超容差即阻断。"""
     deltas = {
         "mAP50": round(current["mAP50"] - baseline["mAP50"], 4),
         "recall": round(current["recall"] - baseline["recall"], 4),
@@ -163,7 +163,7 @@ def check_regression(
 
 
 # ---------------------------------------------------------------------------
-# Golden Set 轻量版本化（§15.6 / §7.4 数据版本的本地替代）
+# Golden Set 轻量版本化
 # ---------------------------------------------------------------------------
 
 
@@ -186,7 +186,7 @@ def golden_set_fingerprint(directory: str | Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 评估报告落盘（供 models API 展示 metric_map，§7.4 模型卡）
+# 评估报告落盘（供 models API 展示 metric_map， 模型卡）
 # ---------------------------------------------------------------------------
 
 
@@ -219,7 +219,7 @@ def save_eval_report(
 
 
 def load_eval_report(model_id: str, eval_dir: str | Path) -> dict[str, Any] | None:
-    """读取某模型的最近评估报告；无则返回 None（不臆造指标）。"""
+    """读取某模型的最近评估报告；无则返回 None。"""
     path = Path(eval_dir) / f"{model_id.replace('::', '__')}.json"
     if not path.exists():
         return None

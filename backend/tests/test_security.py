@@ -1,4 +1,4 @@
-"""P2-9 测试：安全响应头 + 基础限流（§7.5 / §13.9）。"""
+"""P2-9 测试：安全响应头 + 基础限流。"""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def test_security_headers_present() -> None:
 
 
 def test_rate_limit_429() -> None:
-    """超过限流阈值 → 429 RATE_LIMITED（§13.9 防打爆）。"""
+    """超过限流阈值 → 429 RATE_LIMITED。"""
 
     # 构造一个 limit=3 的独立应用，避免污染全局 app 的限流计数
     from fastapi import FastAPI

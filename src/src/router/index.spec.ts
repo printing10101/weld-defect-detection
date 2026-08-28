@@ -1,4 +1,4 @@
-/** 工作台路由单元测试（T4-3 / T4-4）：四工作区注册、默认重定向、直接导航。 */
+/** 工作台路由单元测试（ / ）：四工作区注册、默认重定向、直接导航。 */
 import { createMemoryHistory } from "vue-router";
 import { describe, expect, it } from "vitest";
 import { createAppRouter, routeNameToViewId, routes } from "./index";

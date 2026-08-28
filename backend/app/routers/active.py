@@ -1,8 +1,8 @@
-"""主动学习闭环 API（§5.5/§5.6，M7 真实实现）。
+"""主动学习闭环 API。
 
 闭环编排：检测结果 → 高价值采样（优先人工标注）→ 人工确认缺陷回流
 训练池（YOLO 标注 + 数据版本 manifest）→ 供训练脚本合并重训。
-只做编排，标注/采样算法在 domain/active_learning.py（§19.1 分层）。
+只做编排，标注/采样算法在 domain/active_learning.py。
 """
 
 from __future__ import annotations
@@ -120,7 +120,7 @@ def active_export(
     req: ExportIn,
     reg: Annotated[Registry, Depends(get_registry)],
 ) -> ExportOut:
-    """人工确认缺陷回流训练池（§5.5：人工复核结果写入训练池）。
+    """人工确认缺陷回流训练池。
 
     写 pool_dir/{image_stem}.txt（YOLO normalized），随后重算数据版本
     manifest（指纹随标注内容变化 → 训练侧可据此判断是否需重训）。

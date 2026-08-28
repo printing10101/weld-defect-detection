@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** 应用壳（AutoCAD/WPS 桌面软件范式）：
  *  MenuBar（菜单栏）→ RibbonBar（工具栏）→ DocTabs（文档标签页）→ main（RouterView 工作区）→ StatusBar（状态栏）。
- *  当前工作区由 Vue Router 驱动（T4-3），操作员状态来自 Pinia workspace store（T4-1）。
+ *  当前工作区由 Vue Router 驱动，操作员状态来自 Pinia workspace store。
  *  快捷键：Ctrl+1..4 切换工作区，Ctrl+O/Ctrl+Shift+O 打开影像/批量导入。
  *  帮助菜单提供「快捷键」「关于」模态（桌面软件标准 About 对话框）。 */
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";

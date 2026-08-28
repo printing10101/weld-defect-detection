@@ -1,7 +1,7 @@
 """轻量进程内指标注册表（可观测性基础设施，无第三方依赖）。
 
 为"未来接 Prometheus / OpenTelemetry"预留的边界：
-- 业务代码只调用 `get_metrics().inc / observe`，不感知导出方式；
+- 业务代码只调用 `get_metrics.inc / observe`，不感知导出方式；
 - 导出端点是唯一出口（`/api/v1/metrics`，见 app/routers/metrics.py）；
 - 替换实现（如接入 OTEL）只改本模块与导出端点，不动业务调用点。
 

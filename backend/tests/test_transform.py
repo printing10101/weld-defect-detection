@@ -1,4 +1,4 @@
-"""train/serve 预处理一致性测试（ADR-007 / §T3）。"""
+"""train/serve 预处理一致性测试（ / ）。"""
 
 from __future__ import annotations
 

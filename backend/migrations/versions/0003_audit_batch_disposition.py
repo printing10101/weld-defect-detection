@@ -2,9 +2,9 @@
 
 Revision ID: 0003_audit_batch_disposition
 Revises: 0002_devices_report_hash
-Create Date: 2026-08-15
+Create Date:
 
-P1-F 审计增强（可空列，向后兼容）：
+ 审计增强（可空列，向后兼容）：
 - images.batch_no   : 批量追溯（batch 导入/复评批次）
 - defects.disposition: 处置建议快照（accept | conditional | rework | recheck）
 """

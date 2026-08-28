@@ -1,4 +1,4 @@
-"""verify 端点集成测试（§4.2 / §T5）。"""
+"""verify 端点集成测试。"""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def test_verify_endpoint_shape() -> None:
 
 
 def test_verify_rejects_non_image() -> None:
-    """解码失败 → ImageUnreadableError → 400 IMG_UNREADABLE（§14 错误码表）。
+    """解码失败 → ImageUnreadableError → 400 IMG_UNREADABLE。
 
     此前无全局处理器时该路径漏成 500，属实现缺陷而非契约。
     """
@@ -90,7 +90,7 @@ def _upload_dark_lines(amps: list[float], n: int = 19) -> bytes:
 
 
 def test_verify_hole_type() -> None:
-    """iqi_type=hole 应走孔型识别，返回 iqi_type=='hole'（§4.2 线型或孔型）。"""
+    """iqi_type=hole 应走孔型识别，返回 iqi_type=='hole'。"""
     with TestClient(app) as client:
         resp = client.post(
             "/api/v1/verify",
@@ -103,7 +103,7 @@ def test_verify_hole_type() -> None:
 
 
 def test_verify_grade_with_thickness() -> None:
-    """传入透照厚度 → iqi.grade 由可达丝号+厚度映射（§4.2 A/AB/B）。
+    """传入透照厚度 → iqi.grade 由可达丝号+厚度映射。
 
     全幅 19 丝、厚度 1.0mm（≤2mm 要求丝号 14）→ 最高等级 A。
     """

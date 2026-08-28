@@ -150,7 +150,7 @@ def test_backup_restore_api_roundtrip() -> None:
 
 
 def test_api_rejects_traversal_archive_name() -> None:
-    """路径穿越防护：归档名不得越出 backups 目录（§T4 安全边界）。"""
+    """路径穿越防护：归档名不得越出 backups 目录。"""
     with TestClient(app) as client:
         res = client.post("/api/v1/system/restore", json={"archive": "../evil.zip"})
         assert res.status_code == 422

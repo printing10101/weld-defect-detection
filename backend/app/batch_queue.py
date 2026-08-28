@@ -1,15 +1,15 @@
-"""批量任务队列（§12.1，M6 真实实现）。
+"""批量任务队列。
 
 BatchManager 用线程池多 worker 并行跑 ``InspectionPipeline.run_inspection``
-单图全链路（校验→预处理→检测→判定→落库→报告），满足规格书能力：
+单图全链路（校验→预处理→检测→判定→落库→报告），支持以下能力：
 - 任务队列：提交后逐图入队，异步执行（接口立即返回 batch_id）；
 - 多 worker 并行推理：``ThreadPoolExecutor``（worker 数可配）；
-- 进度可视化：``status()`` 返回 done/total/failed + 每任务明细；
+- 进度可视化：``status`` 返回 done/total/failed + 每任务明细；
 - 失败隔离：单图异常捕获记 failed + error，不影响其余任务；
 - 断点续跑：批次状态以 JSON 快照落盘（data/batch/{batch_id}.json），
-  进程重启后 ``status()`` 仍可读历史与未完成标记（v1 不自动重跑，
+  进程重启后 ``status`` 仍可读历史与未完成标记（v1 不自动重跑，
   已完成任务结果已入库，可重新提交未完成项继续）；
-- 取消：``cancel()`` 标记批次取消，未启动任务不再执行（running 任务
+- 取消：``cancel`` 标记批次取消，未启动任务不再执行（running 任务
   线程不可抢占，v1 等待其自然结束，结果保留）。
 
 线程安全：所有状态变更在 ``_lock`` 内；worker 只读快照对象并回写结果。
@@ -229,7 +229,7 @@ class BatchManager:
         self._closed = True
 
     def _ensure_pool(self) -> None:
-        """若线程池已随 shutdown() 关闭（如测试生命周期中 lifespan 多次启停），
+        """若线程池已随 shutdown 关闭（如测试生命周期中 lifespan 多次启停），
         惰性重建，使单例 BatchManager 在进程内可继续接收提交（生产真实退出后
         不再有新提交，不受影响）。"""
         if self._closed:
@@ -241,7 +241,7 @@ class BatchManager:
     # ------------------------------------------------------------------
     def _run_one(self, batch_id: str, task_id: str, item: BatchItem) -> None:
         # 锁仅保护状态变更；落盘（序列化整批 JSON + 写盘，I/O 较重）移到锁外，
-        # 避免每次状态变更阻塞全部 worker（§优化 F10：消除持锁全量写盘的吞吐瓶颈）。
+        # 避免每次状态变更阻塞全部 worker。
         with self._lock:
             batch = self._batches[batch_id]
             if batch["cancelled_flag"]:
@@ -280,7 +280,7 @@ class BatchManager:
         batch["done"] = sum(1 for t in batch["tasks"] if t["status"] == "done")
         batch["failed"] = sum(1 for t in batch["tasks"] if t["status"] == "failed")
         batch["cancelled"] = sum(1 for t in batch["tasks"] if t["status"] == "cancelled")
-        # 注意：落盘由调用方在锁外执行（§优化 F10），此处仅变更内存状态。
+        # 注意：落盘由调用方在锁外执行，此处仅变更内存状态。
 
     def _maybe_finish(self, batch: dict) -> None:
         if batch["status"] == "finished":
@@ -332,7 +332,7 @@ class BatchManager:
     def _load_existing(self) -> None:
         """启动时恢复历史批次快照（断点续跑的可查部分）。
 
-        F11：进程崩溃/重启时处于 running/pending 的任务实际已中断，若原样恢复会
+：进程崩溃/重启时处于 running/pending 的任务实际已中断，若原样恢复会
         永久显示「运行中」且永不重跑。这里把它们标记为 failed（interrupted），
         用户可经 retry 重新入队（retry 兼容 failed/cancelled）。
         """

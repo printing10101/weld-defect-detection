@@ -1,4 +1,4 @@
-"""合规处置建议（P0-E，POST /api/v1/recommend）。
+"""合规处置建议（，POST /api/v1/recommend）。
 
 与 /judge 的区别：judge 在未授权/熔断时 422 硬失败；recommend **永不硬失败**——
 评级不可得（未授权/方法标准/信息不足）时降级为「需人工复核」并附免责声明，

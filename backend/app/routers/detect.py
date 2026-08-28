@@ -1,7 +1,7 @@
-"""缺陷检测 + 量化（§5，M4b 掩膜精修版）。
+"""缺陷检测 + 量化。
 
-multipart 上传 → 加载 → 增强(§4.3) → 训练模型检测器(YoloDetector) → 掩膜精修
-(MaskQuantifier，§5.3/§5.4) → 量化(掩膜级 L/W/面积/周长) → 标注图。
+multipart 上传 → 加载 → 增强 → 训练模型检测器(YoloDetector) → 掩膜精修
+(MaskQuantifier，) → 量化(掩膜级 L/W/面积/周长) → 标注图。
 检测在增强图上进行，掩膜精修在增强图 ROI 取轮廓；标注图叠加在原始灰阶上。
 """
 
@@ -73,7 +73,7 @@ async def detect(
     conf_v = conf if conf is not None else dc.infer_conf
 
     async with staged_upload(image, reg.config) as tmp_path:
-        # 解码/推理/编码均为 CPU 密集同步调用，放线程池避免阻塞事件循环（§13.11）。
+        # 解码/推理/编码均为 CPU 密集同步调用，放线程池避免阻塞事件循环。
         return await run_in_threadpool(
             _detect_sync, reg, tmp_path, pixel_spacing_mm, conf_v, dc.infer_iou
         )
@@ -89,7 +89,7 @@ def _detect_sync(
     gray, meta = load_image(tmp_path)
     dc = reg.config.detect
     pp_cfg = reg.config.preprocess
-    # 与全链路一致：检测在增强图上进行（§4.3）；掩膜精修也在增强图 ROI 取轮廓。
+    # 与全链路一致：检测在增强图上进行；掩膜精修也在增强图 ROI 取轮廓。
     enhanced = gray
     if pp_cfg.enabled:
         pp = reg.preprocessor
@@ -104,7 +104,7 @@ def _detect_sync(
     out: list[DefectOut] = []
     for d in refined:
         g = quantifier.quantify(d, spacing, image=enhanced, cfg=mrc)
-        # 未标定（spacing_known=False）：物理字段置 None，绝不输出伪物理 mm/位置；
+        # 未标定（spacing_known=False）：物理字段置 None，不输出伪物理量；
         # aspect_ratio 为无量纲形状量，恒有效。与 /report grader 熔断保持单一语义。
         out.append(
             DefectOut(

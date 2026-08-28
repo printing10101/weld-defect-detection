@@ -1,8 +1,8 @@
-"""initial schema (§7.1 / §12.2 / §12.5)
+"""initial schema
 
 Revision ID: 0001_initial
 Revises:
-Create Date: 2026-08-11
+Create Date:
 
 Baseline migration: 创建 images / defects / reports / reviews / audit_log 五表，
 与 backend.infra.db.Base.metadata（create_all）完全对齐。后续 schema 演进走

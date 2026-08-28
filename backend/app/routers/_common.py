@@ -1,4 +1,4 @@
-"""路由公共工具（§T5）。
+"""路由公共工具。
 
 集中三件此前散落在各路由的事：
 1. multipart 上传暂存（含大小/扩展名限额与临时目录清理）；
@@ -23,7 +23,7 @@ _CHUNK = 1 << 20  # 1 MiB 分块读取，避免整文件驻留内存
 
 
 def not_implemented(stage: str) -> JSONResponse:
-    """M1 骨架期占位：返回 501 并标注计划实现里程碑（§19.5）。"""
+    """ 骨架期占位：返回 501 并标注计划实现里程碑。"""
     return JSONResponse(
         {
             "error": {
@@ -44,7 +44,7 @@ def _reject(status: int, code: str, message: str) -> NoReturn:
 async def staged_upload(upload: UploadFile, cfg: AppConfig) -> AsyncIterator[Path]:
     """把上传文件落到受控临时目录并产出路径，退出时连目录一并删除。
 
-    相较各路由原先的 `write_bytes(await image.read())`：
+    相较各路由原先的 `write_bytes(await image.read)`：
     - 分块写盘 + 累计计数，超过 upload.max_bytes 立即 413（原实现无上限，单请求可打爆内存）；
     - 扩展名白名单，非影像类型 415（原实现任意后缀均落盘）；
     - 临时目录随上下文退出清理（原实现只删文件，目录持续泄漏）。

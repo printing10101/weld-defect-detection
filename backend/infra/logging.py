@@ -1,4 +1,4 @@
-"""统一日志配置（可观测性基础设施，§13.5）。
+"""统一日志配置（可观测性基础设施，）。
 
 提供 `configure_logging(obs: ObservabilityCfg | None)`：
 - 固定 INFO 级别、统一格式（时间/级别/模块/消息）；
@@ -6,7 +6,7 @@
   便于接入日志采集/ELK/云日志，是十年数据积累的可观测基础；
 - log_format=text 时保持人类可读（本地开发默认）。
 
-配置三处同步（§T8）：default.yaml + schema.yaml + infra/config.py。
+配置三处同步：default.yaml + schema.yaml + infra/config.py。
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ class JsonFormatter(logging.Formatter):
     """将日志记录序列化为单行 JSON（结构化、可机器消费）。
 
     保留时间/级别/logger/消息；extra 自动并入顶层字段（如 model_uri），
-    崩溃信息完整保留。序列化失败回退字符串，绝不因日志抛异常。
+    崩溃信息完整保留。序列化失败回退字符串。
     """
 
     def format(self, record: logging.LogRecord) -> str:

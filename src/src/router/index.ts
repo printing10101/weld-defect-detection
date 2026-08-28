@@ -1,6 +1,6 @@
 /**
- * 工作台路由（Vue Router）——四个工作区由 URL 驱动（§四工作区路由）。
- * T4-3：用真实路由取代 AppShell 里基于 ref 的 v-show 手工切换，
+ * 工作台路由（Vue Router）——四个工作区由 URL 驱动。
+ *：用真实路由取代 AppShell 里基于 ref 的 v-show 手工切换，
  * 使「当前工作区」成为可寻址/可回溯的导航状态，为后续深链与多文档范式留出扩展位。
  * 采用 hash 历史：Tauri 生产以本地文件运行，hash 路由免去服务端 rewrite 配置。
  * createAppRouter(history?) 工厂便于单元测试注入 memory 历史。
@@ -27,7 +27,7 @@ export function createAppRouter(history = createWebHashHistory()) {
   return createRouter({ history, routes });
 }
 
-/** 应用级单例（生产/开发用）；测试请走 createAppRouter(createMemoryHistory())。 */
+/** 应用级单例（生产/开发用）；测试请走 createAppRouter(createMemoryHistory)。 */
 export const router = createAppRouter();
 
 /** 把路由名映射回操作层约定的 ViewId（兜底到单张检测）。 */

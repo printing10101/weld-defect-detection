@@ -1,4 +1,4 @@
-"""judge 端点集成测试（§6 / §T8 熔断）。"""
+"""judge 端点集成测试。"""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def test_judge_authorized_returns_level() -> None:
     assert body["joint_level"] == "III"
     assert body["per_defect_grade"], "应给出逐缺陷级别"
     assert isinstance(body["need_review"], bool)
-    # T1：未持有授权正本（authorized_copy=false）→ 响应必须带强免责声明，
+    # 未持有授权正本（authorized_copy=false）→ 响应必须带强免责声明，
     # 明确"非标准授权正本 / 不替代责任工程师法定评定"。
     assert body["disclaimer"] is not None
     assert "非标准授权正本" in body["disclaimer"]
@@ -56,7 +56,7 @@ def test_judge_missing_thickness_422() -> None:
 
 
 def test_judge_missing_spacing_fuses_422() -> None:
-    """未提供像素标定 → 不再静默 1.0 mm/px（伪物理），grader 熔断 422（§6/§T8）。"""
+    """未提供像素标定 → 不再静默 1.0 mm/px（伪物理），grader 熔断 422。"""
     body = _payload()
     body.pop("pixel_spacing_mm")
     with TestClient(app) as client:
@@ -72,7 +72,7 @@ def test_judge_empty_payload_422() -> None:
 
 
 def test_judge_skeleton_standard_fuses_422() -> None:
-    """§6.1 骨架标准（GB/T 3323 已注册未实现）→ grade 熔断 422。"""
+    """ 骨架标准（GB/T 3323 已注册未实现）→ grade 熔断 422。"""
     body = _payload()
     body["standard_id"] = "GB/T3323-2019"
     with TestClient(app) as client:
@@ -82,7 +82,7 @@ def test_judge_skeleton_standard_fuses_422() -> None:
 
 
 def test_judge_unknown_standard_422() -> None:
-    """§6.1 未注册标准 → 装配即 422。"""
+    """ 未注册标准 → 装配即 422。"""
     body = _payload()
     body["standard_id"] = "ISO-UNKNOWN-XXXX"
     with TestClient(app) as client:

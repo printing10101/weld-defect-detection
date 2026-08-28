@@ -1,4 +1,4 @@
-"""P0-B GLASS 式缺陷合成生成器测试（backend/training/defect_synth）。"""
+""" GLASS 式缺陷合成生成器测试（backend/training/defect_synth）。"""
 
 from __future__ import annotations
 

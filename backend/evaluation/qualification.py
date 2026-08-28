@@ -1,10 +1,10 @@
-"""评价/标注人员资质管理（DB50/T 1807-2025 §5 / TSG Z8001）。
+"""评价/标注人员资质管理（DB50/T 1807-2025  / TSG Z8001）。
 
 标准要求：
-- 系统评价人员：RT(D)Ⅱ 级及以上（§5.1）；
-- 标准测试集标注人员：RTⅡ 级及以上（§5.2）。
+- 系统评价人员：RT(D)Ⅱ 级及以上；
+- 标准测试集标注人员：RTⅡ 级及以上。
 
-比标准更严格：
+本实现口径（较标准收紧）：
 - 持证类型/证书编号/有效期全部落盘（data/eval/std_personnel.json，路径可配），
   记录表须引用实际记录，不接受前端随手填姓名；
 - 有效期过期 → 视为无资质；
@@ -57,19 +57,19 @@ class Personnel:
         try:
             return date.fromisoformat(self.valid_until) < date.today()
         except ValueError:
-            return True  # 日期格式非法 → 保守判过期（取严）
+            return True  # 日期格式非法按过期处理
 
 
 def required_level(role: str) -> int:
-    """岗位最低级别要求（§5）：评价/标注人员均为Ⅱ级及以上；未知岗位取最严（3 级）。
+    """岗位最低级别要求：评价/标注人员均为Ⅱ级及以上；未知岗位取最严（3 级）。
 
-    评价人员与标注人员的差别在资格类别（评价须 RT(D)，§5.1），不在级别。
+    评价人员与标注人员的差别在资格类别（评价须 RT(D)，），不在级别。
     """
     return 2 if role in ("evaluator", "labeler") else 3
 
 
 def check_personnel(people: list[Personnel]) -> dict[str, object]:
-    """资质校验：评价人员须 RT(D)Ⅱ+、标注人员须 RTⅡ+（§5）。
+    """资质校验：评价人员须 RT(D)Ⅱ+、标注人员须 RTⅡ+。
 
     返回 {"qualified": bool, "issues": [str], "evaluators": [...], "labelers": [...]}。
     任何岗位缺员、级别不足、证书过期、证书类型无法解析均计入 issues。
@@ -121,7 +121,7 @@ def load_personnel(path: str | Path) -> list[Personnel]:
 
 
 def save_personnel(people: list[Personnel], path: str | Path) -> Path:
-    """人员资质落盘（评价记录表的姓名/持证类型来源，§11.3.1）。"""
+    """人员资质落盘（评价记录表的姓名/持证类型来源，）。"""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(

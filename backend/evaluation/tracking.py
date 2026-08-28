@@ -1,6 +1,6 @@
-"""实验追踪 + 模型卡 + 数据版本（§7.4 MLOps，M6 实现）。
+"""实验追踪 + 模型卡 + 数据版本。
 
-规格书 §7.4 要求（v1 本地可离线、零外部服务依赖，可演进）：
+设计文档  要求（v1 本地可离线、零外部服务依赖，可演进）：
 - 实验追踪：记录超参/指标/产物（MLflow 可本地；本实现以 JSONL 落盘
   data/experiments/，字段语义对齐 MLflow Run，未来可一键导出/迁移）；
 - 模型注册：models 表 + 模型卡（精度、数据分布、局限、ethically 使用说明）；
@@ -23,7 +23,7 @@ from typing import Any
 
 
 class ExperimentTracker:
-    """本地实验追踪（JSONL，§7.4 可演进 MLflow）。
+    """本地实验追踪（JSONL， 可演进 MLflow）。
 
     每条 Run 一行 JSON：run_id, name, params, metrics, artifacts, created_at。
     并发安全：追加写 + 进程内锁；只追加不修改（审计友好）。
@@ -100,9 +100,9 @@ def build_model_card(
     limitations: list[str],
     ethics: list[str],
 ) -> dict[str, Any]:
-    """组装模型卡（§7.4：精度、数据分布、局限、ethically 使用说明）。
+    """组装模型卡。
 
-    与规格书 §7.1 models 表 metric_map 语义对齐：metric_map 存指标与数据分布，
+    与设计文档  models 表 metric_map 语义对齐：metric_map 存指标与数据分布，
     note 存局限/伦理；前端可据此展示"该模型能用在哪、不能信什么"。
     """
     return {
@@ -117,7 +117,7 @@ def build_model_card(
 
 
 def dataset_fingerprint(directory: str | Path) -> str:
-    """数据集目录内容哈希（DVC 数据版本语义的本地替代，§7.4）。
+    """数据集目录内容哈希（DVC 数据版本语义的本地替代，）。
 
     与 harness.golden_set_fingerprint 同算法；区别在语义：本函数用于训练集
     版本追踪（何时换了训练数据），后者用于固定评估集（Golden Set）版本锁定。

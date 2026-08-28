@@ -1,4 +1,4 @@
-"""PDF/A-1b 归档合规后处理（§7.2 / M7）。
+"""PDF/A-1b 归档合规后处理。
 
 reportlab 生成 PDF 后，本模块注入长期归档（PDF/A-1b）所必需的要素：
 - XMP 元数据（pdfaid part=1, conformance=B）——PDF/A 标识；
@@ -117,8 +117,8 @@ def postprocess_to_pdfa(
         root[NameObject("/OutputIntents")] = ArrayObject([writer._add_object(intent)])
 
     # 3. 文档 ID（trailer /ID，PDF/A 要求），由输出路径 + 页数派生稳定值。
-    #    注意属性名是 _ID 且必须是 ArrayObject[ByteStringObject]；写成 _id 或
-    #    裸 tuple 都会被 pypdf 忽略——产出的 PDF 将没有 /ID（原实现即如此）。
+    # 注意属性名是 _ID 且必须是 ArrayObject[ByteStringObject]；写成 _id 或
+    # 裸 tuple 都会被 pypdf 忽略——产出的 PDF 将没有 /ID（原实现即如此）。
     seed = str(out).encode("utf-8") + str(len(reader.pages)).encode("utf-8")
     doc_id = hashlib.sha256(seed).digest()[:16]
     writer._ID = ArrayObject([ByteStringObject(doc_id), ByteStringObject(doc_id)])

@@ -2,7 +2,7 @@
 
 与 CLI（backend/evaluation/run_std_eval.py）配合：CLI 产出指标 JSON
 （data/eval/std_eval.json），本路由负责记录表装配与归档输出。
-资质不满足（§5）或 FRR 未测时记录表标记"参考值"，不出正式分级（比标准严）。
+资质不满足或 FRR 未测时记录表标记"参考值"，不出正式分级。
 """
 
 from __future__ import annotations

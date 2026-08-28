@@ -1,4 +1,4 @@
-"""NB/T47013 规则引擎测试（§6，M5）。"""
+"""NB/T47013 规则引擎测试。"""
 
 from __future__ import annotations
 
@@ -131,9 +131,9 @@ def test_combined_rating() -> None:
 
 
 def test_combined_rating_spec_formula() -> None:
-    """§6.2 综合评级 = round + linear − 1（≤IV）：圆 II + 条 III → 2+3-1=4 → IV。
+    """ 综合评级 = round + linear − 1（≤IV）：圆 II + 条 III → 2+3-1=4 → IV。
 
-    旧实现（同级+1/取最差）在此给 III，规格书公式给 IV——本测试锁定规格书。
+    旧实现（同级+1/取最差）在此给 III，设计文档公式给 IV——本测试锁定设计文档。
     """
     grader = Nb47013Grader(_AUTHORIZED)
     # 圆：T=20 下 2 个 4mm 圆（各 6 点）→ 12 点 → II 级（上限 I:6 II:12 III:18）
@@ -145,7 +145,7 @@ def test_combined_rating_spec_formula() -> None:
 
 
 def test_ignored_small_defects_downgrade_when_many() -> None:
-    """§6.2：I 级评定区内不计点缺陷>10 个 → 降一级。
+    """：I 级评定区内不计点缺陷>10 个 → 降一级。
 
     T=20（>5），11 个 0.4mm 圆（≤不计点数阈值 0.5）→ 点数 0 → I 级，
     但不计点缺陷 11>10 → 降为 II。
@@ -160,7 +160,7 @@ def test_ignored_small_defects_downgrade_when_many() -> None:
 
 
 def test_linear_group_cumulative_downgrades() -> None:
-    """§6.2 组内(12T区)累计：单条均 ≤II 限值，但 12T 区内累计超 II 限值 → III。
+    """ 组内(12T区)累计：单条均 ≤II 限值，但 12T 区内累计超 II 限值 → III。
 
     T=30：单条 8mm（lim2=10 → 单条 II）；3 条间距 100mm（12T=360 区覆盖全部）
     累计 24mm > glim2=20 → 组级别 III → 综合 III。
@@ -177,7 +177,7 @@ def test_linear_group_cumulative_downgrades() -> None:
 
 
 def test_linear_collinear_merge() -> None:
-    """§6.2 同线间距≤小缺陷长度 → 合并：2 条 5mm 间距 2mm → 合并为 12mm。
+    """ 同线间距≤小缺陷长度 → 合并：2 条 5mm 间距 2mm → 合并为 12mm。
 
     T=30：合并后单条 12mm（lim2=10, lim3=20）→ III；不合并单条 5mm → II。
     """
@@ -191,7 +191,7 @@ def test_linear_collinear_merge() -> None:
 
 
 def test_size_near_critical_triggers_review() -> None:
-    """§6.4 尺寸临界：长径≈T/2 → need_review=True（即便级别正常也复核）。
+    """ 尺寸临界：长径≈T/2 → need_review=True（即便级别正常也复核）。
 
     长径 9.5mm（≈T/2=10 的 0.95 倍）：28 点 → IV 级，但因临界仍强制人工复核。
     """
@@ -209,7 +209,7 @@ def test_size_near_critical_triggers_review() -> None:
 
 
 def test_unsupported_standard_fuses() -> None:
-    """§6.1 未知标准（未注册）→ 装配即熔断。"""
+    """ 未知标准（未注册）→ 装配即熔断。"""
     from backend.domain.errors import GradingAmbiguousError
     from backend.domain.grade.registry import get_grader
 
@@ -218,7 +218,7 @@ def test_unsupported_standard_fuses() -> None:
 
 
 def test_registry_supports_skeletons() -> None:
-    """§6.1 骨架标准已注册（可装配），但 grade() 熔断。"""
+    """ 骨架标准已注册（可装配），但 grade 熔断。"""
     from backend.domain.errors import GradingAmbiguousError
     from backend.domain.grade.registry import get_grader, supported_standard_ids
 
@@ -229,7 +229,7 @@ def test_registry_supports_skeletons() -> None:
 
 
 def test_table_loader_rejects_bad_group_structure() -> None:
-    """§T8 启动即失败：linear_limits.group 结构不完整必须报错。"""
+    """ 启动即失败：linear_limits.group 结构不完整必须报错。"""
     from backend.domain.standards.tables import loader as table_loader
 
     bad = {
@@ -251,7 +251,7 @@ def test_table_loader_rejects_bad_group_structure() -> None:
 
 
 def test_deep_hole_direct_iv() -> None:
-    """§6.2 深孔（黑度>母材）直判 IV：即便尺寸小、点数低也直判，且强制人工复核。"""
+    """ 深孔（黑度>母材）直判 IV：即便尺寸小、点数低也直判，且强制人工复核。"""
     grader = Nb47013Grader(_AUTHORIZED)
     # 小尺寸圆形缺陷 + deep_hole=True（检测器标注）→ 直判 IV（与尺寸/点数无关）
     hole = Detection(
@@ -282,7 +282,7 @@ def test_deep_hole_direct_iv() -> None:
 
 
 def test_grade_disclaimer_present_when_no_authorized_copy() -> None:
-    """T1：未持有授权正本（authorized_copy 默认 False）→ GradeResult 带强声明。
+    """：未持有授权正本（authorized_copy 默认 False）→ GradeResult 带强声明。
 
     _AUTHORIZED 仅置 authorized=True（数值完整可运算），未置 authorized_copy，
     故免责声明须明确"非标准授权正本 / 不替代责任工程师法定评定"。
@@ -295,7 +295,7 @@ def test_grade_disclaimer_present_when_no_authorized_copy() -> None:
 
 
 def test_disclaimer_for_authorized_copy_true_is_light() -> None:
-    """T1：authorized_copy=True（已持授权正本并签核）→ 轻声明，不含"非授权正本"措辞。"""
+    """：authorized_copy=True（已持授权正本并签核）→ 轻声明，不含"非授权正本"措辞。"""
     tables = StandardTables(
         standard_id="NB/T47013.2-2015",
         version="2015",
@@ -309,7 +309,7 @@ def test_disclaimer_for_authorized_copy_true_is_light() -> None:
 
 
 def test_disclaimer_for_no_copy_includes_source_note() -> None:
-    """T1：authorized_copy=False 时免责声明包含 source_note（来源说明）。"""
+    """：authorized_copy=False 时免责声明包含 source_note（来源说明）。"""
     tables = StandardTables(
         standard_id="NB/T47013.2-2015",
         version="2015",

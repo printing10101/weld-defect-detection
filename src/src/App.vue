@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 全局离线/模型加载提示的宿主；状态与轮询逻辑已下沉到 Pinia backend store（T4-2）。 */
+/** 全局离线/模型加载提示的宿主；状态与轮询逻辑已下沉到 Pinia backend store。 */
 import { onMounted, onUnmounted } from "vue";
 import AppShell from "./components/AppShell.vue";
 import { useBackendStore } from "./stores/backend";
@@ -7,7 +7,7 @@ import { useBackendStore } from "./stores/backend";
 const backend = useBackendStore();
 
 onMounted(() => {
-  // 后端不可达/超时 → 全局离线横幅 + 自动轮询恢复；任意成功响应 → 清除（§优化 F18）
+  // 后端不可达/超时 → 全局离线横幅 + 自动轮询恢复；任意成功响应 → 清除
   backend.bind();
   backend.start();
 });

@@ -1,4 +1,4 @@
-"""P2 报告模板数据化测试（§7.2）。
+"""P2 报告模板数据化测试。
 
 覆盖：
 - 默认模板 standard.yaml 加载：关键版式文案与 v1 内联版式等价；
@@ -31,7 +31,7 @@ def test_load_standard_template_matches_v1_content() -> None:
     tpl = load_report_template("standard")
     assert isinstance(tpl, ReportTemplate)
     assert tpl.name == "standard"
-    # 与 v1 内联版式等价（§7.2 数据化不改变默认输出）
+    # 与 v1 内联版式等价
     assert tpl.cover_title == "射线焊缝缺陷智能检测评片报告"
     assert tpl.doc_title_prefix == "射线检测评片报告"
     assert tpl.section_workpiece == "一、工件信息"

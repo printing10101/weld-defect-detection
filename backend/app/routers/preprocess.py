@@ -1,7 +1,7 @@
-"""图像预处理（§4.3/§4.4）。
+"""图像预处理。
 
-M3 真实实现：multipart 上传 → 加载 → 降噪+增强（管线）→ 质量度量 → 返回增强图缩略。
-管线以"不损害缺陷边缘"为硬约束（§4.3）；参数走配置（§T8 禁硬编码）。
+ 真实实现：multipart 上传 → 加载 → 降噪+增强（管线）→ 质量度量 → 返回增强图缩略。
+管线以"不损害缺陷边缘"为硬约束；参数走配置。
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ async def preprocess(
     reg: Annotated[Registry, Depends(get_registry)],
     gamma: Annotated[float | None, Form()] = None,  # 缺省走配置
 ) -> PreprocessResponse:
-    # 伽马必须为正：gamma<=0 会让 pow() 产生 inf/nan，后续 PSNR/SSIM 全污染。
+    # 伽马必须为正：gamma<=0 会让 pow 产生 inf/nan，后续 PSNR/SSIM 全污染。
     if gamma is not None and not 0.0 < gamma <= 10.0:
         raise HTTPException(
             status_code=422,
@@ -44,7 +44,7 @@ async def preprocess(
         )
     async with staged_upload(image, reg.config) as tmp_path:
         name = image.filename or "upload"
-        # 滤波/CLAHE/度量均为 CPU 密集同步调用，进线程池（§13.11）。
+        # 滤波/CLAHE/度量均为 CPU 密集同步调用，进线程池。
         return await run_in_threadpool(_preprocess_sync, reg, tmp_path, gamma, name)
 
 
@@ -65,7 +65,7 @@ def _preprocess_sync(
         "noise_in": round(estimate_noise(gray), 3),
         "noise_out": round(estimate_noise(enhanced), 3),
     }
-    # §4.4 质量度量门禁（无参考）：BRISQUE 特征 + 复合 RQI 分。
+    # 质量度量门禁（无参考）：BRISQUE 特征 + 复合 RQI 分。
     quality = assess_quality(gray, QualityCfg(**reg.config.quality.model_dump()))
     thumb = _thumbnail(enhanced)
     return PreprocessResponse(

@@ -1,8 +1,8 @@
-"""检查记录仓储（§7.1 / §7.3 / §12.2 / §12.5）。
+"""检查记录仓储。
 
 提供 images/defects/reports 的写入、检索与统计能力（纯存储，无业务判定逻辑）；
-返回值均为 dict（JSON 可序列化），禁止 ORM 对象跨层传递（§19.1）。
-M7 扩展：apply_review（复核落库）/ list_reviews / append_audit（哈希链）/ list_audit。
+返回值均为 dict（JSON 可序列化），禁止 ORM 对象跨层传递。
+ 扩展：apply_review（复核落库）/ list_reviews / append_audit（哈希链）/ list_audit。
 千级记录检索目标 < 1s：created_at/joint_level 索引 + 单查询聚合。
 """
 
@@ -57,7 +57,7 @@ class InspectionRepository:
         IntegrityError 转译为 ValueError，防止 SQL 细节外泄给客户端。
 
         写入顺序：**必须先 flush images 行**再写 defects/reports。ORM 未声明
-        relationship() 时，SQLAlchemy 跨 mapper 的 INSERT 顺序按 mapper 排序键
+        relationship 时，SQLAlchemy 跨 mapper 的 INSERT 顺序按 mapper 排序键
         （模块名.类名）决定，DefectRecord 字母序早于 ImageRecord，会先插子表；
         在 `PRAGMA foreign_keys=ON` 下直接触发 FOREIGN KEY constraint failed。
         """
@@ -137,7 +137,7 @@ class InspectionRepository:
         report_hash: str | None = None,
         signed_at: datetime | None = None,
     ) -> None:
-        """回填报告字段（PDF 路径 / 数字指纹 / 签发时间，§7.2）。
+        """回填报告字段（PDF 路径 / 数字指纹 / 签发时间，）。
 
         pdf_path 由报告生成后回填；report_hash/signed_at 由 PdfReporter.build
         写入（数字签名）。任一字段为 None 表示不改动对应列。
@@ -163,7 +163,7 @@ class InspectionRepository:
         page: int = 1,
         size: int = 20,
     ) -> tuple[list[dict[str, Any]], int]:
-        """多条件检索（§7.3）：级别/缺陷类别/日期范围/工件号，分页。"""
+        """多条件检索：级别/缺陷类别/日期范围/工件号，分页。"""
         size = max(1, min(size, _PAGE_MAX))
         page = max(1, page)
         conds: list[Any] = []
@@ -214,7 +214,7 @@ class InspectionRepository:
             return items, total
 
     def stats(self) -> dict[str, Any]:
-        """缺陷统计与分布（§7.3）：总数 / 级别分布 / 缺陷类别分布。"""
+        """缺陷统计与分布：总数 / 级别分布 / 缺陷类别分布。"""
         with Session(self._engine) as session:
             total = int(session.scalar(select(func.count()).select_from(ImageRecord)) or 0)
             by_level = {
@@ -233,7 +233,7 @@ class InspectionRepository:
             }
             return {"total": total, "by_level": by_level, "by_class": by_class}
 
-    # ---- 人工复核 / 审计（M7，§12.2 / §12.5）----
+    # ---- 人工复核 / 审计（， / ）----
     def apply_review(
         self,
         *,
@@ -287,7 +287,7 @@ class InspectionRepository:
             # 影像综合级别 + 复核标记
             if final_level is not None:
                 image.joint_level = final_level
-            # 无综合级别且无既有级别时，视为仍需复核（§12.2 状态机兜底，避免无声消失）
+            # 无综合级别且无既有级别时，视为仍需复核
             image.need_review = bool(
                 needs_arbitration
                 or (not consensus and role != "arbitrator")
@@ -351,7 +351,7 @@ class InspectionRepository:
             )
             return [self._review_to_dict(r) for r in rows]
 
-    # ---- 人工复核缺陷增删改（DB50/T 1807-2025 §6.1.4，比标准严：全程审计留痕） ----
+    # ---- 人工复核缺陷增删改（DB50/T 1807-2025 §6.1.4，全程审计留痕） ----
 
     def add_manual_defect(
         self,
@@ -507,7 +507,7 @@ class InspectionRepository:
         """追加一条不可变审计日志（哈希链）。返回所写行。
 
         防分叉：单进程内用 self._audit_lock 串行化读-改-写；并将时间戳纳入
-        哈希覆盖，确保“何时”这一追溯要素不可被篡改（§12.5）。
+        哈希覆盖，确保“何时”这一追溯要素不可被篡改。
         """
         now = datetime.now(UTC).replace(tzinfo=None)
         payload = json.dumps(
@@ -564,9 +564,9 @@ class InspectionRepository:
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
-        """审计日志检索（§14 GET /api/v1/audit），按时间降序。
+        """审计日志检索，按时间降序。
 
-        返回 (当页条目, 匹配总数)。原实现只返回列表，调用方拿 len() 当 total，
+        返回 (当页条目, 匹配总数)。原实现只返回列表，调用方拿 len 当 total，
         在超过 limit 时会低报总数，审计场景不可接受。
         """
         limit = max(1, min(limit, 500))
@@ -601,7 +601,7 @@ class InspectionRepository:
             session.add(ReportRecord(id=report_id, image_id=image_id))
 
     def verify_chain(self) -> bool:
-        """校验审计哈希链的连续性与不可分叉性（§12.5）。
+        """校验审计哈希链的连续性与不可分叉性。
 
         原实现用 list(session.scalars(...)) 一次性把整张审计表 materialize 成
         ORM 对象，随表增长内存占用线性膨胀（O(N)），且每次 /audit 校验都会触发。
@@ -760,8 +760,8 @@ def _parse_dt(raw: str) -> datetime:
 def _parse_dt_end(raw: str) -> datetime:
     """解析区间上界，返回开区间右端点。
 
-    "2026-08-08"（纯日期）视为「含当天」→ 次日 00:00:00；
-    "2026-08-08T12:00"（带时间）按字面取值，不再无脑 +1 天
+    ""（纯日期）视为「含当天」→ 次日 00:00:00；
+    "T12:00"（带时间）按字面取值，不再无脑 +1 天
     （原实现对带时间的上界会多纳入整整一天的记录）。
     """
     s = (raw or "").strip()

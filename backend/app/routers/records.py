@@ -1,4 +1,4 @@
-"""历史检索与统计（§7.3，M6 真实实现）。
+"""历史检索与统计。
 
 GET /api/v1/records?level=&class=&from=&to=&workpiece=&page=&size=
 → {items[], total, stats}；多条件过滤 + 分页 + 缺陷统计。

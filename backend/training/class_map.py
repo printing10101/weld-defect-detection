@@ -1,4 +1,4 @@
-"""缺陷类别映射（§1.3 / M4b 数据契约）。
+"""缺陷类别映射。
 
 统一把**不同来源数据集**的类别名映射到本项目冻结的 :class:`DefectClass`
 枚举，保证训练、推理、判定三层使用同一套类别语义。
@@ -36,7 +36,7 @@ class SourceClass(str, Enum):
     SPATTERS = "spatters"
 
 
-# 主训练集（SWRD + 用户 X 光）使用的 6 类，与 DefectClass 一一对应（ADR-010 扩展 UNDERCUT）
+# 主训练集（SWRD + 用户 X 光）使用的 6 类，与 DefectClass 一一对应（ 扩展 UNDERCUT）
 SWRD_TO_DEFECTCLASS: dict[str, DefectClass] = {
     "porosity": DefectClass.POROSITY,
     "inclusion": DefectClass.SLAG,
@@ -44,9 +44,9 @@ SWRD_TO_DEFECTCLASS: dict[str, DefectClass] = {
     "lack_of_penetration": DefectClass.INCOMPLETE_PENETRATION,
     "lack_of_fusion": DefectClass.LACK_OF_FUSION,
     "crack": DefectClass.CRACK,
-    # 咬边：ADR-010 起为独立第 6 类 DefectClass.UNDERCUT（竞赛评分项 + SWRD 第 6 类）。
+    # 咬边： 起为独立第 6 类 DefectClass.UNDERCUT（竞赛评分项 + SWRD 第 6 类）。
     # 内凹：DB50/T 1807 单面焊重点关注缺陷，2026-08 起拆分为独立第 7 类 CONCAVITY
-    #（追加索引 6，历史 0-5 索引不变）。
+    # （追加索引 6，历史 0-5 索引不变）。
     "undercut": DefectClass.UNDERCUT,
     "concavity": DefectClass.CONCAVITY,
 }

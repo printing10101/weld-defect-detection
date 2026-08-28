@@ -1,4 +1,4 @@
-"""标准能力清单（§6.1，GET /api/v1/standards）。
+"""标准能力清单。
 
 返回全部已注册判定标准的能力目录（来自 domain/grade/registry 的真实元数据）：
 - 是否输出缺陷级别（grades_defects）与级别体系（levels）；

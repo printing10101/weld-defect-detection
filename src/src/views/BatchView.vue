@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 批量处理视图（§12.1）：多底片/文件夹导入 → 异步队列 → 进度可视化 → 取消/重试 → 历史。
+ * 批量处理视图：多底片/文件夹导入 → 异步队列 → 进度可视化 → 取消/重试 → 历史。
  * 数据全部来自真实后端 /batch 系列接口；进度经 2s 轮询实时更新。
  */
 import { onMounted, onUnmounted, ref, watch } from "vue";
@@ -31,7 +31,7 @@ const force = ref(true);
 
 let timer: number | null = null;
 
-// 轮询健壮性（§D3）：连续失败退避 + 后端离线态，避免后端宕机时无限空转。
+// 轮询健壮性：连续失败退避 + 后端离线态，避免后端宕机时无限空转。
 const POLL_BASE_MS = 2000;
 const MAX_OFFLINE_STRIKES = 3;
 const pollErrorCount = ref(0);

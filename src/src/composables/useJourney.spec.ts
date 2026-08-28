@@ -1,4 +1,4 @@
-/** useJourney composable 单元测试（T4-4）：上传→处理→报告 状态流转。 */
+/** useJourney composable 单元测试：上传→处理→报告 状态流转。 */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../services/api", async (importOriginal) => {

@@ -192,13 +192,13 @@ def run(epochs: int, start: str = "data/runs/pretrained/yolov8n.pt", name: str =
         json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     print("[real] 指标 →", json.dumps(out["metrics"], ensure_ascii=False))
-    # §7.4 MLOps 闭环：训练后钩子——导出 ONNX 并在 Golden Set 上评估，闭环写报告/漂移/实验。
+    # MLOps 闭环：训练后钩子——导出 ONNX 并在 Golden Set 上评估，闭环写报告/漂移/实验。
     _export_and_golden_eval(best, name)
     return out
 
 
 def _export_and_golden_eval(best_pt: Path, name: str) -> None:
-    """训练后钩子（§7.4 MLOps 闭环）：导出 ONNX + Golden Set 评估，闭环写报告/漂移/实验。
+    """训练后钩子：导出 ONNX + Golden Set 评估，闭环写报告/漂移/实验。
 
     失败-soft：导出或评估任何一步失败仅告警，不阻断训练产物落盘；
     需 data/eval/golden 存在（否则跳过，提示先建立固定评估集）。

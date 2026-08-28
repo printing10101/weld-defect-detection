@@ -2,7 +2,7 @@
 /**
  * 档案检索视图（真实 GET /api/v1/records）。
  * 列表与统计全部来自后端查询；空态/错误态基于真实响应。
- * 附加：主动学习训练池状态（M7，GET /api/v1/active/pool）。
+ * 附加：主动学习训练池状态（，GET /api/v1/active/pool）。
  */
 import { onMounted, ref, watch } from "vue";
 import { activePool, listRecords } from "../services/api";
@@ -19,11 +19,11 @@ const page = ref(1);
 const pageSize = ref(50);
 const total = ref(0);
 
-// 请求序号守卫（F20）：切回 active / 翻页 / 过滤可能并发多个 load()，
+// 请求序号守卫：切回 active / 翻页 / 过滤可能并发多个 load，
 // 旧请求晚到会覆盖新响应。仅接受最新一次请求的返回。
 let loadReqId = 0;
 
-// 主动学习训练池（M7）
+// 主动学习训练池
 const poolLoading = ref(true);
 const pool = ref<ActivePoolOut | null>(null);
 

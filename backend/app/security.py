@@ -1,9 +1,9 @@
-"""安全响应头 + 基础限流中间件（§7.5 / §13.9，P2-9）。
+"""安全响应头 + 基础限流中间件。
 
 - 安全头：CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy /
   Permissions-Policy（桌面本地 WebView 场景，收紧外部访问面）。
 - 限流：每客户端 IP 滑动窗口计数，防单来源打爆 API（本地桌面低风险，
-  但规格书 §13.9 要求防护；阈值宽松，不干扰正常使用）。
+  但设计文档  要求防护；阈值宽松，不干扰正常使用）。
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ _HITS_LOCK = threading.Lock()
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """为所有响应附加安全头（§7.5 合规 + 防 XSS/点击劫持/嗅探）。"""
+    """为所有响应附加安全头。"""
 
     _HEADERS: ClassVar[dict[str, str]] = {
         "Content-Security-Policy": "default-src 'self'; img-src 'self' data: blob:; "
@@ -40,7 +40,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """每客户端 IP 滑动窗口限流（§13.9）。
+    """每客户端 IP 滑动窗口限流。
 
     默认 60 req/min 每 IP（远超桌面本地正常用量，仅拦截异常打爆）。
     可通过环境变量 SCAN_RATE_LIMIT 覆盖：0 = 禁用限流（测试环境用，

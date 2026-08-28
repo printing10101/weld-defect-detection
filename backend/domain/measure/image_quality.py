@@ -1,19 +1,16 @@
 """数字底片图像质量测量：SNRn 归一化信噪比 + 双丝像质计空间分辨率。
 
-DB50/T 1807-2025 §6.1.6 要求系统具备"归一化信噪比、空间分辨率"测量功能。
+DB50/T 1807-2025  要求系统具备"归一化信噪比、空间分辨率"测量功能。
 
-公式出处（2026-08 查证）：
-- SNRN = SNR × (88 µm / SRb)，即把实测 SNR 归一到 88µm 参考基本空间分辨率
-  （ISO 20769-1:2018 定义；GB/T 26141.1-2010 修改采用 ISO 14096-1，同源体系；
-  SRb 由双丝像质计或 MTF 测得）。见：
-  https://standards.iteh.ai/catalog/standards/cen/c2a4517f-adea-4d7f-9ee4-1f1acc61898d/en-iso-20769-1-2018
-  https://www.iso.org/standard/87451.html
+公式依据：
+- SNRN = SNR × (88 µm / SRb)：把实测 SNR 归一到 88µm 参考基本空间分辨率
+  （ISO 20769-1:2018 定义，GB/T 26141.1-2010 同源；SRb 由双丝像质计或 MTF 测得）
 - 双丝像质计判据：调制深度 M=(Imax−Imin)/(Imax+Imin)≥0.2 视为可分辨
   （ISO 17636-2 / EN 14784 双丝法）；空间分辨率 = 第一对不可分辨丝的丝径。
 - SNRn 合格线（min_snrn）按数字化级别配置；默认 130 取自 ISO 17636-2 最优
-  CR 板级别阈值，GB/T 26141.1 的 DS/DB/DA 级确切限值须以授权原文复核（待查证）。
+  CR 板级别阈值，GB/T 26141.1 的 DS/DB/DA 级确切限值须以授权原文复核。
 
-比标准更严格：无缺陷 ROI 时自动分块取**最差 3 块**（不取均值）；SRb 未提供时
+从严口径：无缺陷 ROI 时自动分块取最差块（不取均值）；SRb 未提供时
 用像素尺寸保守估计并显式标记 srb_estimated=True；调制深度 0.2~0.3 标记"临界"。
 """
 
@@ -26,7 +23,7 @@ import numpy as np
 
 # 归一化基准（ISO 20769-1 / GB/T 26141.1 体系）：88 µm
 _REF_APERTURE_MM = 0.088
-# 双丝可分辨判据（ISO 17636-2）：M≥0.2；0.2~0.3 为"临界"（比标准严的提示带）
+# 双丝可分辨判据（ISO 17636-2）：M≥0.2；0.2~0.3 为"临界"（提示带）
 _RESOLVED_M = 0.20
 _MARGINAL_M = 0.30
 
@@ -98,7 +95,7 @@ def measure_snr(
     min_snrn: float = 130.0,
     n_blocks: int = 3,
 ) -> SNRResult:
-    """SNRn 测量：自动选最平坦的 n_blocks 块，取**最差块**口径（比标准严）。
+    """SNRn 测量：自动选最平坦的 n_blocks 块，取**最差块**口径。
 
     srb_mm：双丝像质计实测基本空间分辨率（mm）；缺省时用扫描像素尺寸保守估计
     （SRb≈pixel size 会高估 SRb → 低估 SNRn → 偏严，方向安全）。
@@ -163,7 +160,7 @@ class DuplexResult:
 
     spatial_resolution_mm: float | None  # 第一对不可分辨丝的丝径
     resolved: list[dict[str, float]]  # 逐对 {diameter, modulation, verdict}
-    marginal: bool  # 存在 0.2≤M<0.3 的临界对（比标准严的提示）
+    marginal: bool  # 存在 0.2≤M<0.3 的临界对
     wire_axis_deg: float  # 检测所用丝方向（度，相对图像 x 轴）
     period_px: float  # 实测丝对内周期（像素）
 

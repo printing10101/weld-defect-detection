@@ -1,10 +1,10 @@
-"""M4b 端到端烟雾测试（合成数据，无许可风险）。
+""" 端到端烟雾测试（合成数据，无许可风险）。
 
 流程：合成 X 光风格图像 + YOLO 标签 → dataset_builder.build_dataset
 → 训练 2 个 epoch（tiny，从零架构，免下载权重）→ YoloDetector(torch) 推理回一条
 → 校验 Detection 字段与 need_review 链路可读。
 
-不依赖 SWRD / 用户数据；仅用于验证 M4b 代码链路可跑通。
+不依赖 SWRD / 用户数据；仅用于验证  代码链路可跑通。
 用法：python -m backend.training.smoke_test
 """
 

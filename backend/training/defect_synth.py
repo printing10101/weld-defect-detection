@@ -1,4 +1,4 @@
-"""GLASS 式缺陷合成生成器（P0-B）。
+"""GLASS 式缺陷合成生成器。
 
 借鉴 GLASS（ECCV'24，gradient-ascent anomaly synthesis）的核心思路——
 「程序化合成缺陷样本，低成本扩充训练池」——本项目用可解释的几何+灰度

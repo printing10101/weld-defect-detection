@@ -1,4 +1,4 @@
-"""仓储测试（§7.1/§7.3）：CRUD / 多条件检索 / 统计。"""
+"""仓储测试：CRUD / 多条件检索 / 统计。"""
 
 from __future__ import annotations
 

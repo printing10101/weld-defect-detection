@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 合规处置建议面板（P0-E）：展示后端 ReportOut 的处置徽标 / 动作清单 / 免责声明。
+ * 合规处置建议面板：展示后端 ReportOut 的处置徽标 / 动作清单 / 免责声明。
  * 数据诚实性：徽标与动作全部来自后端 recommend 引擎真实输出，前端不做规则推导。
  */
 import { computed } from "vue";

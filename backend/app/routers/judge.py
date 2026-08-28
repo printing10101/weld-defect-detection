@@ -1,6 +1,6 @@
-"""标准判定（§6 / §T8 熔断）。
+"""标准判定。
 
-M5 真实实现：defects + 母材厚度 T → Nb47013Grader（多标准适配）。
+ 真实实现：defects + 母材厚度 T → Nb47013Grader（多标准适配）。
 未授权数值表（authorized=false）→ 熔断：422 GRADING_AMBIGUOUS，不输出级别。
 """
 
@@ -30,8 +30,8 @@ class JudgeDefectIn(BaseModel):
 
 class JudgeRequest(BaseModel):
     base_metal_thickness_mm: float
-    # 未标定禁定级（§6/§T8，与 /report 单一真源一致）：缺省 None，
-    # 由 grader 对 None 熔断（422 GRADING_AMBIGUOUS），绝不静默 1.0 mm/px 伪物理。
+    # 未标定禁定级：缺省 None，
+    # 由 grader 对 None 熔断（422 GRADING_AMBIGUOUS），禁止回退 1.0 mm/px 假标定。
     pixel_spacing_mm: float | None = None
     standard_id: str = "NB/T47013.2-2015"
     defects: list[JudgeDefectIn] = []
@@ -44,7 +44,7 @@ class JudgeResponse(BaseModel):
     need_review: bool
     standard_id: str
     standard_version: str
-    # 标准来源免责声明（工业过渡路径，T1）：authorized_copy=false 时为强声明，
+    # 标准来源免责声明（工业过渡路径，）：authorized_copy=false 时为强声明，
     # 提示"数值转录自公开解读、非授权正本、不替代责任工程师法定评定"。
     disclaimer: str | None = None
 
@@ -70,7 +70,7 @@ def judge(
         base_metal_thickness_mm=req.base_metal_thickness_mm,
     )
     try:
-        # §6.1 多标准适配：按 standard_id 路由判定器（默认 NB/T47013；骨架/未知标准熔断 422）
+        # 多标准适配：按 standard_id 路由判定器（默认 NB/T47013；骨架/未知标准熔断 422）
         grader = reg.grader_for(req.standard_id)
         result = grader.grade(defects, context)
     except GradingAmbiguousError as exc:

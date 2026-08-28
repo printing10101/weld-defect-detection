@@ -2,9 +2,9 @@
 
 Revision ID: 0005_defect_review_source
 Revises: 0004_drop_users
-Create Date: 2026-08-28
+Create Date:
 
-DB50/T 1807-2025 §6.1.4 复核功能补全（比标准严）：
+DB50/T 1807-2025  复核功能补全：
 - defects.source     : 来源（auto=检测器 | manual=人工添加），全程可追溯；
 - defects.deleted_at : 软删除时间（复核删除不物理清除，供审计追溯）。
 """

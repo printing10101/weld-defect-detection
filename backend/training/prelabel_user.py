@@ -1,4 +1,4 @@
-"""用 M4a 基线检测器（BlobDetector）为用户 165 张 定检 图生成预标注（warm start）。
+"""用  基线检测器（BlobDetector）为用户 165 张 定检 图生成预标注（warm start）。
 
 目的：加速人工标注。BlobDetector 只能定位暗斑（class 占位 0=气孔），
 不能分类——产出的 YOLO txt 给出缺陷**位置**初稿，人工在 Label Studio 中

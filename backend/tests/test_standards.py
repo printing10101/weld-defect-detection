@@ -1,7 +1,7 @@
-"""§6.1 多标准注册表与能力目录（registry + GET /api/v1/standards）。
+""" 多标准注册表与能力目录（registry + GET /api/v1/standards）。
 
 覆盖：4 标准注册齐全；能力目录状态（NB=enabled / GB=tables_missing /
-ASME=method_standard / ISO=method_standard）；未知标准熔断；语义化 grade()
+ASME=method_standard / ISO=method_standard）；未知标准熔断；语义化 grade
 熔断消息（方法标准/缺表不输出级别，禁止静默错判）；API 契约。
 """
 
@@ -80,7 +80,7 @@ def test_all_capabilities_ordered() -> None:
 
 
 def test_semantic_fuse_messages() -> None:
-    """方法标准/缺表适配器 grade() 熔断，消息是标准语义而非"未实现"。"""
+    """方法标准/缺表适配器 grade 熔断，消息是标准语义而非"未实现"。"""
     gb = get_grader("GB/T3323-2019", None)
     with pytest.raises(GradingAmbiguousError) as ei_gb:
         gb.grade([_det(DefectClass.POROSITY)], _ctx())

@@ -1,9 +1,9 @@
-"""DB50/T 1807-2025 评价体系核心计算（§9 测试 / §10 指标 / §11 结果）。
+"""DB50/T 1807-2025 评价体系核心计算。
 
 与现有 mAP@0.5 体系（harness.py）**口径不同、并行共存**：
 - 本模块按地方标准口径：IOU≥0.1 即视为位置匹配（非 0.5）；误检=位置对但
   类型错（FD）；漏检=GT 未被匹配（MD）；误报=无缺陷底片整图级误报（FRR）。
-- 比标准更严格：
+- 本实现口径（较标准收紧）：
   1) 双阈值并行：标准口径 0.1 之外同时按严格口径（默认 0.3）评估，记录
      系统分级取两者较差者；
   2) FRR 分级线默认取收紧值（自动 3% / 手工 4%，即标准 L2 线）而非 L1 线；
@@ -22,7 +22,7 @@ from typing import Any
 import numpy as np
 
 # ---------------------------------------------------------------------------
-# 标准缺陷类别（§10.1 n=1..7）与模型类别映射
+# 标准缺陷类别与模型类别映射
 # ---------------------------------------------------------------------------
 
 STD_CLASS_NAMES: dict[int, str] = {
@@ -35,7 +35,7 @@ STD_CLASS_NAMES: dict[int, str] = {
     7: "咬边",
 }
 
-# 重点关注缺陷（§8.2）：双面焊 = 裂纹/未熔合/未焊透；单面焊另含内凹/咬边
+# 重点关注缺陷：双面焊 = 裂纹/未熔合/未焊透；单面焊另含内凹/咬边
 FOCUS_DEFECTS: dict[str, set[int]] = {
     "double": {3, 4, 5},
     "single": {3, 4, 5, 6, 7},
@@ -81,10 +81,10 @@ def _to_std_class(
 
 @dataclass
 class StdEvalConfig:
-    """标准评价配置；默认值即"比标准更严格"口径。"""
+    """标准评价配置；默认值在标准口径上收紧。"""
 
     iou_standard: float = 0.1  # §9.2 标准口径
-    iou_strict: float = 0.3  # 严格口径（取严分级用）
+    iou_strict: float = 0.3  # 严格口径（分级取两者较差）
     weld_form: str = "single"  # single/double（§8.2 单/双面焊，决定重点关注集）
     weld_method: str = "manual"  # manual/auto（§11.1 FRR 分级线不同）
     frr_l1: dict[str, float] = field(default_factory=lambda: {"auto": 0.08, "manual": 0.10})
@@ -108,7 +108,7 @@ class StdEvalConfig:
 
 
 # ---------------------------------------------------------------------------
-# §9.2 匹配：GT×预测全局贪心（IOU 降序），每预测至多配一个 GT
+# 匹配：GT×预测全局贪心（IOU 降序），每预测至多配一个 GT
 # ---------------------------------------------------------------------------
 
 # 逐 GT 判定结果：td / fd / md；fd 附带被误检成的预测类别
@@ -171,7 +171,7 @@ def _iou(a: Iterable[float], b: Iterable[float]) -> float:
 
 
 # ---------------------------------------------------------------------------
-# §10 指标 + §11.1 分级 + §11.2 风险
+# 指标 +  分级 +  风险
 # ---------------------------------------------------------------------------
 
 
@@ -202,7 +202,7 @@ class StdEvalResult:
     fr_by_class: dict[int, int]  # 无缺陷底片误报按预测类别分布（图4 行）
     n_no_defect_reported: int  # a
     n_no_defect_clean: int  # b
-    fp_extra: int  # 未匹配预测数（比标准多暴露）
+    fp_extra: int  # 未匹配预测数（单独统计）
     confusion: list[dict[str, Any]]  # 图3/图4 混淆矩阵行
     kdr: float
     wdr: float
@@ -235,7 +235,7 @@ class StdEvalResult:
         }
 
 
-# 系统分级表（§11.1 表1）：KDR/WDR/TDR 下限 + FRR 上限按 weld_method
+# 系统分级表：KDR/WDR/TDR 下限 + FRR 上限按 weld_method
 _LEVEL_TABLE: list[dict[str, Any]] = [
     {"level": "L4", "kdr": 1.00, "kdr_exact": True, "wdr": 1.00, "wdr_exact": True, "tdr": 0.98},
     {"level": "L3", "kdr": 1.00, "kdr_exact": True, "wdr": 0.98, "wdr_exact": False, "tdr": 0.96},
@@ -249,7 +249,7 @@ _FRR_L2 = {"auto": 0.03, "manual": 0.04}
 def grade_level(
     kdr: float, wdr: float, tdr: float, frr: float, cfg: StdEvalConfig
 ) -> str | None:
-    """§11.1 表1 分级：四项指标全部达标的最优级别；全不达标 → None（未定级）。
+    """ 表1 分级：四项指标全部达标的最优级别；全不达标 → None（未定级）。
 
     strict_frr=True（默认）时 FRR 一律按收紧线（3%/4%）判定，严于标准 L1 线。
     """
@@ -275,16 +275,16 @@ def evaluate(
     no_defect_set: list[tuple[str, list[dict[str, Any]]]],
     cfg: StdEvalConfig | None = None,
 ) -> dict[str, Any]:
-    """完整评价（§9~§11）。
+    """完整评价。
 
     defect_set: [(image_id, gts, preds)]；no_defect_set: [(image_id, preds)]。
-    返回 {"standard": StdEvalResult.to_dict(), "strict": ..., "level_recorded": ...}：
+    返回 {"standard": StdEvalResult.to_dict, "strict": ..., "level_recorded": ...}：
     standard=IOU 0.1 口径，strict=严格口径；level_recorded 取两者较差。
     """
     cfg = cfg or StdEvalConfig()
     std_res = _evaluate_at(defect_set, no_defect_set, cfg.iou_standard, cfg, strict=False)
     strict_res = _evaluate_at(defect_set, no_defect_set, cfg.iou_strict, cfg, strict=True)
-    # 比标准严：无缺陷测试集缺失 → FRR 未测，不得按 0% 通过分级，整体不定级
+    # 无缺陷测试集缺失时 FRR 未测，不得按 0% 通过分级，整体不定级
     if not no_defect_set:
         std_res["level"] = None
         strict_res["level"] = None
@@ -394,13 +394,13 @@ def _evaluate_at(
 
 
 # ---------------------------------------------------------------------------
-# §11.2 风险分析
+# 风险分析
 # ---------------------------------------------------------------------------
 
 
 def _miss_risk(per: dict[int, ClassCounts], cfg: StdEvalConfig) -> str:
     """漏检风险（表2）：Ⅰ类=重点关注漏检，或一般关注漏检（保守按评定≥Ⅱ级）；
-    Ⅱ类=仅评定为Ⅰ级的圆形缺陷漏检。无逐缺陷评级数据时保守归Ⅰ类（取严）。"""
+    Ⅱ类=仅评定为Ⅰ级的圆形缺陷漏检。无逐缺陷评级数据时保守归Ⅰ类。"""
     if any(per[n].md for n in cfg.focus):
         return "Ⅰ类"
     if any(per[n].md for n in (1, 2)):

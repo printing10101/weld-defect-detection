@@ -1,4 +1,4 @@
-"""预处理测试（§4.3/§4.4）：降噪/增强/边缘/形态学/质量度量/API。"""
+"""预处理测试：降噪/增强/边缘/形态学/质量度量/API。"""
 
 from __future__ import annotations
 
@@ -78,7 +78,7 @@ def test_preprocess_api() -> None:
     assert "ssim" in body["metrics"]
     assert body["metrics"]["noise_out"] < body["metrics"]["noise_in"]
     assert body["thumbnail"]
-    # §4.4 质量门禁字段
+    # 质量门禁字段
     assert "quality" in body
     assert "score" in body["quality"] and "passed" in body["quality"]
     assert "metrics" in body["quality"]
@@ -136,7 +136,7 @@ def test_assess_quality_report_fields() -> None:
 
 
 def test_quality_cfg_hard_gates_defaults() -> None:
-    """三类硬门禁阈值默认值需与标定结论一致（§T8 同步的单一真源）。"""
+    """三类硬门禁阈值默认值需与标定结论一致。"""
     qc = DomainQualityCfg()
     assert qc.blur_lap_bad == 30.0
     assert qc.exposure_entropy_bad == 0.62

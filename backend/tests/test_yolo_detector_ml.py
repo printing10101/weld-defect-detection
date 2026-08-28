@@ -1,4 +1,4 @@
-"""真实检测器（YoloDetector）测试层（§部署硬化 C1 / 门禁虚假信心修复）。
+"""真实检测器（YoloDetector）测试层。
 
 问题背景：conftest 强制 BASELINE_ENABLED=true，且 CI 不装 ML 依赖，
 导致生产检测器 YoloDetector 的代码路径在 CI 零执行——任何 yolo_detector.py
@@ -47,7 +47,7 @@ def _load_detector() -> YoloDetector:
 
 @pytest.mark.ml_smoke
 def test_yolo_detector_interface_contract() -> None:
-    """接口契约：YoloDetector 必须实现 load / infer（ADR-002 主干可热替换）。
+    """接口契约：YoloDetector 必须实现 load / infer（ 主干可热替换）。
 
     无需权重：仅校验检测器模块可被 onnxruntime 加载、接口存在——CI 装 onnxruntime
     后即必过，恢复对真实检测器代码路径的真实门禁覆盖（修复 continue-on-error 虚假信心）。

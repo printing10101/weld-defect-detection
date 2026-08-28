@@ -1,12 +1,12 @@
-"""SQLite 引擎/会话与 ORM 模型（SQLAlchemy 2.0，§7.1 / §T4）。
+"""SQLite 引擎/会话与 ORM 模型（SQLAlchemy 2.0， / ）。
 
-M6 补齐 images/defects/reports 三表（逻辑模型见规格书 §7.1）：
+ 补齐 images/defects/reports 三表（逻辑模型见设计文档 ）：
 - images 增加 joint_level/need_review 冗余列（按级别检索，来源=判定结果快照）；
 - images 增加 iqi_detail/density_ok 快照列（报告"IQI 与黑度校验结论"章节数据源）；
 - reports 增加 basis(JSON) 列（报告"判定依据条款"章节快照）。
-M7 新增 reviews（人工复核提交）/ audit_log（不可变审计日志，哈希链）：
-- reviews 支撑 §12.2 双人复核/仲裁状态机与 κ 一致性记录；
-- audit_log 支撑 §12.5 合规追溯（谁/何时/对何对象/前后值/哈希链）。
+ 新增 reviews（人工复核提交）/ audit_log（不可变审计日志，哈希链）：
+- reviews 支撑  双人复核/仲裁状态机与 κ 一致性记录；
+- audit_log 支撑  合规追溯（谁/何时/对何对象/前后值/哈希链）。
 v3 换 PostgreSQL 时同 schema 迁移，SQLAlchemy 屏蔽差异。
 """
 
@@ -30,7 +30,7 @@ class Base(DeclarativeBase):
 
 
 class ImageRecord(Base):
-    """一次检查影像记录（§7.1 images）。"""
+    """一次检查影像记录。"""
 
     __tablename__ = "images"
 
@@ -71,7 +71,7 @@ class ImageRecord(Base):
 
 
 class DefectRecord(Base):
-    """缺陷检测/量化/评级明细（§7.1 defects）。"""
+    """缺陷检测/量化/评级明细。"""
 
     __tablename__ = "defects"
 
@@ -107,7 +107,7 @@ class DefectRecord(Base):
 
 
 class ReportRecord(Base):
-    """报告产出记录（§7.1 reports）。"""
+    """报告产出记录。"""
 
     __tablename__ = "reports"
 
@@ -119,13 +119,13 @@ class ReportRecord(Base):
     standard_ref: Mapped[str | None] = mapped_column(String(128), default=None)
     signer: Mapped[str | None] = mapped_column(String(64), default=None)
     basis: Mapped[list] = mapped_column(JSON, default=list)  # 判定依据条款快照
-    # §7.2 数字签名：报告内容指纹（SHA-256）+ 签发时间；POST /report/{id}/verify 校验。
+    # 数字签名：报告内容指纹（SHA-256）+ 签发时间；POST /report/{id}/verify 校验。
     report_hash: Mapped[str | None] = mapped_column(String(64), default=None)
     signed_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
 
 
 class DeviceRecord(Base):
-    """检测设备档案（§12.4 设备标定与跨设备一致性）。"""
+    """检测设备档案。"""
 
     __tablename__ = "devices"
 
@@ -139,7 +139,7 @@ class DeviceRecord(Base):
 
 
 class CalibrationRecord(Base):
-    """一次设备标定记录（§12.4）。
+    """一次设备标定记录。
 
     标定时比对实测像素标定与标定件参考值：相对偏差 ≤5% → status=ok，
     超差 → status=over（跨设备一致率 ≤5% 的量化门槛）。
@@ -160,7 +160,7 @@ class CalibrationRecord(Base):
 
 
 class ReviewRecord(Base):
-    """人工复核提交（§12.2 双人复核/仲裁状态机）。
+    """人工复核提交。
 
     每次复核（初评/复评/仲裁）写入一行；κ 为本次提交与系统自动评级的一致性
     （Cohen's κ）。consensus/needs_arbitration 记录本次复核的判定走向。
@@ -181,7 +181,7 @@ class ReviewRecord(Base):
 
 
 class AuditRecord(Base):
-    """不可变审计日志（§12.5，哈希链 append-only）。
+    """不可变审计日志。
 
     谁(actor)/何时(created_at)/对何对象(object_type+object_id)做了何操作(action)，
     以及前后值(before/after)；hash = sha256(prev_hash || payload)，prev_hash 指向上一条，
@@ -204,7 +204,7 @@ class AuditRecord(Base):
 
 
 def create_db_engine(path: str) -> Engine:
-    """SQLite 引擎（§T4；v3 换 PostgreSQL 仅改此函数）。
+    """SQLite 引擎。
 
     加固：父目录不存在时自动创建；开启外键校验、WAL 写模式与锁等待超时，
     避免并发评片/复核/审计落库时出现 database is locked，并让外键约束真正生效。

@@ -2,7 +2,7 @@
 
 Revision ID: 0004_drop_users
 Revises: 0003_audit_batch_disposition
-Create Date: 2026-08-28
+Create Date:
 
 移除用户/认证系统（单机科研自用，无用户系统）：
 - users 表（历史遗留，含密码哈希）随认证功能一并删除。

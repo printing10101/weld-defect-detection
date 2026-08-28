@@ -1,12 +1,12 @@
-"""DB50/T 1807-2025 标准评价 CLI（§9~§11 完整跑通入口）。
+"""DB50/T 1807-2025 标准评价 CLI。
 
 两种预测来源（二选一）：
 - --pred-dir  : YOLO txt 预测目录（归一化 class cx cy w h，与真值同格式）；
 - --model     : 部署 ONNX，复用 scripts/eval_real_onnx.py 的推理链路
                 （letterbox + class_conf 逐类阈值 + NMS），口径与生产一致。
 
-无缺陷测试集（§9.1.2 底片级误报）：--clean-img-dir；若带 --clean-label-dir
-会校验其标签全空（比标准严：混入缺陷标注即拒绝评价）。
+无缺陷测试集：--clean-img-dir；若带 --clean-label-dir
+会校验其标签全空（混入缺陷标注即拒绝评价）。
 
 用法：
   python -m backend.evaluation.run_std_eval \
@@ -186,7 +186,7 @@ def main() -> None:
           f"KDR={std['kdr']:.2%} FRR={std['frr']:.2%} 分级={std['level']}")
     print(f"严格口径  (IOU≥{strict['iou_threshold']}): TDR={strict['tdr']:.2%} WDR={strict['wdr']:.2%} "
           f"KDR={strict['kdr']:.2%} FRR={strict['frr']:.2%} 分级={strict['level']}")
-    print(f"记录分级（取严）: {result['level_recorded']}")
+    print(f"记录分级（从严）: {result['level_recorded']}")
     print(f"风险: 漏检={std['risks']['miss']} 误检={std['risks']['false_detect']} "
           f"误报={std['risks']['false_report']}")
     for n in sorted(STD_CLASS_NAMES):

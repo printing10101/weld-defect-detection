@@ -5,7 +5,7 @@
 - histograms: 直方图聚合（http_request_duration_seconds 的 count/sum/min/max）
 
 边界：导出端点是可观测的唯一出口；接入 Prometheus/OTEL 时代替的是"如何序列化"
-这一层，业务采集点（get_metrics().inc/observe）保持不变。
+这一层，业务采集点（get_metrics.inc/observe）保持不变。
 """
 
 from __future__ import annotations

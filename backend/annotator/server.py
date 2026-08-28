@@ -17,8 +17,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-# 安装根目录锚点：backend/annotator/server.py -> parents[2] = 安装根目录
-# （§部署硬化 #6：原 Path("data/real_label") 相对 CWD，Tauri/安装包场景 CWD≠项目根会失效）
+# 安装根目录锚点：parents[2] = 安装根目录（相对 CWD 在 Tauri 安装包场景会漂移）
 ROOT = Path(__file__).resolve().parents[2] / "data" / "real_label"
 IMG = ROOT / "images"
 LBL = ROOT / "labels"
@@ -31,7 +30,7 @@ PRE.mkdir(parents=True, exist_ok=True)
 def _safe_image_path(name: str) -> Path | None:
     """把 URL 中的影像名解析到 IMG 目录内，越界即返回 None（防路径穿越）。
 
-    原实现直接 `IMG / name` 后仅用 .exists() 判断，未校验解析后是否仍落在 IMG
+    原实现直接 `IMG / name` 后仅用 .exists 判断，未校验解析后是否仍落在 IMG
     之内：name 形如 `../../etc/passwd` 会越界读任意文件。这里与主 API 的
     backend.infra.fs.safe_resolve 保持同语义——空名/'.'/'..' 拒绝，解析结果
     必须仍相对 IMG，否则返回 None（调用方按 404 处理）。

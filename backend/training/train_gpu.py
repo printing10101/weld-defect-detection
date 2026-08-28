@@ -1,4 +1,4 @@
-"""GPU 全自动训练（2026-08-15 优化后数据集，全自动路线）。
+"""GPU 全自动训练（ 优化后数据集，全自动路线）。
 
 数据：data/training/data.yaml（train 3422 = 真实 user 128 + 合成 450 + steel 2699
       + 伪标签 11（train-only）+ 罕见类过采样 x2；val 322 / test 362 纯真实标注）

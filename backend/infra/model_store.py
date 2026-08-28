@@ -1,7 +1,7 @@
-"""模型存储/加载（§T4 / §7.4）。
+"""模型存储/加载。
 
-M4 前为桩：只管理 URI/版本/哈希状态，不加载真实权重。
-真实推理实现（YOLO/RT-DETR 等）在 M4 里程碑以 DefectDetector 实现注入。
+ 前为桩：只管理 URI/版本/哈希状态，不加载真实权重。
+真实推理实现（YOLO/RT-DETR 等）在  里程碑以 DefectDetector 实现注入。
 """
 
 from __future__ import annotations
@@ -45,11 +45,11 @@ class LocalModelStore:
         self._hash: str | None = None
 
     def load(self, model_uri: str | None = None) -> None:
-        """加载权重并记录版本（M1 桩：仅当文件存在时计算哈希）。"""
+        """加载权重并记录版本（ 桩：仅当文件存在时计算哈希）。"""
         uri = _resolve_model_uri(model_uri or self.default_uri)
         path = Path(uri)
         if path.is_file():
-            # 分块摘要：原实现 read_bytes() 会把整份权重读进内存（大模型下是数百 MB 峰值）
+            # 分块摘要：原实现 read_bytes 会把整份权重读进内存（大模型下是数百 MB 峰值）
             digest = hashlib.sha256()
             with path.open("rb") as fh:
                 for chunk in iter(lambda: fh.read(1 << 20), b""):

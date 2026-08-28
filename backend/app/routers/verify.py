@@ -1,9 +1,9 @@
 """影像质量校验 + 报告数字签名校验。
 
 两部分：
-1. POST /api/v1/verify（§4.2，原实现）：multipart 上传 → 黑度估计 + 线型 IQI
+1. POST /api/v1/verify：multipart 上传 → 黑度估计 + 线型 IQI
    识别 + 伪缺陷筛查 → evaluable（单图轻量同步计算）。
-2. POST /api/v1/report/{id}/verify（§7.2，新增）：报告数字签名校验——生成时
+2. POST /api/v1/report/{id}/verify：报告数字签名校验——生成时
    PdfReporter.build 计算内容指纹（关键字段 canonical JSON → SHA-256）写入
    reports.report_hash；本端点用同一函数重算比对，防篡改。
 """
@@ -91,10 +91,10 @@ def _verify_sync(
         sensitivity=tuple(reg.config.iqi.sensitivity),
     )
     iqi = verify_iqi(gray, iqi_cfg, roi=roi, iqi_type=iqi_type)
-    # 用透照厚度 + 参考表补全 A/AB/B 等级（厚度缺失则 grade=None，不臆造）。
+    # 用透照厚度 + 参考表补全 A/AB/B 等级（厚度缺失则 grade=None）。
     iqi = enrich_grade(iqi, thickness_mm, iqi_cfg.sensitivity)
 
-    # 伪缺陷筛查（§4.2：划痕/尘点/显影不均）。仅严重项默认阻断。
+    # 伪缺陷筛查。仅严重项默认阻断。
     # 将 infra 配置适配为 domain 类型（隔离 pydantic，避免跨层字段耦合）。
     pd_cfg = reg.config.pseudo_defect
     pd_domain = PseudoDefectCfg(
@@ -130,7 +130,7 @@ def _verify_sync(
 
 
 # ---------------------------------------------------------------------------
-# §7.2 报告数字签名校验（POST /api/v1/report/{id}/verify）
+# 报告数字签名校验（POST /api/v1/report/{id}/verify）
 # ---------------------------------------------------------------------------
 
 

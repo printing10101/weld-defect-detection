@@ -1,4 +1,4 @@
-"""不可变审计日志查询（§12.5 / M7）。
+"""不可变审计日志查询。
 
 GET /api/v1/audit：按 actor/action/object_type/object_id/limit 过滤返回审计链
 （谁/何时/对何对象/前后值/哈希链）。写入由业务动作（复核、报告重生成等）

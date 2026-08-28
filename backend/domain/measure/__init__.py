@@ -1,4 +1,4 @@
-"""图像质量测量（DB50/T 1807-2025 §6.1.6）：SNRn / 双丝像质计空间分辨率。"""
+"""图像质量测量（DB50/T 1807-2025 ）：SNRn / 双丝像质计空间分辨率。"""
 
 from backend.domain.measure.image_quality import (
     DUPLEX_WIRE_DIAMETERS_MM,

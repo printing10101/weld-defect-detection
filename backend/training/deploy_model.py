@@ -1,4 +1,4 @@
-"""训练后部署：best.pt → legacy ONNX → 运行时/安装包 → 真实集检出回归（P0-B/P1 收尾）。
+"""训练后部署：best.pt → legacy ONNX → 运行时/安装包 → 真实集检出回归（/P1 收尾）。
 
 流程：
 1. 强制 legacy 导出（torch>=2.9 dynamo 卡死绕行，simplify=False 防多类折叠）；
