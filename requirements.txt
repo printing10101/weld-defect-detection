@@ -26,3 +26,5 @@ ultralytics==8.2.9
 onnxruntime==1.28.0
 reportlab==5.0.0
 pypdf==6.15.0
+python-multipart==0.0.32
+alembic==1.19.1
