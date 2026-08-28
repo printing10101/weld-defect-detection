@@ -234,6 +234,7 @@ async function onVerify(): Promise<void> {
     <ReviewPanel
       v-if="result.need_review"
       :image-id="result.image_id"
+      :report-id="result.report_id"
     />
 
     <div class="section-h">

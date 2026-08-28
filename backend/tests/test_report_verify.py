@@ -1,4 +1,4 @@
-""" 报告数字签名校验（POST /api/v1/report/{id}/verify）。
+"""报告数字签名校验（POST /api/v1/report/{id}/verify）。
 
 覆盖：正常报告指纹一致（valid=true）；DB 内容被篡改后校验失败（valid=false）；
 无指纹的旧报告返回 legacy（valid=null）。

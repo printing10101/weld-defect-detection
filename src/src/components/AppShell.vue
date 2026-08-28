@@ -27,6 +27,8 @@ const TABS: { id: ViewId; label: string }[] = [
   { id: "batch", label: "批量检测" },
   { id: "archive", label: "档案检索" },
   { id: "device", label: "设备标定" },
+  { id: "viewer", label: "底片查看" },
+  { id: "std-eval", label: "系统评价" },
 ];
 function goto(v: ViewId): void {
   router.push({ name: v });
@@ -57,6 +59,12 @@ function onAction(id: string): void {
       break;
     case "view-device":
       goto("device");
+      break;
+    case "view-viewer":
+      goto("viewer");
+      break;
+    case "view-std-eval":
+      goto("std-eval");
       break;
     case "operator":
       editOperator();

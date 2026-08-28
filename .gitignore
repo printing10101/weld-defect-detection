@@ -85,3 +85,4 @@ data/m6_demo_report.pdf
 data/eval/std_eval.json
 data/eval/std_record.json
 data/eval/std_personnel.json
+data/*.db.bak

@@ -249,9 +249,7 @@ class QualityCfg:
     # —— 三类硬门禁（反证测试后补强；任一触发即判不合格，不扰动已标定 RQI 复合分）——
     blur_lap_bad: float = 30.0  # Laplacian 方差低于此值判失焦/模糊（真实底片实测 ≥45）
     exposure_entropy_bad: float = 0.62  # 直方图熵(归一化)低于此值判过/欠曝（真实底片实测 ≥0.73）
-    stain_smooth_bad: float = (
-        0.15  # 平滑异常斑块占比高于此值判污渍（真实底片 ≤0.14，留安全余量）
-    )
+    stain_smooth_bad: float = 0.15  # 平滑异常斑块占比高于此值判污渍（真实底片 ≤0.14，留安全余量）
 
 
 @dataclass(frozen=True)

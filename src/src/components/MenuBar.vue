@@ -38,6 +38,8 @@ const MENUS: Menu[] = [
       { id: "view-batch", label: "批量检测", shortcut: "Ctrl+2" },
       { id: "view-archive", label: "档案检索", shortcut: "Ctrl+3" },
       { id: "view-device", label: "设备标定", shortcut: "Ctrl+4" },
+      { id: "view-viewer", label: "底片查看", shortcut: "Ctrl+5" },
+      { id: "view-std-eval", label: "系统评价", shortcut: "Ctrl+6" },
     ],
   },
   {

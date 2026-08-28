@@ -12,11 +12,10 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from backend.app.dependencies import get_operator_name
 from backend.evaluation.qualification import (
     Personnel,
     check_personnel,
@@ -71,7 +70,8 @@ def _load_eval_result(rel_path: str) -> dict[str, Any]:
         p = Path.cwd() / rel_path
     if not p.is_file():
         raise HTTPException(
-            404, f"标准评价结果不存在: {rel_path}（先运行 python -m backend.evaluation.run_std_eval）"
+            404,
+            f"标准评价结果不存在: {rel_path}（先运行 python -m backend.evaluation.run_std_eval）",
         )
     try:
         payload = json.loads(p.read_text(encoding="utf-8"))

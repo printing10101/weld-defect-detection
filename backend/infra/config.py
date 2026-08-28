@@ -165,8 +165,8 @@ class IqiCfg(BaseModel):
 class PseudoDefectCfg(BaseModel):
     """伪缺陷筛查阈值。
 
-    字段集须与 backend/domain/pseudo_defect.py 的 PseudoDefectCfg 对齐
-。
+        字段集须与 backend/domain/pseudo_defect.py 的 PseudoDefectCfg 对齐
+    。
     """
 
     hough_threshold: int = 60
@@ -233,8 +233,8 @@ class QualityCfg(BaseModel):
 class MaskRefineCfg(BaseModel):
     """掩膜精修量化配置（， 四地同步）。
 
-    字段集须与 backend/domain/quantify.py 的 MaskRefineCfg dataclass 对齐
-。
+        字段集须与 backend/domain/quantify.py 的 MaskRefineCfg dataclass 对齐
+    。
     """
 
     enabled: bool = True

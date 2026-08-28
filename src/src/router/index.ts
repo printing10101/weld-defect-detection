@@ -11,6 +11,7 @@ import ArchiveView from "../views/ArchiveView.vue";
 import BatchView from "../views/BatchView.vue";
 import DeviceView from "../views/DeviceView.vue";
 import JourneyView from "../views/JourneyView.vue";
+import StdEvalView from "../views/StdEvalView.vue";
 import ViewerView from "../views/ViewerView.vue";
 
 /** 路由名与 ViewId 一一对应，AppShell 用 route.name 直接得到当前工作区。 */
@@ -21,6 +22,7 @@ export const routes: RouteRecordRaw[] = [
   { path: "/archive", name: "archive", component: ArchiveView },
   { path: "/device", name: "device", component: DeviceView },
   { path: "/viewer", name: "viewer", component: ViewerView },
+  { path: "/std-eval", name: "std-eval", component: StdEvalView },
 ];
 
 export function createAppRouter(history = createWebHashHistory()) {
@@ -32,7 +34,14 @@ export const router = createAppRouter();
 
 /** 把路由名映射回操作层约定的 ViewId（兜底到单张检测）。 */
 export function routeNameToViewId(name: unknown): ViewId {
-  if (name === "batch" || name === "archive" || name === "device" || name === "journey") {
+  if (
+    name === "batch" ||
+    name === "archive" ||
+    name === "device" ||
+    name === "journey" ||
+    name === "viewer" ||
+    name === "std-eval"
+  ) {
     return name;
   }
   return "journey";

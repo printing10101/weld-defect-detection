@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import cv2
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from backend.app.dependencies import Registry, get_registry
+from backend.infra.reporting.pdf_reporter import _read_gray
 
 router = APIRouter(tags=["records"])
 
@@ -51,3 +53,41 @@ def records(
             status_code=422, detail={"code": "INVALID_QUERY", "message": str(exc)}
         ) from None
     return RecordsResponse(items=items, total=total, stats=reg.repository.stats())
+
+
+_PREVIEW_MAX_SIDE = 1600  # 预览长边上限（查看器/报告页展示够用，控制传输体积）
+
+
+@router.get("/images/{image_id}/preview.png")
+def image_preview(
+    image_id: str,
+    reg: Annotated[Registry, Depends(get_registry)],
+) -> Response:
+    """库内影像的 PNG 预览（浏览器不解码 TIFF/DICOM，统一在此转换）。
+
+    支持静态加密副本（SDC1 魔数自动解密）；长边超限时等比降采样。
+    """
+    image = reg.repository.get_image(image_id)
+    if image is None:
+        raise HTTPException(
+            status_code=404, detail={"code": "NOT_FOUND", "message": f"image not found: {image_id}"}
+        )
+    gray = _read_gray(str(image["path"]))
+    if gray is None:
+        raise HTTPException(
+            status_code=422, detail={"code": "BAD_IMAGE", "message": "影像不可读（文件缺失或损坏）"}
+        )
+    h, w = gray.shape[:2]
+    scale = min(1.0, _PREVIEW_MAX_SIDE / max(h, w))
+    if scale < 1.0:
+        gray = cv2.resize(gray, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".png", gray)
+    if not ok:
+        raise HTTPException(
+            status_code=500, detail={"code": "ENCODE_FAIL", "message": "预览编码失败"}
+        )
+    return Response(
+        content=buf.tobytes(),
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )

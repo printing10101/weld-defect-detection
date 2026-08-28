@@ -14,11 +14,9 @@ from backend.evaluation.qualification import (
     Personnel,
     check_personnel,
     parse_cert_level,
-    save_personnel,
 )
 from backend.evaluation.std_record import build_record
 from backend.infra.reporting.std_eval_record import build_record_pdf
-
 
 # ---------------------------------------------------------------------------
 # 测试夹具：一次小规模标准评价结果（evaluate 产物的同构字典）
@@ -30,8 +28,11 @@ def eval_result() -> dict:
     from backend.evaluation.std501807 import StdEvalConfig, evaluate
 
     defect_set = [
-        ("img1", [{"bbox": [0, 0, 10, 10], "class_id": 4}],
-         [{"bbox": [0, 0, 10, 10], "class_id": 4, "score": 0.9}]),
+        (
+            "img1",
+            [{"bbox": [0, 0, 10, 10], "class_id": 4}],
+            [{"bbox": [0, 0, 10, 10], "class_id": 4, "score": 0.9}],
+        ),
     ]
     no_defect = [("c1", []), ("c2", [])]
     return evaluate(defect_set, no_defect, StdEvalConfig())
@@ -40,7 +41,13 @@ def eval_result() -> dict:
 @pytest.fixture()
 def people() -> list[Personnel]:
     return [
-        Personnel(name="张三", cert_type="RT(D)-II", role="evaluator", cert_no="RTD-001", valid_until="2099-12-31"),
+        Personnel(
+            name="张三",
+            cert_type="RT(D)-II",
+            role="evaluator",
+            cert_no="RTD-001",
+            valid_until="2099-12-31",
+        ),
         Personnel(name="李四", cert_type="RT-Ⅱ", role="labeler", cert_no="RT-002"),
         Personnel(name="王五", cert_type="RT-Ⅱ", role="labeler", cert_no="RT-003"),
     ]
@@ -85,8 +92,10 @@ def test_check_personnel_expired_and_missing():
 def test_check_personnel_bad_date_conservative():
     # 有效期格式非法 → 保守判过期（从严）
     res = check_personnel(
-        [Personnel("张三", "RT(D)-II", "evaluator", valid_until="not-a-date"),
-         Personnel("李四", "RT-II", "labeler")]
+        [
+            Personnel("张三", "RT(D)-II", "evaluator", valid_until="not-a-date"),
+            Personnel("李四", "RT-II", "labeler"),
+        ]
     )
     assert res["qualified"] is False
     assert any("过期" in i for i in res["issues"])
@@ -122,8 +131,12 @@ def test_build_record_fields(eval_result, people, tmp_path: Path):
 def test_build_record_unqualified_reference_only(eval_result, tmp_path: Path):
     # 无人员资质 → 官方结论降级为参考值
     rec = build_record(
-        eval_result, system_name="s", system_version="v", developer="d",
-        people=[], operator="",
+        eval_result,
+        system_name="s",
+        system_version="v",
+        developer="d",
+        people=[],
+        operator="",
     )
     assert rec["grading"]["official"] is False
     assert "参考值" in rec["grading"]["note"]
@@ -136,8 +149,12 @@ def test_build_record_unqualified_reference_only(eval_result, tmp_path: Path):
 
 def test_build_record_pdf(eval_result, people, tmp_path: Path):
     rec = build_record(
-        eval_result, system_name="s", system_version="v", developer="d",
-        people=people, operator="张三",
+        eval_result,
+        system_name="s",
+        system_version="v",
+        developer="d",
+        people=people,
+        operator="张三",
     )
     out = tmp_path / "rec.pdf"
     path = build_record_pdf(rec, out)
@@ -159,7 +176,10 @@ def client(tmp_path: Path, monkeypatch, eval_result) -> TestClient:
     eval_dir.mkdir(parents=True, exist_ok=True)
     eval_json = eval_dir / "std_eval.json"
     eval_json.write_text(
-        json.dumps({"n_defect_images": 1, "n_no_defect_images": 2, "result": eval_result}, ensure_ascii=False),
+        json.dumps(
+            {"n_defect_images": 1, "n_no_defect_images": 2, "result": eval_result},
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
@@ -171,11 +191,18 @@ def test_personnel_roundtrip(client: TestClient, tmp_path: Path):
     assert r.status_code == 200 and r.json()["qualified"] is False  # 尚未录入
     r = client.put(
         "/std-eval/personnel",
-        json={"people": [
-            {"name": "张三", "cert_type": "RT(D)-II", "role": "evaluator", "valid_until": "2099-01-01"},
-            {"name": "李四", "cert_type": "RT-II", "role": "labeler"},
-            {"name": "王五", "cert_type": "RT-II", "role": "labeler"},
-        ]},
+        json={
+            "people": [
+                {
+                    "name": "张三",
+                    "cert_type": "RT(D)-II",
+                    "role": "evaluator",
+                    "valid_until": "2099-01-01",
+                },
+                {"name": "李四", "cert_type": "RT-II", "role": "labeler"},
+                {"name": "王五", "cert_type": "RT-II", "role": "labeler"},
+            ]
+        },
     )
     assert r.status_code == 200 and r.json()["qualified"] is True
     assert (tmp_path / "data/eval/std_personnel.json").exists()
@@ -188,15 +215,22 @@ def test_personnel_empty_rejected(client: TestClient):
 def test_record_flow_json_and_pdf(client: TestClient, tmp_path: Path):
     client.put(
         "/std-eval/personnel",
-        json={"people": [
-            {"name": "张三", "cert_type": "RT(D)-II", "role": "evaluator"},
-            {"name": "李四", "cert_type": "RT-II", "role": "labeler"},
-        ]},
+        json={
+            "people": [
+                {"name": "张三", "cert_type": "RT(D)-II", "role": "evaluator"},
+                {"name": "李四", "cert_type": "RT-II", "role": "labeler"},
+            ]
+        },
     )
-    r = client.post("/std-eval/record", json={
-        "eval_result_path": "data/eval/std_eval.json",
-        "system_name": "s", "system_version": "v", "developer": "d",
-    })
+    r = client.post(
+        "/std-eval/record",
+        json={
+            "eval_result_path": "data/eval/std_eval.json",
+            "system_name": "s",
+            "system_version": "v",
+            "developer": "d",
+        },
+    )
     assert r.status_code == 200
     body = r.json()
     assert body["grading"]["level_standard"] == "L4"

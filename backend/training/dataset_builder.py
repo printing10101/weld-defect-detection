@@ -1,4 +1,4 @@
-""" 训练数据集装配（合并多源 → YOLO 分层划分 → data.yaml）。
+"""训练数据集装配（合并多源 → YOLO 分层划分 → data.yaml）。
 
 数据源（落盘于 data/training/raw/）：
 - swrd/      : SWRD 转换结果（swrd_converter，CC BY 4.0，3675 张；本机 115GB 装不下时改用 roboflow）

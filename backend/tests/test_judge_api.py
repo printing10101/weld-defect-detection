@@ -72,7 +72,7 @@ def test_judge_empty_payload_422() -> None:
 
 
 def test_judge_skeleton_standard_fuses_422() -> None:
-    """ 骨架标准（GB/T 3323 已注册未实现）→ grade 熔断 422。"""
+    """骨架标准（GB/T 3323 已注册未实现）→ grade 熔断 422。"""
     body = _payload()
     body["standard_id"] = "GB/T3323-2019"
     with TestClient(app) as client:
@@ -82,7 +82,7 @@ def test_judge_skeleton_standard_fuses_422() -> None:
 
 
 def test_judge_unknown_standard_422() -> None:
-    """ 未注册标准 → 装配即 422。"""
+    """未注册标准 → 装配即 422。"""
     body = _payload()
     body["standard_id"] = "ISO-UNKNOWN-XXXX"
     with TestClient(app) as client:

@@ -1,4 +1,4 @@
-""" 单元测试：评估 Harness + 回归门禁 + 漂移监控 + 实验追踪 + 模型卡。"""
+"""单元测试：评估 Harness + 回归门禁 + 漂移监控 + 实验追踪 + 模型卡。"""
 
 from __future__ import annotations
 

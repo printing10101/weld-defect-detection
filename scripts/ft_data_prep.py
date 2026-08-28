@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """现场微调 Step1：准备微调数据。
 
 - 复制 train.txt 的 102 张现场图 + 标注到 ft_train/
@@ -6,6 +5,7 @@
 - 合并增强图到 ft_train/
 - 写 ft_data.yaml（train=ft_train/images, val=val.txt）
 """
+
 from __future__ import annotations
 
 import shutil
@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from backend.training.augment import generate_rare_copy_paste  # noqa: E402
+from backend.training.augment import generate_rare_copy_paste
 
 
 def main() -> None:
@@ -66,9 +66,8 @@ def main() -> None:
     print(f"[ft] 合并增强 {merged} 张 → ft_train 共 {len(list(ft_img.glob('*')))} 张")
 
     # 4) ft_data.yaml
-    names = ["qikong", "jiazha", "wei_hantou", "wei_ronghe", "lie_wen", "yao_bian"]
     yaml_text = f"""# 现场微调数据（自动生成）：train=现场102+稀有增强，val=现场val.txt
-path: {str(rl).replace(chr(92), '/')}
+path: {str(rl).replace(chr(92), "/")}
 train: ft_train/images
 val: val.txt
 nc: 6

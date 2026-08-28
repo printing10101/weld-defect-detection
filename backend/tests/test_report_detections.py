@@ -1,4 +1,4 @@
-""" 主动学习闭环：GET /api/v1/report/{report_id}/detections 端点测试。
+"""主动学习闭环：GET /api/v1/report/{report_id}/detections 端点测试。
 
 不依赖检测器：直接经 repository 写入 report+image+defects，再以
 TestClient 校验明细返回与 404 路径。覆盖原图可读（真实尺寸）与不可读

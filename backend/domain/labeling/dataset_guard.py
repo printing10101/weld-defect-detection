@@ -77,7 +77,7 @@ def dhash(path: Path, hash_size: int = 8) -> int | None:
 
 
 def hamming(a: int, b: int) -> int:
-    return bin(a ^ b).count("1")
+    return (a ^ b).bit_count()
 
 
 def find_overlaps(
@@ -117,9 +117,7 @@ def find_overlaps(
         for name, th in train_hash.items():
             d = hamming(h, th)
             if d <= phash_hamming:
-                report.perceptual.append(
-                    {"test": f.name, "train": name, "hamming": d}
-                )
+                report.perceptual.append({"test": f.name, "train": name, "hamming": d})
                 break
     return report
 

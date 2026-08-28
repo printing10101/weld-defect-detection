@@ -1,9 +1,9 @@
-# -*- coding: utf-8 -*-
 """现场 val 评估（微调前后对比用）。
 
 用法：python eval_field.py <model.pt>
 输出：现场 val 25 张的整体指标 + 稀有类召回。
 """
+
 from __future__ import annotations
 
 import sys
@@ -19,7 +19,11 @@ RARE = [1, 2, 3, 4, 5]
 
 
 def main() -> None:
-    model_path = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "runs" / "ft_field" / "steel_field_ft" / "weights" / "best.pt"
+    model_path = (
+        Path(sys.argv[1])
+        if len(sys.argv) > 1
+        else ROOT / "runs" / "ft_field" / "steel_field_ft" / "weights" / "best.pt"
+    )
     print(f"模型: {model_path}")
     m = YOLO(str(model_path))
     data = str(ROOT / "data" / "real_label" / "data.yaml")
@@ -34,7 +38,9 @@ def main() -> None:
             val_stems.append(Path(line).stem)
 
     res = m.val(data=data, split="val", imgsz=640, device=0, verbose=False)
-    print(f"=== 现场 val（{len(val_stems)} 张）===  mAP50={res.box.map50:.4f} mAP50-95={res.box.map:.4f} P={res.box.mp:.4f} R={res.box.mr:.4f}")
+    print(
+        f"=== 现场 val（{len(val_stems)} 张）===  mAP50={res.box.map50:.4f} mAP50-95={res.box.map:.4f} P={res.box.mp:.4f} R={res.box.mr:.4f}"
+    )
 
     # 稀有类 GT（val 图）
     gts: dict[int, dict[str, list]] = {c: {} for c in RARE}
@@ -83,7 +89,7 @@ def main() -> None:
                         if cc == c:
                             det_c.append(b)
                 total += len(boxes)
-                for (cx, cy, w, h) in boxes:
+                for cx, cy, w, h in boxes:
                     x1, y1 = (cx - w / 2) * img.shape[1], (cy - h / 2) * img.shape[0]
                     x2, y2 = (cx + w / 2) * img.shape[1], (cy + h / 2) * img.shape[0]
                     gw, gh = w * img.shape[1], h * img.shape[0]
@@ -94,7 +100,7 @@ def main() -> None:
                         if iw * ih > 0.3 * gw * gh:
                             hits += 1
                             break
-            line += f" {NAMES[c]}={hits}/{total}({hits/total if total else 0:.0%})"
+            line += f" {NAMES[c]}={hits}/{total}({hits / total if total else 0:.0%})"
         print(line)
     print("EVAL_DONE")
 

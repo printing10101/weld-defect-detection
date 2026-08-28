@@ -32,6 +32,10 @@ from backend.infra.config import load_config
 _EXT = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
 
 
+def _now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")  # noqa: DTZ005
+
+
 def _config_from_app() -> StdEvalConfig:
     """AppConfig.std_eval（扁平字段）→ StdEvalConfig（frr 聚合成 dict）。"""
     c = load_config().std_eval
@@ -50,7 +54,6 @@ def _config_from_app() -> StdEvalConfig:
 def _image_size(p: Path) -> tuple[int, int]:
     """读图像宽高（走字节读，规避 Windows 非 ASCII 路径）。"""
     import cv2
-
     import numpy as np
 
     data = np.fromfile(str(p), dtype=np.uint8)
@@ -137,8 +140,7 @@ def main() -> None:
     else:
         pred_dir = _ROOT / args.pred_dir
         preds_by_stem = {
-            p.stem: _load_yolo_labels(pred_dir / f"{p.stem}.txt", _image_size(p))
-            for p in img_paths
+            p.stem: _load_yolo_labels(pred_dir / f"{p.stem}.txt", _image_size(p)) for p in img_paths
         }
 
     defect_set = []
@@ -163,7 +165,11 @@ def main() -> None:
                 lbl = _ROOT / args.clean_img_dir / "labels" / f"{p.stem}.txt"
             else:
                 lbl = (_ROOT / args.clean_img_dir).parent / "labels" / f"{p.stem}.txt"
-            if args.clean_pred_dir is None and lbl.exists() and _load_yolo_labels(lbl, _image_size(p)):
+            if (
+                args.clean_pred_dir is None
+                and lbl.exists()
+                and _load_yolo_labels(lbl, _image_size(p))
+            ):
                 raise SystemExit(
                     f"无缺陷测试集发现缺陷标注: {p.stem}（§9.1.2 口径被污染，拒绝评价）"
                 )
@@ -171,7 +177,7 @@ def main() -> None:
 
     result = evaluate(defect_set, no_defect_set, cfg)
     payload = {
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "generated_at": _now_iso(),
         "n_defect_images": len(defect_set),
         "n_no_defect_images": len(no_defect_set),
         "result": result,
@@ -182,13 +188,19 @@ def main() -> None:
 
     std = result["standard"]
     strict = result["strict"]
-    print(f"标准口径  (IOU≥{std['iou_threshold']}): TDR={std['tdr']:.2%} WDR={std['wdr']:.2%} "
-          f"KDR={std['kdr']:.2%} FRR={std['frr']:.2%} 分级={std['level']}")
-    print(f"严格口径  (IOU≥{strict['iou_threshold']}): TDR={strict['tdr']:.2%} WDR={strict['wdr']:.2%} "
-          f"KDR={strict['kdr']:.2%} FRR={strict['frr']:.2%} 分级={strict['level']}")
+    print(
+        f"标准口径  (IOU≥{std['iou_threshold']}): TDR={std['tdr']:.2%} WDR={std['wdr']:.2%} "
+        f"KDR={std['kdr']:.2%} FRR={std['frr']:.2%} 分级={std['level']}"
+    )
+    print(
+        f"严格口径  (IOU≥{strict['iou_threshold']}): TDR={strict['tdr']:.2%} WDR={strict['wdr']:.2%} "
+        f"KDR={strict['kdr']:.2%} FRR={strict['frr']:.2%} 分级={strict['level']}"
+    )
     print(f"记录分级（从严）: {result['level_recorded']}")
-    print(f"风险: 漏检={std['risks']['miss']} 误检={std['risks']['false_detect']} "
-          f"误报={std['risks']['false_report']}")
+    print(
+        f"风险: 漏检={std['risks']['miss']} 误检={std['risks']['false_detect']} "
+        f"误报={std['risks']['false_report']}"
+    )
     for n in sorted(STD_CLASS_NAMES):
         c = std["per_class"][str(n)]
         print(f"  {n} {c['name']}: TDRn={c['tdr']:.2%} FDRn={c['fdr']:.2%} MDRn={c['mdr']:.2%}")

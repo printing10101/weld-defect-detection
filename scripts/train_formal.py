@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """正式训练：steel + synthetic + 稀有类 Copy-Paste 均衡（用户要求）。
 
 与 smoke 的区别：
@@ -7,6 +6,7 @@
 - 增强参数：方案A 验证过的配置（mosaic/mixup/翻转/hsv）
 - 评估：训练后自动 val + test 集专项（裂纹/稀有类）
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,7 +18,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main() -> None:
-    print(f"cuda={torch.cuda.is_available()} {torch.cuda.get_device_name(0) if torch.cuda.is_available() else ''}")
+    print(
+        f"cuda={torch.cuda.is_available()} {torch.cuda.get_device_name(0) if torch.cuda.is_available() else ''}"
+    )
     m = YOLO(str(ROOT / "data" / "real_label" / "yolo11n.pt"))
     m.train(
         data=str(ROOT / "data" / "training" / "data.yaml"),

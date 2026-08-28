@@ -19,8 +19,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-import numpy as np
-
 # ---------------------------------------------------------------------------
 # 标准缺陷类别与模型类别映射
 # ---------------------------------------------------------------------------
@@ -129,8 +127,7 @@ def match_image(
     """
     cfg = cfg or StdEvalConfig()
     gt_std = [
-        _to_std_class(g["class_id"], g["bbox"], cfg.aspect_round_max, cfg.class_to_std)
-        for g in gts
+        _to_std_class(g["class_id"], g["bbox"], cfg.aspect_round_max, cfg.class_to_std) for g in gts
     ]
     pred_std = [
         _to_std_class(p["class_id"], p["bbox"], cfg.aspect_round_max, cfg.class_to_std)
@@ -189,7 +186,7 @@ class ClassCounts:
 
     def rates(self) -> dict[str, float]:
         d = self.total
-        f = lambda x: round(x / d, 4) if d else 0.0  # noqa: E731
+        f = lambda x: round(x / d, 4) if d else 0.0
         return {"tdr": f(self.td), "fdr": f(self.fd), "mdr": f(self.md)}
 
 
@@ -222,7 +219,10 @@ class StdEvalResult:
             },
             "fr_by_class": self.fr_by_class,
             "frr": self.frr,
-            "no_defect": {"reported_a": self.n_no_defect_reported, "clean_b": self.n_no_defect_clean},
+            "no_defect": {
+                "reported_a": self.n_no_defect_reported,
+                "clean_b": self.n_no_defect_clean,
+            },
             "fp_extra": self.fp_extra,
             "confusion": self.confusion,
             "kdr": self.kdr,
@@ -246,10 +246,8 @@ _LEVEL_TABLE: list[dict[str, Any]] = [
 _FRR_L2 = {"auto": 0.03, "manual": 0.04}
 
 
-def grade_level(
-    kdr: float, wdr: float, tdr: float, frr: float, cfg: StdEvalConfig
-) -> str | None:
-    """ 表1 分级：四项指标全部达标的最优级别；全不达标 → None（未定级）。
+def grade_level(kdr: float, wdr: float, tdr: float, frr: float, cfg: StdEvalConfig) -> str | None:
+    """表1 分级：四项指标全部达标的最优级别；全不达标 → None（未定级）。
 
     strict_frr=True（默认）时 FRR 一律按收紧线（3%/4%）判定，严于标准 L1 线。
     """
@@ -342,7 +340,6 @@ def _evaluate_at(
                 n = _to_std_class(p["class_id"], p["bbox"], cfg.aspect_round_max, cfg.class_to_std)
                 fr_by_class[n] += 1
     b = len(no_defect_set) - a
-    fr_total = sum(fr_by_class.values())
 
     denom = sum(c.total for c in per.values())
     tdr = round(sum(c.td for c in per.values()) / denom, 4) if denom else 0.0

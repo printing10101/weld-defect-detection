@@ -23,7 +23,7 @@ _CHUNK = 1 << 20  # 1 MiB 分块读取，避免整文件驻留内存
 
 
 def not_implemented(stage: str) -> JSONResponse:
-    """ 骨架期占位：返回 501 并标注计划实现里程碑。"""
+    """骨架期占位：返回 501 并标注计划实现里程碑。"""
     return JSONResponse(
         {
             "error": {

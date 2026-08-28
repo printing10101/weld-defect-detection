@@ -47,7 +47,7 @@ def test_interfaces_have_expected_methods() -> None:
 
 
 def test_standard_registry_contract() -> None:
-    """ 标准注册表：默认实现可装配；骨架标准已登记；未知熔断。"""
+    """标准注册表：默认实现可装配；骨架标准已登记；未知熔断。"""
     from backend.domain.errors import GradingAmbiguousError
     from backend.domain.grade.gb3323 import Gb3323Grader
     from backend.domain.grade.registry import get_grader, supported_standard_ids

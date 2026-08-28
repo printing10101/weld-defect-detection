@@ -18,6 +18,7 @@ import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 _CERT_RE = re.compile(r"RT\s*(?:\(D\))?\s*[-‐–]?\s*(Ⅰ|Ⅱ|III|II|I|1|2|3)\s*级?", re.IGNORECASE)
 
@@ -55,7 +56,7 @@ class Personnel:
         if not self.valid_until:
             return False
         try:
-            return date.fromisoformat(self.valid_until) < date.today()
+            return date.fromisoformat(self.valid_until) < date.today()  # noqa: DTZ011 — 本地时区语义即所需
         except ValueError:
             return True  # 日期格式非法按过期处理
 
@@ -68,7 +69,7 @@ def required_level(role: str) -> int:
     return 2 if role in ("evaluator", "labeler") else 3
 
 
-def check_personnel(people: list[Personnel]) -> dict[str, object]:
+def check_personnel(people: list[Personnel]) -> dict[str, Any]:
     """资质校验：评价人员须 RT(D)Ⅱ+、标注人员须 RTⅡ+。
 
     返回 {"qualified": bool, "issues": [str], "evaluators": [...], "labelers": [...]}。

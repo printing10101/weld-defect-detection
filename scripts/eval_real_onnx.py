@@ -22,6 +22,7 @@
       --label-dir data/real_label/labels \
       --out data/eval/real_baseline.json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -29,18 +30,21 @@ import json
 import sys
 from pathlib import Path
 
-import numpy as np
 import cv2
+import numpy as np
 import onnxruntime as ort
 
 # ---- 指标：优先复用后端 harness，失败则内联等价实现（纯 numpy） ----
 try:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
     from backend.evaluation.harness import detection_metrics  # type: ignore
-except Exception:  # pragma: no cover
+except Exception:  # noqa: BLE001 — harness 不可导入时内联等价实现
+
     def iou(a, b):
-        x1 = max(a[0], b[0]); y1 = max(a[1], b[1])
-        x2 = min(a[0] + a[2], b[0] + b[2]); y2 = min(a[1] + a[3], b[1] + b[3])
+        x1 = max(a[0], b[0])
+        y1 = max(a[1], b[1])
+        x2 = min(a[0] + a[2], b[0] + b[2])
+        y2 = min(a[1] + a[3], b[1] + b[3])
         inter = max(0.0, x2 - x1) * max(0.0, y2 - y1)
         ua = max(0.0, a[2]) * max(0.0, a[3]) + max(0.0, b[2]) * max(0.0, b[3]) - inter
         return inter / ua if ua > 0 else 0.0
@@ -59,30 +63,49 @@ except Exception:  # pragma: no cover
             bc.setdefault(x["class_id"], {"p": [], "t": []})["p"].append(x)
         for x in targets:
             bc.setdefault(x["class_id"], {"p": [], "t": []})["t"].append(x)
-        cm = {}; ta = tr = tp = tg = 0
+        cm = {}
+        ta = tr = tp = tg = 0
         for cid, g in bc.items():
-            ps = sorted(g["p"], key=lambda d: -d["score"]); ts = g["t"]
-            used = [False] * len(ts); tpf = []
+            ps = sorted(g["p"], key=lambda d: -d["score"])
+            ts = g["t"]
+            used = [False] * len(ts)
+            tpf = []
             for d in ps:
                 hit = False
                 for i, t in enumerate(ts):
                     if used[i]:
                         continue
                     if iou(d["bbox"], t["bbox"]) >= iou_threshold:
-                        used[i] = True; hit = True; break
+                        used[i] = True
+                        hit = True
+                        break
                 tpf.append(hit)
-            cum = np.cumsum(np.array(tpf, float)); n = len(ts)
+            cum = np.cumsum(np.array(tpf, float))
+            n = len(ts)
             rec = cum / n if n else np.zeros_like(cum)
             prec = cum / np.maximum(cum, 1e-9)
             a = _ap(prec, rec)
             r = float(cum[-1] / n) if n else 0.0
             pr = float(cum[-1] / max(cum[-1] + (len(ps) - cum[-1]), 1e-9)) if ps else 0.0
-            cm[str(cid)] = {"ap50": round(a, 4), "recall": round(r, 4), "precision": round(pr, 4), "gt_count": n}
-            ta += a * n; tr += r * n; tp += pr * n; tg += n
+            cm[str(cid)] = {
+                "ap50": round(a, 4),
+                "recall": round(r, 4),
+                "precision": round(pr, 4),
+                "gt_count": n,
+            }
+            ta += a * n
+            tr += r * n
+            tp += pr * n
+            tg += n
         if tg == 0:
             return {"mAP50": 0.0, "recall": 0.0, "precision": 0.0, "gt_total": 0, "by_class": cm}
-        return {"mAP50": round(ta / tg, 4), "recall": round(tr / tg, 4),
-                "precision": round(tp / tg, 4), "gt_total": tg, "by_class": cm}
+        return {
+            "mAP50": round(ta / tg, 4),
+            "recall": round(tr / tg, 4),
+            "precision": round(tp / tg, 4),
+            "gt_total": tg,
+            "by_class": cm,
+        }
 
 
 IMGSZ = 640
@@ -105,10 +128,12 @@ def read_image(p: Path) -> np.ndarray:
 def letterbox(img, new=IMGSZ):
     h, w = img.shape[:2]
     scale = min(new / h, new / w)
-    nh, nw = int(round(h * scale)), int(round(w * scale))
+    nh, nw = round(h * scale), round(w * scale)
     resized = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_LINEAR)
-    t = (new - nh) // 2; b = new - nh - t
-    l = (new - nw) // 2; r = new - nw - l
+    t = (new - nh) // 2
+    b = new - nh - t
+    l = (new - nw) // 2
+    r = new - nw - l
     padded = cv2.copyMakeBorder(resized, t, b, l, r, cv2.BORDER_CONSTANT, value=114)
     return padded, scale, (l, t)
 
@@ -143,8 +168,10 @@ def _nms(boxes, scores, iou_thr):
 def _iou_xywh(a, b):
     ax1, ay1, aw, ah = a[0] - a[2] / 2, a[1] - a[3] / 2, a[2], a[3]
     bx1, by1, bw, bh = b[0] - b[2] / 2, b[1] - b[3] / 2, b[2], b[3]
-    x1 = max(ax1, bx1); y1 = max(ay1, by1)
-    x2 = min(ax1 + aw, bx1 + bw); y2 = min(ay1 + ah, by1 + bh)
+    x1 = max(ax1, bx1)
+    y1 = max(ay1, by1)
+    x2 = min(ax1 + aw, bx1 + bw)
+    y2 = min(ay1 + ah, by1 + bh)
     inter = max(0.0, x2 - x1) * max(0.0, y2 - y1)
     ua = aw * ah + bw * bh - inter
     return inter / ua if ua > 0 else 0.0
@@ -160,7 +187,6 @@ def parse_and_filter(out, scale, pad, orig_wh):
     scores = preds[:, 4:]
     confs = scores.max(1)
     cls = scores.argmax(1)
-    W, H = orig_wh
     kept = []
     for c in range(scores.shape[1]):
         m = (cls == c) & (confs >= CLASS_CONF.get(int(c), 0.3))
@@ -177,11 +203,13 @@ def parse_and_filter(out, scale, pad, orig_wh):
             cy_o = (cy - pad[1]) / scale
             w_o = w / scale
             h_o = h / scale
-            kept.append({
-                "class_id": int(c),
-                "score": float(confs[i]),
-                "bbox": [float(cx_o - w_o / 2), float(cy_o - h_o / 2), float(w_o), float(h_o)],
-            })
+            kept.append(
+                {
+                    "class_id": int(c),
+                    "score": float(confs[i]),
+                    "bbox": [float(cx_o - w_o / 2), float(cy_o - h_o / 2), float(w_o), float(h_o)],
+                }
+            )
     return kept
 
 
@@ -196,14 +224,22 @@ def load_gt(stem: str, label_dir: Path, orig_wh):
         if len(parts) != 5:
             continue
         try:
-            cid, cx, cy, w, h = int(parts[0]), float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])
+            cid, cx, cy, w, h = (
+                int(parts[0]),
+                float(parts[1]),
+                float(parts[2]),
+                float(parts[3]),
+                float(parts[4]),
+            )
         except ValueError:
             continue
         # 归一化 → 原图像素 [x,y,w,h]
-        out.append({
-            "class_id": cid,
-            "bbox": [(cx - w / 2) * W, (cy - h / 2) * H, w * W, h * H],
-        })
+        out.append(
+            {
+                "class_id": cid,
+                "bbox": [(cx - w / 2) * W, (cy - h / 2) * H, w * W, h * H],
+            }
+        )
     return out
 
 
@@ -254,11 +290,15 @@ def main():
     # 控制台摘要
     print(f"模型: {model}")
     print(f"图像数: {n_images}  预测框: {len(preds_all)}  真值框: {len(targets_all)}")
-    print(f"整体 mAP@0.5={metrics['mAP50']:.4f}  召回={metrics['recall']:.4f}  精确={metrics['precision']:.4f}")
+    print(
+        f"整体 mAP@0.5={metrics['mAP50']:.4f}  召回={metrics['recall']:.4f}  精确={metrics['precision']:.4f}"
+    )
     print(f"{'类别':<24}{'GT':>5}{'AP50':>9}{'召回':>9}{'精确':>9}")
     for cid, m in metrics["by_class"].items():
         name = CLASS_NAMES[int(cid)] if int(cid) < len(CLASS_NAMES) else f"cls{cid}"
-        print(f"{name:<24}{m['gt_count']:>5}{m['ap50']:>9.4f}{m['recall']:>9.4f}{m['precision']:>9.4f}")
+        print(
+            f"{name:<24}{m['gt_count']:>5}{m['ap50']:>9.4f}{m['recall']:>9.4f}{m['precision']:>9.4f}"
+        )
     print(f"\n已写 {out_path}")
     return payload
 

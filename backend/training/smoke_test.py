@@ -1,4 +1,4 @@
-""" 端到端烟雾测试（合成数据，无许可风险）。
+"""端到端烟雾测试（合成数据，无许可风险）。
 
 流程：合成 X 光风格图像 + YOLO 标签 → dataset_builder.build_dataset
 → 训练 2 个 epoch（tiny，从零架构，免下载权重）→ YoloDetector(torch) 推理回一条

@@ -1,13 +1,36 @@
 <script setup lang="ts">
 /**
- * 人工复核面板（真实 POST /api/v1/review）。
- * 提交后展示后端真实返回：consensus / kappa / stage / joint_level / needs_arbitration。
+ * 人工复核面板：级别复核（POST /api/v1/review）+ 缺陷增删改
+ * （POST/PATCH/DELETE，DB50/T 1807 §6.1.4），变更后后端自动重评级。
  */
 import { ref } from "vue";
-import { submitReview } from "../services/api";
+import {
+  addReviewDefect,
+  deleteReviewDefect,
+  editReviewDefect,
+  getReportDetections,
+  submitReview,
+} from "../services/api";
 import type { ReviewOut } from "../types/api";
 
-const props = defineProps<{ imageId: string }>();
+const props = defineProps<{ imageId: string; reportId?: string }>();
+
+const DEFECT_CLASSES = [
+  { id: 0, name: "气孔" },
+  { id: 1, name: "夹渣" },
+  { id: 2, name: "未焊透" },
+  { id: 3, name: "未熔合" },
+  { id: 4, name: "裂纹" },
+  { id: 5, name: "咬边" },
+  { id: 6, name: "内凹" },
+];
+
+interface DefectRow {
+  id: string;
+  class_id: number;
+  bbox_px: number[];
+  source: string | null;
+}
 
 const reviewer = ref("");
 const role = ref<"initial" | "secondary" | "arbitrator">("initial");
@@ -16,6 +39,102 @@ const note = ref("");
 const submitting = ref(false);
 const outcome = ref<ReviewOut | null>(null);
 const error = ref<string | null>(null);
+
+// ---- 缺陷增删改 ----
+const defectOpen = ref(false);
+const defectRows = ref<DefectRow[]>([]);
+const defectBusy = ref(false);
+const defectMsg = ref<string | null>(null);
+const defectErr = ref<string | null>(null);
+const reason = ref("");
+const newClass = ref(0);
+const newBox = ref("");
+
+async function toggleDefects(): Promise<void> {
+  defectOpen.value = !defectOpen.value;
+  if (defectOpen.value && props.reportId) await reloadDefects();
+}
+
+async function reloadDefects(): Promise<void> {
+  if (!props.reportId) return;
+  defectErr.value = null;
+  try {
+    const d = await getReportDetections(props.reportId);
+    defectRows.value = d.defects.map((x) => ({
+      id: String(x.id),
+      class_id: Number(x.class_id),
+      bbox_px: (x.bbox as number[]) ?? [],
+      source: (x.source as string | null) ?? null,
+    }));
+  } catch (e) {
+    defectErr.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+function guardReason(): string | null {
+  if (!reason.value.trim()) {
+    defectErr.value = "请先填写变更理由（审计必填）。";
+    return null;
+  }
+  return reason.value.trim();
+}
+
+async function onAddDefect(): Promise<void> {
+  const r = guardReason();
+  if (r === null) return;
+  const parts = newBox.value.split(/[,,\s]+/).filter(Boolean).map(Number);
+  if (parts.length !== 4 || parts.some((v) => !Number.isFinite(v) || v < 0)) {
+    defectErr.value = "框坐标格式：x,y,w,h（非负数字）。";
+    return;
+  }
+  defectBusy.value = true;
+  defectErr.value = null;
+  try {
+    const out = await addReviewDefect(props.imageId, {
+      class_id: newClass.value,
+      bbox_px: parts,
+      reason: r,
+    });
+    defectMsg.value = `已添加，综合级别 ${out.joint_level ?? "需人工"}（缺陷 ${out.defect_count}）`;
+    await reloadDefects();
+  } catch (e) {
+    defectErr.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    defectBusy.value = false;
+  }
+}
+
+async function onEditClass(row: DefectRow, classId: number): Promise<void> {
+  const r = guardReason();
+  if (r === null) return;
+  defectBusy.value = true;
+  defectErr.value = null;
+  try {
+    const out = await editReviewDefect(row.id, { class_id: classId, reason: r });
+    defectMsg.value = `已修改类型，综合级别 ${out.joint_level ?? "需人工"}`;
+    await reloadDefects();
+  } catch (e) {
+    defectErr.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    defectBusy.value = false;
+  }
+}
+
+async function onDeleteDefect(row: DefectRow): Promise<void> {
+  const r = guardReason();
+  if (r === null) return;
+  defectBusy.value = true;
+  defectErr.value = null;
+  try {
+    const out = await deleteReviewDefect(row.id, r);
+    defectMsg.value = `已删除，综合级别 ${out.joint_level ?? "需人工"}（缺陷 ${out.defect_count}）`;
+    await reloadDefects();
+  } catch (e) {
+    defectErr.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    defectBusy.value = false;
+  }
+}
 
 async function onSubmit(): Promise<void> {
   error.value = null;
@@ -133,6 +252,122 @@ async function onSubmit(): Promise<void> {
       >
         {{ submitting ? "提交中…" : "提交复核" }}
       </button>
+      <div class="section-h">
+        缺陷管理（增删改后自动重评级）
+      </div>
+      <button
+        class="btn"
+        type="button"
+        @click="toggleDefects"
+      >
+        {{ defectOpen ? "收起" : "展开" }}缺陷管理
+      </button>
+      <div
+        v-if="defectOpen"
+        style="margin-top: 10px"
+      >
+        <div class="field">
+          <label for="dfr">变更理由（审计必填）<span class="req">*</span></label>
+          <input
+            id="dfr"
+            v-model="reason"
+            placeholder="如：复核确认为裂纹 / 补录漏检气孔 / 确认为伪影像"
+          >
+        </div>
+        <table
+          v-if="defectRows.length"
+          class="dtable"
+        >
+          <thead>
+            <tr><th>类型</th><th>框 [x,y,w,h]</th><th>来源</th><th>操作</th></tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="row in defectRows"
+              :key="row.id"
+            >
+              <td>
+                <select
+                  :value="row.class_id"
+                  :disabled="defectBusy"
+                  @change="onEditClass(row, Number(($event.target as HTMLSelectElement).value))"
+                >
+                  <option
+                    v-for="c in DEFECT_CLASSES"
+                    :key="c.id"
+                    :value="c.id"
+                  >
+                    {{ c.name }}
+                  </option>
+                </select>
+              </td>
+              <td>{{ row.bbox_px.map((v: number) => Math.round(v)).join(", ") }}</td>
+              <td>{{ row.source === "manual" ? "人工" : "检测" }}</td>
+              <td>
+                <button
+                  class="btn danger"
+                  type="button"
+                  :disabled="defectBusy"
+                  @click="onDeleteDefect(row)"
+                >
+                  删除
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div
+          v-else
+          class="lede"
+        >
+          该影像暂无缺陷记录。
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="dfc">新增缺陷类型</label>
+            <select
+              id="dfc"
+              v-model.number="newClass"
+            >
+              <option
+                v-for="c in DEFECT_CLASSES"
+                :key="c.id"
+                :value="c.id"
+              >
+                {{ c.name }}
+              </option>
+            </select>
+          </div>
+          <div class="field grow">
+            <label for="dfb">框坐标 x,y,w,h（像素）</label>
+            <input
+              id="dfb"
+              v-model="newBox"
+              placeholder="如 120,30,20,20"
+            >
+          </div>
+          <button
+            class="btn"
+            type="button"
+            :disabled="defectBusy"
+            @click="onAddDefect"
+          >
+            添加缺陷
+          </button>
+        </div>
+        <div
+          v-if="defectMsg"
+          class="ok show"
+        >
+          {{ defectMsg }}
+        </div>
+        <div
+          v-if="defectErr"
+          class="err show"
+        >
+          {{ defectErr }}
+        </div>
+      </div>
       <div
         v-if="error"
         class="err show"
@@ -186,3 +421,29 @@ async function onSubmit(): Promise<void> {
     </div>
   </div>
 </template>
+
+<style scoped>
+.dtable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 8px 0;
+}
+.dtable th,
+.dtable td {
+  border: 1px solid #d8d8d8;
+  padding: 4px 6px;
+  text-align: left;
+}
+.dtable select {
+  font-size: 12px;
+}
+.btn.danger {
+  color: #b03030;
+}
+.ok.show {
+  color: #2c7a3d;
+  font-size: 12px;
+  margin-top: 6px;
+}
+</style>

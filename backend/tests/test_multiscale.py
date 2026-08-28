@@ -1,4 +1,4 @@
-""" 多尺度训练增强 + 推理 TTA 测试。
+"""多尺度训练增强 + 推理 TTA 测试。
 
 - build_multiscale_augment：输出保持目标尺寸、bbox 标签同步变换；
 - YoloDetector.infer_tta：跨尺度坐标还原 + NMS 去重 + 按置信度排序。

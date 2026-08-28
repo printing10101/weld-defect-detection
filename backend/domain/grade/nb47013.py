@@ -31,6 +31,8 @@ _ZERO_TOLERANCE = {
     DefectClass.INCOMPLETE_PENETRATION,
 }
 _ORDER = {JointLevel.I: 1, JointLevel.II: 2, JointLevel.III: 3, JointLevel.IV: 4}
+
+
 class Nb47013Grader:
     """NB/T47013.2-2015 评级实现。"""
 
@@ -209,7 +211,7 @@ class Nb47013Grader:
         t: float,
         spacing: float,
     ) -> bool:
-        """ 尺寸临界判定：长径≈T/2、条形长度压线、点数压线 → True。
+        """尺寸临界判定：长径≈T/2、条形长度压线、点数压线 → True。
 
         与 uncertainty 高触发同义（任一命中即 need_review），保证临界缺陷
         即便高置信也进入人工复核。
