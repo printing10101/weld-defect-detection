@@ -1,0 +1,67 @@
+# 焊缝射线缺陷检测系统（weld-defect-detection）
+# 自定义非商用许可证 / Custom Non-Commercial License
+
+版权所有 (c) 2026 printing10101
+
+## 一、许可授予（中文）
+
+在遵守本许可证的前提下，任何个人或组织可以免费：
+- 使用、复制、修改本软件及其源代码；
+- 将其用于**个人学习、科研、教学等非商业目的**。
+
+**禁止商业使用**：未经版权所有者事先书面授权，任何人不得将本软件
+（含修改版本）用于任何商业目的，包括但不限于：
+
+1. 直接或间接销售、出租、许可、分销本软件或其衍生品并收取费用；
+2. 将本软件全部或部分集成、嵌入、链接到商业产品、商业系统或商业服务中；
+3. 将本软件（或其衍生品）用于对外提供收费的检测、评片、数据处理等服务；
+4. 在商业性项目、商业性竞赛、受商业合同约束的工作中使用本软件；
+5. 利用本软件或其输出结果直接或间接获取商业利益。
+
+如需商业授权，请联系版权所有者获得书面许可。
+
+## 二、义务
+
+1. 任何复制、修改或再分发，必须完整保留本许可证文本；
+2. 再分发修改版本时，必须显著标明已做修改，且不得声称获得了
+   版权所有者的背书；
+3. 再分发时不得移除或遮蔽本项目文档中的版权与许可声明。
+
+## 三、免责声明（THE SOFTWARE IS PROVIDED "AS IS"）
+
+本软件按"现状"提供，不附带任何明示或默示的担保，包括但不限于
+适销性、特定用途适用性与不侵权的担保。
+
+**特别提示**：本软件输出的缺陷识别、定级与评价结果仅为辅助参考，
+**不构成**无损检测的法定评定结论；任何涉及承压设备安全判定的
+行为，必须由持证无损检测人员依据现行有效标准执行，并由使用者
+自行承担全部责任。在任何情况下，版权所有者均不对因使用或无法
+使用本软件而产生的任何直接、间接、偶然、特殊或惩罚性损害负责。
+
+---
+
+# weld-defect-detection — Custom Non-Commercial License (English Summary)
+
+Copyright (c) 2026 printing10101
+
+Permission is granted, free of charge, to use, copy and modify this
+software **for personal, academic, research and educational purposes only**.
+
+**Commercial use is prohibited** without prior written permission from the
+copyright holder, including but not limited to: selling, sublicensing or
+redistributing for a fee; bundling or integrating into any commercial
+product, system or service; providing paid inspection/evaluation/data
+services; or using it in any for-profit engagement.
+
+The above copyright notice and this license text must be included in all
+copies or substantial portions of the software, and modifications must be
+prominently marked.
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. Detection, grading and evaluation outputs are for reference only
+and do **not** constitute legally valid NDT conclusions. In no event shall
+the copyright holder be liable for any claim, damages or other liability
+arising from the use of this software.
+
+**In case of any discrepancy between the English summary and the Chinese
+text above, the Chinese text shall prevail.**
