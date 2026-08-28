@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from backend.app.dependencies import Registry, get_registry
+from backend.infra.diconde import parse_diconde_file
 from backend.infra.reporting.pdf_reporter import _read_gray
 
 router = APIRouter(tags=["records"])
@@ -91,3 +92,24 @@ def image_preview(
         media_type="image/png",
         headers={"Cache-Control": "private, max-age=3600"},
     )
+
+
+@router.get("/images/{image_id}/diconde")
+def image_diconde(
+    image_id: str,
+    reg: Annotated[Registry, Depends(get_registry)],
+) -> dict:
+    """DICONDE 元数据（ASTM E2339）：透照工艺/设备字段 + 隐私标签状态。
+
+    非 DICOM 影像返回 422；患者隐私字段仅作存在性提示（脱敏由
+    anonymize_images 工具负责）。
+    """
+    image = reg.repository.get_image(image_id)
+    if image is None:
+        raise HTTPException(
+            status_code=404, detail={"code": "NOT_FOUND", "message": f"image not found: {image_id}"}
+        )
+    try:
+        return parse_diconde_file(image["path"])
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail={"code": "NOT_DICOM", "message": str(e)}) from e
