@@ -6,6 +6,7 @@ server:
     - http://localhost:5173
     - tauri://localhost
     - https://tauri.localhost
+    - http://tauri.localhost
 model:
   default_uri: models/weights/best.onnx
   backend: onnx

@@ -34,6 +34,7 @@ class ServerCfg(BaseModel):
         "http://localhost:5173",
         "tauri://localhost",
         "https://tauri.localhost",
+        "http://tauri.localhost",
     ]
 
 

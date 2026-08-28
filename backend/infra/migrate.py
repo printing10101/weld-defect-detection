@@ -22,6 +22,20 @@ _ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 
 
+def _schema_has(db_path: str, table: str) -> bool:
+    """独立短连接探测表是否已存在（用于识别 create_all 裸建的遗留库）。"""
+    import sqlite3
+
+    con = sqlite3.connect(db_path)
+    try:
+        row = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ).fetchone()
+        return row is not None
+    finally:
+        con.close()
+
+
 def ensure_migrations(db_path: str) -> str:
     """确保 DB schema 处于 Alembic 头版本；返回最终所在版本号。
 
@@ -57,6 +71,12 @@ def ensure_migrations(db_path: str) -> str:
             # 避免 0001 的 CREATE TABLE 与既有表冲突。
             _LOG.info("empty alembic_version + legacy tables: stamp baseline then upgrade")
             command.stamp(cfg, "0002_devices_report_hash")
+        if current == "0001_initial" and _schema_has(db_path, "devices"):
+            # 打包版遗留库：create_all 已建出 0002/0003 的表（devices 等），
+            # 版本却停在 0001。直接 upgrade 会在 0002 的 CREATE TABLE 撞表。
+            # 先 stamp 到 0003，再 upgrade 只执行 0004 起的新迁移。
+            _LOG.info("stamped 0001 legacy DB has newer tables, stamping 0003 then upgrade")
+            command.stamp(cfg, "0003_audit_batch_disposition")
         command.upgrade(cfg, "head")
     elif has_images:
         # 历史 create_all DB：标记到基线，不重建表
