@@ -45,7 +45,8 @@ def _native_delete_scope():
         yield
         return
     saved_unlink, saved_remove = os.unlink, os.remove
-    os.unlink, os.remove = nt.unlink, nt.remove
+    os.unlink = getattr(nt, "unlink", os.unlink)
+    os.remove = getattr(nt, "remove", os.remove)
     try:
         yield
     finally:

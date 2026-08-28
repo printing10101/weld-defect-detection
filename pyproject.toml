@@ -11,6 +11,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "pyyaml>=6.0",
     "pydicom>=2.4",
+    "alembic>=1.13",  # 启动期迁移（infra.migrate），运行时依赖
     "numpy>=1.26",
     "scikit-image>=0.22",
     # §7.5 静态加密（AES-256-GCM，security.encrypt 默认开启）属运行时依赖，
@@ -31,6 +32,7 @@ report = [
     "reportlab>=4.0",
     # M7 PDF/A-1b 后处理：在 reportlab 输出上注入 XMP 标识 + sRGB OutputIntent + 文档 ID
     "pypdf>=4.0",
+    "onnxruntime>=1.17",  # 检测器契约/冒烟测试 + pyright 解析
 ]
 dev = [
     "pytest>=8",
@@ -43,6 +45,7 @@ dev = [
     "python-multipart>=0.0.9",      # FastAPI 表单/文件上传（report/measure 等 API 测试）
     "reportlab>=4.0",               # PDF 报告测试（与 report extra 一致）
     "pypdf>=4.0",
+    "onnxruntime>=1.17",  # 检测器契约/冒烟测试 + pyright 解析
 ]
 
 [build-system]
