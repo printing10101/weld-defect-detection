@@ -160,16 +160,12 @@ def main() -> None:
                 p.stem: (_load_yolo_labels(cpd / f"{p.stem}.txt", _image_size(p)) if cpd else [])
                 for p in clean_paths
             }
+        # 无缺陷集布局：<clean>/images + <clean>/labels（同级）；labels 缺省视为全空。
+        # 污染检查不区分预测来源（model 模式同样生效，比标准严）。
+        clean_lbl_dir = clean_dir.parent / "labels"
         for p in clean_paths:
-            if args.clean_pred_dir is None and not args.model:
-                lbl = _ROOT / args.clean_img_dir / "labels" / f"{p.stem}.txt"
-            else:
-                lbl = (_ROOT / args.clean_img_dir).parent / "labels" / f"{p.stem}.txt"
-            if (
-                args.clean_pred_dir is None
-                and lbl.exists()
-                and _load_yolo_labels(lbl, _image_size(p))
-            ):
+            lbl = clean_lbl_dir / f"{p.stem}.txt"
+            if lbl.exists() and _load_yolo_labels(lbl, _image_size(p)):
                 raise SystemExit(
                     f"无缺陷测试集发现缺陷标注: {p.stem}（§9.1.2 口径被污染，拒绝评价）"
                 )
