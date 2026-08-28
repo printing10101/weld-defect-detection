@@ -1,6 +1,11 @@
 server:
   host: 127.0.0.1
   port: 18773
+  cors_origins:                       # CORS 允许源（Tauri webview + 本地开发源；禁 *）
+    - http://127.0.0.1:5173
+    - http://localhost:5173
+    - tauri://localhost
+    - https://tauri.localhost
 model:
   default_uri: models/weights/best.onnx
   backend: onnx
@@ -14,9 +19,10 @@ eval:
   experiments_dir: data/experiments      # 实验追踪 JSONL 落盘（§7.4）
   auto_on_activate: true                 # 模型激活后自动跑 Golden Set 评估
 sync:
-  kind: local                            # local | http（§7.6 端边云同步适配器）
+  kind: local                            # local | http | cloud(v3 联邦占位，未实现)
   http_endpoint: null                    # kind=http 时的推送 URL
   http_token: null                       # 可选 Bearer Token（建议环境变量注入，勿入库）
+  http_timeout: 10.0                     # HTTP 同步推送超时（秒）
 annotator:
   enabled: false                         # 随主应用同进程启动标注器（默认关）
   host: 127.0.0.1
@@ -106,6 +112,8 @@ quality:
   exposure_entropy_bad: 0.62 # 直方图熵(归一化)低于此值判过/欠曝（真实底片实测 ≥0.73）
   stain_smooth_bad: 0.15     # 平滑异常斑块占比高于此值判污渍（真实底片实测 ≤0.14）
 detect:
+  kind: trained_yolo  # 检测器种类（注册表键）：trained_yolo=YOLO 训练模型，baseline_blob=连通域基线
+  quantifier_kind: mask  # 量化器种类（注册表键）：mask=掩膜精修(M4b)，bbox=包围盒近似(M4a)
   baseline_enabled: false  # M4b 训练模型检测器已接入；权重缺失时自动回退 M4a 基线
   allow_baseline_fallback: true  # false = 训练模型加载失败即启动失败（生产建议 false）
   infer_conf: 0.3   # 推理置信度阈值（§T8：统一入口，禁散落硬编码）
@@ -142,8 +150,3 @@ batch:
   workers: 2            # 批量并行 worker 数（§12.1）
   max_per_batch: 100    # 单批最大图数（防一次性打爆资源）
   per_image_estimate_sec: 8.0  # 单图预估耗时（进度/预计时间展示用）
-auth:
-  token_ttl_minutes: 1440   # 访问令牌有效期（分钟，默认 24h）
-  bootstrap_username_env: SCAN_ADMIN_USERNAME   # 首启动引导管理员用户名环境变量
-  bootstrap_password_env: SCAN_ADMIN_PASSWORD   # 首启动引导管理员密码环境变量
-  bootstrap_default_username: admin             # 未设环境变量时的默认管理员用户名

@@ -12,7 +12,6 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -53,29 +52,3 @@ def _test_env(auth_table: Path) -> None:
     # 用于本地验证真实检测链路——此时部分集成测试（断言 ≥N 缺陷）可能需相应调整。
     if not os.environ.get("SCAN_TEST_REAL_DETECTOR"):
         os.environ["SCAN_DETECT__BASELINE_ENABLED"] = "true"
-    # T3：确定性鉴权环境——固定签名密钥 + 引导管理员凭据，使 bootstrap 播种可复现，
-    # 既保证 test_auth.py 能稳定登录，也避免每次运行生成随机管理员密码污染日志。
-    os.environ["SCAN_AUTH_SECRET"] = "test-auth-secret-please-change-in-prod-0123456789"
-    os.environ["SCAN_ADMIN_USERNAME"] = "admin"
-    os.environ["SCAN_ADMIN_PASSWORD"] = "TestPassw0rd!"
-
-
-@pytest.fixture(scope="function", autouse=True)
-def _auth_override() -> Iterator[None]:
-    """让既有集成测试在无令牌时以 admin 身份通过（T3 已给所有 /api/v1 路由加登录依赖）。
-
-    采用 function 级（每个测试前重设），以抵御个别测试 teardown 调用
-    `app.dependency_overrides.clear()` 误删本覆盖（见 test_models_api /
-    test_upload_limit / test_evaluation_closed_loop）；teardown 仅撤销自身键。
-    仅作用于模块级单例 `app`（既有测试 import 的对象）；test_auth.py 另行用
-    create_app() 取得无覆盖实例，验证真实鉴权/401/403 链路，二者互不干扰。
-    """
-    from backend.app.auth import ROLE_ADMIN, CurrentUser, get_current_user
-    from backend.app.main import app
-
-    def _admin_user() -> CurrentUser:
-        return CurrentUser(username="test-admin", role=ROLE_ADMIN, display_name="Test Admin")
-
-    app.dependency_overrides[get_current_user] = _admin_user
-    yield
-    app.dependency_overrides.pop(get_current_user, None)

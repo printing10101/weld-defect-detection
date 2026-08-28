@@ -13,7 +13,6 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from backend.app.auth import get_current_user
 from backend.app.dependencies import Registry, get_registry
 from backend.domain.active_learning import (
     export_training_labels,
@@ -23,8 +22,9 @@ from backend.domain.active_learning import (
 )
 from backend.domain.dto import BBox, DefectClass, Detection
 from backend.infra.fs import safe_resolve
+from backend.infra.pool_store import FilePoolStore
 
-router = APIRouter(tags=["active"], dependencies=[Depends(get_current_user)])
+router = APIRouter(tags=["active"])
 
 
 class SampleDefectIn(BaseModel):
@@ -74,6 +74,11 @@ class PoolOut(BaseModel):
 
 def _pool_dir(reg: Registry) -> Path:
     return Path(reg.config.paths.data_dir) / "active" / "training_pool"
+
+
+def _pool_store(reg: Registry) -> FilePoolStore:
+    """训练池存储（IO 经 infra FilePoolStore 注入，Task #9；domain 不触碰磁盘）。"""
+    return FilePoolStore(_pool_dir(reg))
 
 
 def _to_detection(d: SampleDefectIn) -> Detection:
@@ -131,16 +136,17 @@ def active_export(
             detail={"code": "INVALID_IMAGE_STEM", "message": "image_stem 含非法路径字符"},
         )
     detections = [_to_detection(d) for d in req.defects]
+    store = _pool_store(reg)
     label = export_training_labels(
         safe_stem,
         detections,
         float(req.image_w),
         float(req.image_h),
-        pool_dir=pool,
+        store=store,
         class_overrides=req.class_overrides,
     )
-    manifest = training_pool_manifest(pool)
-    save_pool_manifest(pool, manifest)
+    manifest = training_pool_manifest(store)
+    save_pool_manifest(store, manifest)
     return ExportOut(
         label_file=str(label),
         sample_count=len(detections),
@@ -154,7 +160,7 @@ def active_pool(
     reg: Annotated[Registry, Depends(get_registry)],
 ) -> PoolOut:
     """训练池状态：样本数 / 数据版本指纹 / 最近导出。"""
-    manifest = training_pool_manifest(_pool_dir(reg))
+    manifest = training_pool_manifest(_pool_store(reg))
     return PoolOut(
         sample_count=manifest["sample_count"],
         fingerprint=manifest["fingerprint"],

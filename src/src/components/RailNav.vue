@@ -1,12 +1,21 @@
 <script setup lang="ts">
 /** 左侧导航（DESIGN.md：窄 226px，含 14px 钴蓝方块 mark + 衬线应用名 + 等宽导航）。 */
+import { ref } from "vue";
 import type { ViewId } from "../types/api";
-import { useAuth } from "../composables/useAuth";
+import { getOperatorName, setOperatorName } from "../services/operator";
 
 defineProps<{ active: ViewId }>();
 const emit = defineEmits<{ navigate: [view: ViewId] }>();
 
-const auth = useAuth();
+// 操作员姓名（单机无用户系统）：显示当前姓名，点击可编辑并保存到 localStorage
+const operatorName = ref(getOperatorName());
+
+function editOperatorName(): void {
+  const name = window.prompt("操作员姓名（用于报告签名与审计留痕）", operatorName.value);
+  if (name === null) return; // 取消
+  setOperatorName(name);
+  operatorName.value = getOperatorName();
+}
 
 const NAV: { id: ViewId; label: string }[] = [
   { id: "journey", label: "检测旅程" },
@@ -46,20 +55,14 @@ const NAV: { id: ViewId; label: string }[] = [
       上传 → 处理 → 报告解读<br>
       极简 ZINE · 单一钴蓝锚<br>
       内容均来自真实检测数据
-      <div
-        v-if="auth.isAuthenticated.value"
-        class="user"
-      >
-        <span class="who">
-          {{ auth.state.user?.display_name || auth.state.user?.username }}
-          <em class="role">{{ auth.state.user?.role }}</em>
-        </span>
+      <div class="user">
         <button
           type="button"
-          class="logout"
-          @click="auth.logout()"
+          class="operator"
+          :title="`操作员：${operatorName}（点击修改）`"
+          @click="editOperatorName"
         >
-          退出
+          操作员：{{ operatorName }}
         </button>
       </div>
     </div>
@@ -76,19 +79,7 @@ const NAV: { id: ViewId; label: string }[] = [
   gap: 6px;
   font-size: 12px;
 }
-.who {
-  color: #e8eefc;
-}
-.role {
-  font-style: normal;
-  margin-left: 6px;
-  padding: 1px 6px;
-  border-radius: 3px;
-  background: rgba(47, 107, 255, 0.35);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-}
-.logout {
+.operator {
   align-self: flex-start;
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.3);
@@ -98,7 +89,7 @@ const NAV: { id: ViewId; label: string }[] = [
   font-size: 11px;
   cursor: pointer;
 }
-.logout:hover {
+.operator:hover {
   background: rgba(255, 255, 255, 0.1);
 }
 </style>

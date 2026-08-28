@@ -12,16 +12,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from backend.app.auth import (
-    ROLE_ADMIN,
-    ROLE_AUDITOR,
-    CurrentUser,
-    get_current_user,
-    require_roles,
-)
 from backend.app.dependencies import Registry, get_registry
 
-router = APIRouter(tags=["audit"], dependencies=[Depends(get_current_user)])
+router = APIRouter(tags=["audit"])
 
 
 class AuditEntry(BaseModel):
@@ -47,7 +40,6 @@ class AuditResponse(BaseModel):
 @router.get("/audit", response_model=AuditResponse)
 def audit(
     reg: Annotated[Registry, Depends(get_registry)],
-    current_user: Annotated[CurrentUser, Depends(require_roles(ROLE_AUDITOR, ROLE_ADMIN))],
     actor: Annotated[str | None, Query()] = None,
     action: Annotated[str | None, Query()] = None,
     object_type: Annotated[str | None, Query()] = None,

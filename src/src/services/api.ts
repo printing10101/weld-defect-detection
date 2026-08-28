@@ -19,17 +19,14 @@ import type {
   DeviceIn,
   DeviceOut,
   HealthResponse,
-  LoginIn,
-  LoginOut,
   RecordsResponse,
   ReportOut,
   ReportDetectionsOut,
   ReviewIn,
   ReviewOut,
-  UserOut,
   VerifyOut,
 } from "../types/api";
-import { authHeaders, clearToken, setToken } from "./auth";
+import { getOperatorName } from "./operator";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "/api/v1";
 
@@ -48,8 +45,6 @@ export class ApiRequestError extends Error {
   }
 }
 
-/** 令牌失效统一信号：request() 遇 401 派发，供 App 切回登录态。 */
-export const AUTH_UNAUTHORIZED_EVENT = "auth:unauthorized";
 /** 后端离线信号：request() 遇连接不可达/超时派发，供 App 显示全局离线横幅（§优化 F18）。 */
 export const BACKEND_DOWN_EVENT = "backend:down";
 /** 后端恢复信号：任意成功响应派发，供 App 清除离线横幅。 */
@@ -118,18 +113,14 @@ async function rawRequest<T>(path: string, init: RequestInit, timeoutMs = REQUES
     } catch {
       /* 非 JSON 响应：保留 statusText */
     }
-    if (res.status === 401) {
-      // 令牌无效/过期：清除本地令牌并广播，驱动 UI 返回登录态（不静默保留失效会话）
-      clearToken();
-      window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT));
-    }
     throw new ApiRequestError(res.status, code, message, detail);
   }
   return (await res.json()) as T;
 }
 
 async function request<T>(path: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
-  const headers = { ...authHeaders(), ...(init?.headers ?? {}) };
+  // 操作员姓名（X-Operator-Name）：单机无用户系统，由设置中的操作员姓名标识"谁在操作"
+  const headers = { "X-Operator-Name": getOperatorName(), ...(init?.headers ?? {}) };
   const merged: RequestInit = { ...init, headers };
   let lastErr: unknown;
   // 仅后端不可达时重试（连接刚启动时短暂抖动）；超时/HTTP 错误直接抛，不重试。
@@ -148,28 +139,6 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = REQUEST_
 
 export function getHealth(): Promise<HealthResponse> {
   return request<HealthResponse>("/health");
-}
-
-/** 登录：用户名+密码 → 存储令牌并返回当前用户（§T3）。 */
-export function login(body: LoginIn): Promise<LoginOut> {
-  return request<LoginOut>("/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  }).then((out) => {
-    setToken(out.access_token);
-    return out;
-  });
-}
-
-/** 当前登录用户信息（§T3）。 */
-export function getMe(): Promise<UserOut> {
-  return request<UserOut>("/auth/me");
-}
-
-/** 退出登录：清除本地令牌（§T3）。 */
-export function logout(): void {
-  clearToken();
 }
 
 /** 新评片全链路：上传影像 + 表单参数 → 真实报告结果（同步流水线，等待期间为处理中）。

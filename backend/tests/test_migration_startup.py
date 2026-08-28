@@ -13,7 +13,8 @@ from backend.infra.db import Base, create_db_engine
 from backend.infra.migrate import ensure_migrations
 
 # schema 演进：0001 基线 + 0002（devices/calibrations + reports 数字签名字段）+ 0003（P1-F 审计增强）
-_HEAD = "0003_audit_batch_disposition"
+#   + 0004（删除 users 表：移除用户/认证系统，改操作员姓名机制）
+_HEAD = "0004_drop_users"
 
 
 def test_migrate_fresh_db_creates_tables(tmp_path) -> None:

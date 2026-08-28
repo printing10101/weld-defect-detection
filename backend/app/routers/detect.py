@@ -17,14 +17,14 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-from backend.app.auth import get_current_user
 from backend.app.dependencies import Registry, get_registry
 from backend.app.routers._common import staged_upload
-from backend.domain.quantify import MaskQuantifier, refine_detections
+from backend.domain.quantify import get_quantifier, refine_detections
 from backend.domain.quantify import MaskRefineCfg as DomainMaskRefineCfg
+from backend.domain.spacing import resolve_spacing  # 单一真源（§T8/§6）
 from backend.infra.image_loader import load_image
 
-router = APIRouter(tags=["detect"], dependencies=[Depends(get_current_user)])
+router = APIRouter(tags=["detect"])
 
 
 class DefectOut(BaseModel):
@@ -35,12 +35,13 @@ class DefectOut(BaseModel):
     bbox: list[float]  # x,y,w,h (px)，精修后为最小外接矩形轴对齐框
     confidence: float
     uncertainty: float
-    L_mm: float
-    W_mm: float
-    area_mm2: float
-    perimeter_mm: float
-    aspect_ratio: float
-    position: list[float]  # x_mm, y_mm
+    calibrated: bool  # 像素标定是否可信（未标定禁输出伪物理尺寸，§T8/§6）
+    L_mm: float | None = None  # None = 未标定，无物理量纲
+    W_mm: float | None = None
+    area_mm2: float | None = None
+    perimeter_mm: float | None = None
+    aspect_ratio: float  # 无量纲，与标定无关，恒有效
+    position: list[float] | None = None  # x_mm, y_mm；None = 未标定
     mask_ref: str | None = None  # 掩膜资源 URI（当前不落盘，留 SAM 插件接口）
 
 
@@ -93,15 +94,18 @@ def _detect_sync(
     if pp_cfg.enabled:
         pp = reg.preprocessor
         enhanced = pp.enhance(pp.denoise(gray), pp_cfg.gamma)
-    spacing = pixel_spacing_mm or meta.pixel_spacing_mm or 1.0
+    spacing, spacing_known = resolve_spacing(pixel_spacing_mm, meta.pixel_spacing_mm)
     detections = reg.detector.infer(enhanced, conf=conf_v, iou=iou_v, class_conf=dc.class_conf)
     mrc = DomainMaskRefineCfg(**reg.config.mask_refine.model_dump())
     refined = refine_detections(enhanced, detections, mrc)
-    mq = MaskQuantifier()
+    # 经量化器注册表装配（去除 app 层 new 实现；种类由 detect.quantifier_kind 配置驱动）。
+    quantifier = get_quantifier(dc.quantifier_kind)
 
     out: list[DefectOut] = []
     for d in refined:
-        g = mq.quantify_from_image(enhanced, d, spacing, mrc)
+        g = quantifier.quantify(d, spacing, image=enhanced, cfg=mrc)
+        # 未标定（spacing_known=False）：物理字段置 None，绝不输出伪物理 mm/位置；
+        # aspect_ratio 为无量纲形状量，恒有效。与 /report grader 熔断保持单一语义。
         out.append(
             DefectOut(
                 id=d.id,
@@ -111,12 +115,13 @@ def _detect_sync(
                 bbox=[d.bbox.x, d.bbox.y, d.bbox.w, d.bbox.h],
                 confidence=d.score,
                 uncertainty=d.uncertainty,
-                L_mm=g.length_mm,
-                W_mm=g.width_mm,
-                area_mm2=g.area_mm2,
-                perimeter_mm=g.perimeter_mm,
+                calibrated=spacing_known,
+                L_mm=g.length_mm if spacing_known else None,
+                W_mm=g.width_mm if spacing_known else None,
+                area_mm2=g.area_mm2 if spacing_known else None,
+                perimeter_mm=g.perimeter_mm if spacing_known else None,
                 aspect_ratio=g.aspect_ratio,
-                position=[g.position_x_mm, g.position_y_mm],
+                position=[g.position_x_mm, g.position_y_mm] if spacing_known else None,
                 mask_ref=d.mask_ref,
             )
         )

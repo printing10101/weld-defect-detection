@@ -20,7 +20,6 @@ from backend.app.dependencies import get_registry
 from backend.app.routers import (
     active,
     audit,
-    auth,
     batch,
     detect,
     devices,
@@ -38,6 +37,7 @@ from backend.app.routers import (
     verify,
 )
 from backend.domain.errors import AppError
+from backend.infra.config import load_config
 from backend.infra.fs import safe_resolve
 
 
@@ -125,19 +125,16 @@ def create_app() -> FastAPI:
     """
     app = FastAPI(title="ScanDetection", version="0.1.0", lifespan=lifespan)
 
-    # 打包版本（Tauri 桌面端）需要允许 webview 源（tauri://localhost）访问 API；
-    # 本地开发源（127.0.0.1 / :5173）一并保留。桌面应用仅监听本机，风险可控。
-    # 注意：不再使用 "*"，否则任意外部网站均可跨源读取本机 API（含审计链 / 报告）。
+    # CORS 允许源由配置驱动（§13.6 配置中心化，P2）：默认覆盖 Tauri webview
+    # （tauri://localhost）+ 本地开发源（127.0.0.1 / :5173）。桌面应用仅监听
+    # 本机，风险可控。不再使用 "*"，否则任意外部网站均可跨源读取本机 API
+    # （含审计链 / 报告）；部署新增前端源改 configs/default.yaml 即可，不改代码。
+    cfg = load_config()
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://127.0.0.1:5173",
-            "http://localhost:5173",
-            "tauri://localhost",
-            "https://tauri.localhost",
-        ],
+        allow_origins=list(cfg.server.cors_origins),
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type", "X-Scan-Token"],
+        allow_headers=["Content-Type", "X-Operator-Name"],
     )
 
     # §7.5 / §13.9：安全响应头 + 基础限流（P2-9）。中间件按添加顺序执行，
@@ -165,7 +162,6 @@ def create_app() -> FastAPI:
         audit.router,
         active.router,
         evaluation.router,
-        auth.router,
     ):
         app.include_router(router, prefix="/api/v1")
     return app

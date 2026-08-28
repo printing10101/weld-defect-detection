@@ -15,14 +15,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from backend.app.auth import get_current_user
 from backend.app.dependencies import Registry, get_registry
 from backend.app.routers.judge import JudgeRequest, _defect_class
 from backend.domain.dto import BBox, Detection, ImageMeta, Modality
 from backend.domain.errors import GradingAmbiguousError
 from backend.domain.recommend import Recommendation, recommend
 
-router = APIRouter(tags=["recommend"], dependencies=[Depends(get_current_user)])
+router = APIRouter(tags=["recommend"])
 
 
 class RecommendResponse(BaseModel):

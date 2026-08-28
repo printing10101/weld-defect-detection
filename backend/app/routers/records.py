@@ -11,10 +11,9 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from backend.app.auth import get_current_user
 from backend.app.dependencies import Registry, get_registry
 
-router = APIRouter(tags=["records"], dependencies=[Depends(get_current_user)])
+router = APIRouter(tags=["records"])
 
 _DATE_PATTERN = r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?)?$"
 

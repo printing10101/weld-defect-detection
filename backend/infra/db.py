@@ -197,27 +197,6 @@ class AuditRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
-class UserRecord(Base):
-    """系统用户（§T3，P0 用户权限与登录）。
-
-    role ∈ {reviewer 评片员, auditor 审核员, admin 管理员}（RBAC，见 backend/app/auth.py）。
-    password_hash 为 PBKDF2-HMAC-SHA256 派生串（algo$iters$salt$hash），明文永不入库。
-    disabled=True 时禁止登录（离职/停用，但历史审计/签名留痕保留）。
-    """
-
-    __tablename__ = "users"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    display_name: Mapped[str | None] = mapped_column(String(128), default=None)
-    role: Mapped[str] = mapped_column(String(16), default="reviewer")
-    password_hash: Mapped[str] = mapped_column(String(256))
-    disabled: Mapped[bool] = mapped_column(default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
-    created_by: Mapped[str | None] = mapped_column(String(64), default=None)
-    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
-
-
 def create_db_engine(path: str) -> Engine:
     """SQLite 引擎（§T4；v3 换 PostgreSQL 仅改此函数）。
 

@@ -16,12 +16,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-from backend.app.auth import CurrentUser, get_current_user
-from backend.app.dependencies import Registry, _resolve_path, get_registry
-from backend.domain.detect.yolo_detector import YoloDetector
+from backend.app.dependencies import Registry, _resolve_path, get_operator_name, get_registry
+from backend.domain.detect import get_detector
+from backend.domain.errors import ModelUnavailableError
 from backend.evaluation.run_eval import run_golden_evaluation
 
-router = APIRouter(tags=["models"], dependencies=[Depends(get_current_user)])
+router = APIRouter(tags=["models"])
 
 
 class ModelInfo(BaseModel):
@@ -92,12 +92,12 @@ def list_models(reg: Annotated[Registry, Depends(get_registry)]) -> ModelsRespon
 async def activate_model(
     model_id: str,
     reg: Annotated[Registry, Depends(get_registry)],
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    operator: Annotated[str, Depends(get_operator_name)],
 ) -> ActivateResponse:
     try:
         # registry 锁内重载检测器会话（DefectDetector.load 已预热校验）；失败抛出→保持原检测器。
-        # actor 记录为登录操作员（T3 合规闭环）。
-        entry = await run_in_threadpool(reg.activate_model, model_id, current_user.username)
+        # actor 记录为请求头操作员（X-Operator-Name）。
+        entry = await run_in_threadpool(reg.activate_model, model_id, operator)
     except KeyError:
         raise HTTPException(
             status_code=404,
@@ -128,11 +128,10 @@ async def evaluate_model(
             status_code=404,
             detail={"code": "MODEL_NOT_FOUND", "message": f"未找到模型: {model_id}"},
         )
-    # 评估该模型权重：加载独立检测器（不干扰当前活跃检测器）
-    det = YoloDetector()
+    # 评估该模型权重：经注册表加载独立检测器（不干扰当前活跃检测器）
     try:
-        det.load(entry.uri, reg.config.model.backend)
-    except (RuntimeError, OSError) as exc:
+        det = get_detector("trained_yolo", model_uri=entry.uri, backend=reg.config.model.backend)
+    except (RuntimeError, OSError, ModelUnavailableError) as exc:
         raise HTTPException(
             status_code=500,
             detail={"code": "MODEL_LOAD_FAILED", "message": str(exc)},

@@ -17,7 +17,6 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-from backend.app.auth import get_current_user
 from backend.app.dependencies import Registry, get_registry
 from backend.app.routers._common import parse_roi, staged_upload
 from backend.domain.density import check_density, estimate_density
@@ -26,7 +25,7 @@ from backend.domain.pseudo_defect import PseudoDefectCfg, screen_pseudo_defects
 from backend.infra.image_loader import load_image
 from backend.infra.reporting.pdf_reporter import report_fingerprint
 
-router = APIRouter(tags=["verify"], dependencies=[Depends(get_current_user)])
+router = APIRouter(tags=["verify"])
 
 
 class IqiOut(BaseModel):

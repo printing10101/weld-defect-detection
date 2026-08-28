@@ -27,7 +27,6 @@ from backend.infra.db import (
     ImageRecord,
     ReportRecord,
     ReviewRecord,
-    UserRecord,
     create_db_engine,
 )
 
@@ -486,108 +485,6 @@ class InspectionRepository:
                     return False
                 prev = r.hash
             return True
-
-    # ---- 用户（§T3，P0 用户权限与登录）----
-    def create_user(
-        self,
-        *,
-        username: str,
-        display_name: str | None,
-        role: str,
-        password_hash: str,
-        created_by: str | None = None,
-    ) -> dict[str, Any]:
-        """创建用户（用户名唯一）。返回用户 dict。已存在 → ValueError。"""
-        if role not in ("reviewer", "auditor", "admin"):
-            raise ValueError(f"invalid role: {role!r}")
-        with Session(self._engine) as session, session.begin():
-            if (
-                session.scalars(select(UserRecord).where(UserRecord.username == username)).first()
-                is not None
-            ):
-                raise ValueError(f"user exists: {username}")
-            rec = UserRecord(
-                id=uuid.uuid4().hex,
-                username=username,
-                display_name=display_name,
-                role=role,
-                password_hash=password_hash,
-                created_by=created_by,
-            )
-            session.add(rec)
-            session.flush()
-            return self._user_to_dict(rec)
-
-    def get_user_by_username(self, username: str) -> dict[str, Any] | None:
-        with Session(self._engine) as session:
-            rec = session.scalars(select(UserRecord).where(UserRecord.username == username)).first()
-            return self._user_to_dict(rec) if rec is not None else None
-
-    def get_user_password_hash(self, username: str) -> str | None:
-        """仅取密码哈希（绝不外泄到 API 响应；_user_to_dict 已剥离该字段）。
-
-        用于登录校验；与 get_user_by_username 分离，保证对外用户 dict 永不含哈希。
-        """
-        with Session(self._engine) as session:
-            rec = session.scalars(select(UserRecord).where(UserRecord.username == username)).first()
-            return rec.password_hash if rec is not None else None
-
-    def get_user_by_id(self, user_id: str) -> dict[str, Any] | None:
-        with Session(self._engine) as session:
-            rec = session.get(UserRecord, user_id)
-            return self._user_to_dict(rec) if rec is not None else None
-
-    def list_users(self) -> list[dict[str, Any]]:
-        with Session(self._engine) as session:
-            rows = list(session.scalars(select(UserRecord).order_by(UserRecord.created_at.asc())))
-            return [self._user_to_dict(r) for r in rows]
-
-    def count_users(self) -> int:
-        with Session(self._engine) as session:
-            return int(session.scalar(select(func.count()).select_from(UserRecord)) or 0)
-
-    def set_password(self, username: str, password_hash: str) -> None:
-        with Session(self._engine) as session, session.begin():
-            rec = session.scalars(select(UserRecord).where(UserRecord.username == username)).first()
-            if rec is None:
-                raise KeyError(f"user not found: {username}")
-            rec.password_hash = password_hash
-
-    def set_role(self, username: str, role: str) -> None:
-        if role not in ("reviewer", "auditor", "admin"):
-            raise ValueError(f"invalid role: {role!r}")
-        with Session(self._engine) as session, session.begin():
-            rec = session.scalars(select(UserRecord).where(UserRecord.username == username)).first()
-            if rec is None:
-                raise KeyError(f"user not found: {username}")
-            rec.role = role
-
-    def set_disabled(self, username: str, disabled: bool) -> None:
-        with Session(self._engine) as session, session.begin():
-            rec = session.scalars(select(UserRecord).where(UserRecord.username == username)).first()
-            if rec is None:
-                raise KeyError(f"user not found: {username}")
-            rec.disabled = bool(disabled)
-
-    def update_last_login(self, username: str) -> None:
-        with Session(self._engine) as session, session.begin():
-            rec = session.scalars(select(UserRecord).where(UserRecord.username == username)).first()
-            if rec is not None:
-                rec.last_login_at = datetime.now(UTC).replace(tzinfo=None)
-
-    @staticmethod
-    def _user_to_dict(rec: UserRecord) -> dict[str, Any]:
-        return {
-            "id": rec.id,
-            "username": rec.username,
-            "display_name": rec.display_name,
-            "role": rec.role,
-            "disabled": rec.disabled,
-            "created_at": _fmt_dt(rec.created_at),
-            "created_by": rec.created_by,
-            "last_login_at": _fmt_dt(rec.last_login_at),
-            # 密码哈希绝不外泄
-        }
 
     # ---- 内部序列化 ----
     def _image_to_dict(self, rec: ImageRecord) -> dict[str, Any]:

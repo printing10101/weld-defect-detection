@@ -11,10 +11,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from backend.app.auth import CurrentUser, get_current_user
-from backend.app.dependencies import Registry, get_registry
+from backend.app.dependencies import Registry, get_operator_name, get_registry
 
-router = APIRouter(tags=["devices"], dependencies=[Depends(get_current_user)])
+router = APIRouter(tags=["devices"])
 
 
 class DeviceIn(BaseModel):
@@ -73,7 +72,7 @@ def list_devices(reg: Annotated[Registry, Depends(get_registry)]) -> list[Device
 def register_device(
     body: DeviceIn,
     reg: Annotated[Registry, Depends(get_registry)],
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    operator: Annotated[str, Depends(get_operator_name)],
 ) -> DeviceOut:
     """注册检测设备。"""
     dev = reg.device_store.register(
@@ -81,7 +80,7 @@ def register_device(
         model=body.model,
         serial_no=body.serial_no,
         notes=body.notes,
-        created_by=current_user.username,
+        created_by=operator,
     )
     return DeviceOut(**dev)
 

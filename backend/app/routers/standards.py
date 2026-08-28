@@ -9,13 +9,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from pydantic import BaseModel
 
-from backend.app.auth import get_current_user
 from backend.domain.grade.registry import all_standard_capabilities
 
-router = APIRouter(tags=["standards"], dependencies=[Depends(get_current_user)])
+router = APIRouter(tags=["standards"])
 
 
 class StandardCapabilityOut(BaseModel):

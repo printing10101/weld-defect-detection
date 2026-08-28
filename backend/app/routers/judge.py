@@ -11,12 +11,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from backend.app.auth import get_current_user
 from backend.app.dependencies import Registry, get_registry
 from backend.domain.dto import BBox, DefectClass, Detection, ImageMeta, Modality
 from backend.domain.errors import AppError, GradingAmbiguousError
 
-router = APIRouter(tags=["judge"], dependencies=[Depends(get_current_user)])
+router = APIRouter(tags=["judge"])
 
 
 class JudgeDefectIn(BaseModel):
@@ -31,7 +30,9 @@ class JudgeDefectIn(BaseModel):
 
 class JudgeRequest(BaseModel):
     base_metal_thickness_mm: float
-    pixel_spacing_mm: float = 1.0
+    # 未标定禁定级（§6/§T8，与 /report 单一真源一致）：缺省 None，
+    # 由 grader 对 None 熔断（422 GRADING_AMBIGUOUS），绝不静默 1.0 mm/px 伪物理。
+    pixel_spacing_mm: float | None = None
     standard_id: str = "NB/T47013.2-2015"
     defects: list[JudgeDefectIn] = []
 

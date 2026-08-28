@@ -26,6 +26,15 @@ _LOG = logging.getLogger("scandetection.config")
 class ServerCfg(BaseModel):
     host: str = "127.0.0.1"
     port: int = 18773
+    # CORS 允许源（§13.6 配置中心化，P2）：Tauri webview + 本地开发源。
+    # 部署新增前端源（如公司内网门户）改配置即可，不改代码；禁 "*"，
+    # 否则任意外部网站均可跨源读取本机 API（含审计链 / 报告）。
+    cors_origins: list[str] = [
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        "tauri://localhost",
+        "https://tauri.localhost",
+    ]
 
 
 class ModelCfg(BaseModel):
@@ -61,9 +70,10 @@ class SyncCfg(BaseModel):
     kind=http ：HttpSyncAdapter（推送到可配置端点，需自行保证传输加密）。
     """
 
-    kind: str = "local"  # local | http
+    kind: str = "local"  # local | http | cloud（v3 联邦占位，未实现，勿生产启用）
     http_endpoint: str | None = None  # kind=http 时的推送 URL
     http_token: str | None = None  # 可选 Bearer Token（建议走环境变量注入，勿入版本库）
+    http_timeout: float = 10.0  # HTTP 同步推送超时（秒，§13.6 配置中心化）
 
 
 class AnnotatorCfg(BaseModel):
@@ -239,7 +249,9 @@ class MaskRefineCfg(BaseModel):
 class DetectCfg(BaseModel):
     # 安全默认 = 训练模型路径（缺失权重时按 allow_baseline_fallback 策略显式回退并记日志）。
     # 原默认 True：一旦 default.yaml 缺键，会静默落 blob 基线而无人告警（§部署硬化 配置漂移）。
-    baseline_enabled: bool = False  # M4a 基线检测器开关；训练模型就绪后保持 false
+    kind: str = "trained_yolo"  # 检测器种类（注册表键）：trained_yolo=YOLO 训练模型，baseline_blob=连通域基线
+    quantifier_kind: str = "mask"  # 量化器种类（注册表键，§T8）：mask=掩膜精修(M4b)，bbox=包围盒近似(M4a)
+    baseline_enabled: bool = False  # M4a 基线检测器开关（kind 的兼容别名；显式 kind 优先）；训练模型就绪后保持 false
     allow_baseline_fallback: bool = True  # 训练模型加载失败时是否回退基线（False=启动即失败）
     infer_conf: float = 0.3  # 推理置信度阈值（§T8：禁硬编码，统一入口）
     infer_iou: float = 0.5  # NMS IoU 阈值
@@ -305,22 +317,6 @@ class BatchCfg(BaseModel):
     per_image_estimate_sec: float = 8.0  # 单图预估耗时（进度条/预计时间展示用）
 
 
-class AuthCfg(BaseModel):
-    """用户鉴权与 RBAC 配置（§T3，P0 用户权限与登录，§T8 三处同步）。
-
-    - token_ttl_minutes：访问令牌有效期（默认 24h，无状态令牌到期即失效）；
-    - 密钥解析优先级（backend/app/auth.py resolve_auth_secret）：
-      环境变量 SCAN_AUTH_SECRET → 否则持久化随机密钥文件 data/.auth_secret
-      → 否则临时随机（重启失效，仅开发）。生产务必用 SCAN_AUTH_SECRET 注入。
-    - 首启动引导管理员：当系统无任何用户时，依 SCAN_ADMIN_USERNAME /
-      SCAN_ADMIN_PASSWORD 创建初始管理员（密码缺失则生成随机并打印日志）。
-    """
-
-    token_ttl_minutes: int = 60 * 24  # 24h
-    bootstrap_username_env: str = "SCAN_ADMIN_USERNAME"
-    bootstrap_password_env: str = "SCAN_ADMIN_PASSWORD"
-    bootstrap_default_username: str = "admin"
-
 
 class AppConfig(BaseSettings):
     server: ServerCfg = ServerCfg()
@@ -341,7 +337,6 @@ class AppConfig(BaseSettings):
     standard: StandardCfg = StandardCfg()
     review: ReviewCfg = ReviewCfg()
     batch: BatchCfg = BatchCfg()
-    auth: AuthCfg = AuthCfg()
 
     model_config = {"env_prefix": "SCAN_"}
 

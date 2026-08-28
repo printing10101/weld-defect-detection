@@ -14,12 +14,11 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend.app.auth import get_current_user
 from backend.app.dependencies import Registry, get_registry
 from backend.evaluation.drift import estimate_drift
 from backend.infra.fs import safe_resolve
 
-router = APIRouter(tags=["evaluation"], dependencies=[Depends(get_current_user)])
+router = APIRouter(tags=["evaluation"])
 
 
 class DriftSample(BaseModel):

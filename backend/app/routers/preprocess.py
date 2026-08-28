@@ -15,13 +15,12 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-from backend.app.auth import get_current_user
 from backend.app.dependencies import Registry, get_registry
 from backend.app.routers._common import staged_upload
 from backend.domain.preprocess.metrics import QualityCfg, assess_quality, estimate_noise, psnr, ssim
 from backend.infra.image_loader import load_image
 
-router = APIRouter(tags=["preprocess"], dependencies=[Depends(get_current_user)])
+router = APIRouter(tags=["preprocess"])
 
 
 class PreprocessResponse(BaseModel):

@@ -13,11 +13,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from backend.app.auth import CurrentUser, get_current_user
 from backend.app.batch_queue import BatchItem
-from backend.app.dependencies import Registry, get_registry
+from backend.app.dependencies import Registry, get_operator_name, get_registry
 
-router = APIRouter(tags=["batch"], dependencies=[Depends(get_current_user)])
+router = APIRouter(tags=["batch"])
 
 
 class BatchSubmitOut(BaseModel):
@@ -81,7 +80,7 @@ def _suffix_ok(name: str | None, allowed: tuple[str, ...]) -> bool:
 @router.post("/batch", response_model=BatchSubmitOut)
 def submit_batch(
     reg: Annotated[Registry, Depends(get_registry)],
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    operator: Annotated[str, Depends(get_operator_name)],
     images: Annotated[list[UploadFile], File()],
     pixel_spacing_mm: Annotated[float | None, Form()] = None,
     base_metal_thickness_mm: Annotated[float | None, Form()] = None,
@@ -124,15 +123,15 @@ def submit_batch(
     batch_dir = Path(reg.config.paths.tmp_dir) / f"batch_{uuid.uuid4().hex}"
     batch_dir.mkdir(parents=True, exist_ok=True)
 
-    # actor = 提交批次的登录操作员（T3 鉴权闭环）；signer 缺省回填为登录用户。
+    # actor = 提交批次的操作员（X-Operator-Name）；signer 缺省回填为操作员。
     options: dict = {
         "pixel_spacing_mm": pixel_spacing_mm,
         "base_metal_thickness_mm": base_metal_thickness_mm,
         "standard_id": standard_id,
         "workpiece_no": workpiece_no,
         "weld_no": weld_no,
-        "signer": signer or current_user.username,
-        "actor": current_user.username,
+        "signer": signer or operator,
+        "actor": operator,
         "template": template or "standard",
         "force": force,
     }

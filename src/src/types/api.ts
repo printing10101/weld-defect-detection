@@ -192,31 +192,6 @@ export interface ActivePoolOut {
   exported_at: string | null;
 }
 
-/* ── 鉴权（§T3 · POST /api/v1/auth/…）── */
-
-export interface LoginIn {
-  username: string;
-  password: string;
-}
-
-export interface UserOut {
-  id: string;
-  username: string;
-  display_name: string | null;
-  role: string;
-  disabled: boolean;
-  created_at: string | null;
-  created_by: string | null;
-  last_login_at: string | null;
-}
-
-export interface LoginOut {
-  access_token: string;
-  token_type: string;
-  user: UserOut;
-}
-
-
 /* ── 批量处理（§12.1 · POST /api/v1/batch、GET /batch/{id}、GET /batches、retry/cancel）── */
 
 export type BatchTaskStatus = "pending" | "running" | "done" | "failed" | "cancelled";

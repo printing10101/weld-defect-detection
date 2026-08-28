@@ -16,13 +16,12 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from backend.app.auth import CurrentUser, get_current_user
-from backend.app.dependencies import Registry, get_registry, _resolve_path
+from backend.app.dependencies import Registry, get_operator_name, get_registry, _resolve_path
 from backend.app.pipelines import InspectionPipeline
 from backend.app.routers._common import parse_roi, staged_upload
 from backend.infra.fs import safe_resolve
 
-router = APIRouter(tags=["report"], dependencies=[Depends(get_current_user)])
+router = APIRouter(tags=["report"])
 
 
 class ReportOut(BaseModel):
@@ -59,7 +58,7 @@ class ReportDetectionsOut(BaseModel):
 @router.post("/report", response_model=ReportOut)
 async def report(
     reg: Annotated[Registry, Depends(get_registry)],
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    operator: Annotated[str, Depends(get_operator_name)],
     image: Annotated[UploadFile | None, File()] = None,
     image_id: Annotated[str | None, Form()] = None,
     pixel_spacing_mm: Annotated[float | None, Form()] = None,
@@ -75,9 +74,9 @@ async def report(
 ) -> ReportOut:
     pipeline = InspectionPipeline(reg)
     tpl = template or "standard"
-    # 责任工程师签字默认取登录用户（闭合 T1/T2 占位）；显式提供时优先。
-    effective_signer = signer or current_user.username
-    actor = current_user.username  # 审计 actor = 登录操作员
+    # 责任工程师签字默认取操作员（闭合 T1/T2 占位）；显式提供时优先。
+    effective_signer = signer or operator
+    actor = operator  # 审计 actor = 操作员（X-Operator-Name 头）
 
     if pixel_spacing_mm is not None and pixel_spacing_mm <= 0:
         raise HTTPException(

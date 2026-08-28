@@ -21,15 +21,14 @@
 | 双人评片 + Cohen's κ（§12.2） | `backend/domain/review.py` |
 | 设备标定档案（§12.4） | `backend/infra/device_store.py` |
 | 不可变审计哈希链（§12.5） | `backend/infra/repository.py::append_audit` |
-| 鉴权 RBAC（三角色） | `backend/app/auth.py` |
 | 模型注册/热切换/自动评估（§7.4） | `backend/infra/model_registry.py`、`backend/evaluation/` |
 | 主动学习闭环 + 标注器 | `backend/domain/active_learning.py`、`backend/annotator/` |
 
-- **18 个 API 路由全部真实实现**（无 501 桩）：health / verify / preprocess / standards /
+- **17 个 API 路由全部真实实现**（无 501 桩）：health / verify / preprocess / standards /
   detect / devices / judge / batch / review / explain / report / records / models /
-  audit / active / evaluation / recommend / auth。
+  audit / active / evaluation / recommend。
 - **后端单测 320 通过**（门禁 `--cov-fail-under=70` 强制）。
-- 前端：Vue3 + TS 旅程式评片 + 批量进度 + 档案检索 + 登录（`src/src/`）。
+- 前端：Vue3 + TS 旅程式评片 + 批量进度 + 档案检索（`src/src/`）。单机科研自用、无用户系统，可在设置中填写操作员姓名（`X-Operator-Name`，用于报告签名与审计留痕）。
 
 ## 目录结构（§19.2，含已扩展部分）
 ```

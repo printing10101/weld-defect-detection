@@ -3,6 +3,7 @@
 server:
   host: str   # 本地绑定（默认 127.0.0.1）
   port: int   # 默认 18773
+  cors_origins: list[str]   # CORS 允许源（Tauri webview + 本地开发；禁 *）
 model:
   default_uri: str
   backend: str   # onnx | torch | tensorrt
@@ -16,9 +17,10 @@ eval:
   experiments_dir: str          # 实验追踪 JSONL 落盘目录（§7.4，MLflow 可演进）
   auto_on_activate: bool        # 模型激活后自动跑 Golden Set 评估（使 metric_map 有值）
 sync:
-  kind: str                     # local | http（§7.6 端边云同步适配器选择）
+  kind: str                     # local | http | cloud（v3 联邦占位，未实现）
   http_endpoint: str | None     # kind=http 时的推送 URL
   http_token: str | None        # 可选 Bearer Token（建议走环境变量注入，勿入版本库）
+  http_timeout: float           # HTTP 同步推送超时（秒）
 annotator:
   enabled: bool                 # 随主应用同进程启动标注器（默认关）
   host: str
@@ -92,7 +94,9 @@ quality:
   exposure_entropy_bad: float    # 直方图熵(归一化)低于此值判过/欠曝（现 0.62，真实底片 ≥0.73）
   stain_smooth_bad: float        # 平滑异常斑块占比高于此值判污渍（现 0.15，真实底片 ≤0.14）
 detect:
-  baseline_enabled: bool          # M4a 基线检测器开关（训练模型就绪后置 false）
+  kind: str                       # 检测器种类（注册表键）：trained_yolo=YOLO 训练模型，baseline_blob=连通域基线
+  quantifier_kind: str            # 量化器种类（注册表键）：mask=掩膜精修(M4b)，bbox=包围盒近似(M4a)
+  baseline_enabled: bool          # M4a 基线检测器开关（kind 兼容别名；显式 kind 优先）
   allow_baseline_fallback: bool   # 训练模型加载失败时是否降级基线（false=启动即失败）
   infer_conf: float               # 推理置信度阈值
   infer_iou: float                # NMS IoU 阈值
@@ -126,8 +130,3 @@ batch:
   workers: int                    # 批量并行 worker 数（§12.1）
   max_per_batch: int              # 单批最大图数
   per_image_estimate_sec: float   # 单图预估耗时（预计时间展示用）
-auth:
-  token_ttl_minutes: int          # 访问令牌有效期（分钟，默认 1440=24h）
-  bootstrap_username_env: str     # 首启动引导管理员用户名环境变量名
-  bootstrap_password_env: str     # 首启动引导管理员密码环境变量名
-  bootstrap_default_username: str # 未设环境变量时的默认管理员用户名

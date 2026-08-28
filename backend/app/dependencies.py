@@ -11,15 +11,17 @@ import os
 import threading
 from pathlib import Path
 
-from backend.app.auth import ROLE_ADMIN, hash_password
+from fastapi import Header
+
 from backend.app.batch_queue import BatchManager
-from backend.domain.detect.blob_detector import BlobConfig, BlobDetector
-from backend.domain.detect.yolo_detector import YoloDetector
-from backend.domain.grade.nb47013 import Nb47013Grader
+from backend.app.plugins import bootstrap_plugins
+from backend.domain.detect import BlobConfig, get_detector
+from backend.domain.errors import ModelUnavailableError
 from backend.domain.grade.registry import get_grader
 from backend.domain.interfaces import DefectDetector, Reporter, StandardGrader
 from backend.domain.preprocess.pipeline import OpencvPreprocessor
-from backend.domain.standards.tables.loader import load_standard_tables
+from backend.domain.standards.tables.loader import load_standard_tables, set_default_table_source
+from backend.infra.standards.tables_source import FileTableSource
 from backend.domain.sync import LocalAdapter
 from backend.infra.config import AppConfig, ensure_runtime_dirs, load_config
 from backend.infra.model_registry import ModelEntry, ModelRegistry
@@ -72,8 +74,14 @@ class Registry:
     """应用共享状态容器（单例）。"""
 
     def __init__(self) -> None:
+        # §19.4 插件发现（P2）：先于检测器/判定器装配，使插件注册的种类立即可用；
+        # 幂等，未安装插件时静默无操作。
+        bootstrap_plugins()
         self._lock = threading.Lock()
         self.config: AppConfig = load_config()
+        # §T8 依赖倒置：将 infra.FileTableSource 注册为默认标准表数据源，
+        # 使 domain 在运行期完全不接触文件系统（测试/独立场景回退域内置引导默认）。
+        set_default_table_source(FileTableSource())
         # 部署硬化（#6）：启动即创建运行时目录，保证干净环境（首次安装/容器）可立即运行。
         ensure_runtime_dirs(self.config)
         self.detector_kind: str = "unknown"
@@ -90,9 +98,6 @@ class Registry:
         self.grader: StandardGrader = self._build_grader()
         self.preprocessor = self._build_preprocessor()
         self.repository = InspectionRepository(_resolve_path(self.config.paths.db_path))
-        # 首启动引导管理员（§T3，P0）：无任何用户时依环境变量创建初始 admin，
-        # 使产品开箱可用；已存在用户则跳过（不覆盖）。闭合工业合规"谁在操作"的硬前置。
-        self._seed_bootstrap_admin()
         self.reporter: Reporter = PdfReporter(
             self.repository, _resolve_path(self.config.paths.reports_dir)
         )
@@ -103,41 +108,6 @@ class Registry:
         from backend.infra.device_store import DeviceStore
 
         self.device_store = DeviceStore(_resolve_path(self.config.paths.db_path))
-
-    def _seed_bootstrap_admin(self) -> None:
-        """首启动引导管理员（§T3，P0）。
-
-        当系统无任何用户时，依 SCAN_ADMIN_USERNAME / SCAN_ADMIN_PASSWORD 创建初始
-        admin（密码缺失则生成随机 16 位并打印至日志，仅首次）。已存在用户则跳过
-        （不覆盖、不重复创建）。保证产品开箱即可登录，闭合"操作者身份"合规前置。
-        """
-        if self.repository.count_users() > 0:
-            return
-        import os
-        import secrets as _secrets
-
-        username = (
-            os.environ.get(self.config.auth.bootstrap_username_env)
-            or self.config.auth.bootstrap_default_username
-        )
-        pw = os.environ.get(self.config.auth.bootstrap_password_env)
-        if not pw:
-            pw = _secrets.token_urlsafe(16)
-            _LOG.warning(
-                "首启动已生成引导管理员 用户名=%s 密码=%s（请立即登录修改；"
-                "生产建议用 %s 环境变量预设）",
-                username,
-                pw,
-                self.config.auth.bootstrap_password_env,
-            )
-        self.repository.create_user(
-            username=username,
-            display_name="管理员",
-            role=ROLE_ADMIN,
-            password_hash=hash_password(pw),
-            created_by="system",
-        )
-        _LOG.info("引导管理员已创建：%s", username)
 
     def eval_report(self, model_id: str) -> dict | None:
         """读取某模型的评估报告（§7.4 模型卡 metric_map 数据源；无则 None）。"""
@@ -166,60 +136,76 @@ class Registry:
         """装配端边云同步适配器（§7.6）：按 SyncCfg.kind 选择 local / http。
 
         - local：数据不出本机，待同步队列落 data/sync/pending.jsonl（可观测）；
-        - http ：LocalAdapter 本地留档 + POST 到 http_endpoint（尽力而为，失败仅告警）。
+        - http ：本地留档 + POST 到 http_endpoint（尽力而为，失败仅告警）。
 
         默认 local（数据不出本机）；仅当显式配置 sync.kind=http 才发起网络调用。
+        IO 依赖倒置（Task #9）：JSONL 落盘（JsonlQueue）与 HTTP 传输（UrllibJsonPoster）
+        均由 infra 提供并注入，domain 适配器不触碰文件系统/网络。
         """
-        from backend.domain.sync import HttpSyncAdapter
+        from backend.domain.sync import CloudAdapter, HttpSyncAdapter
+        from backend.infra.sync_io import JsonlQueue, UrllibJsonPoster
 
         queue_path = _resolve_path(str(Path(self.config.paths.data_dir) / "sync" / "pending.jsonl"))
+        queue = JsonlQueue(queue_path)
+        if self.config.sync.kind == "cloud":
+            # v3 联邦占位（P3）：契约完整但未实现，push/pull/federate 显式
+            # NotImplementedError（fail-loud，绝不静默假装已同步/已联邦）。
+            try:
+                return CloudAdapter(
+                    endpoint=self.config.sync.http_endpoint or "",
+                    token=self.config.sync.http_token,
+                )
+            except ValueError as exc:
+                _LOG.error("CloudAdapter 配置无效，回退 local：%s", exc)
         if self.config.sync.kind == "http":
             try:
                 return HttpSyncAdapter(
                     endpoint=self.config.sync.http_endpoint,
                     token=self.config.sync.http_token,
-                    queue_path=queue_path,
+                    queue=queue,
+                    transport=UrllibJsonPoster(timeout=self.config.sync.http_timeout),
                 )
             except ValueError as exc:
                 _LOG.error("HttpSyncAdapter 配置无效，回退 local：%s", exc)
-        return LocalAdapter(queue_path)
+        return LocalAdapter(queue)
 
     def _build_detector(self) -> DefectDetector:
-        """按配置装配检测器：M4a 基线 / M4b 训练模型（模型无关接口，ADR-002）。"""
+        """按 config.detect.kind 经注册表装配检测器（模型无关，ADR-002）。
+
+        决策（选哪种）仍由本方法负责，构造（如何建）收敛到 get_detector，
+        兑现"换检测器不改主干"。训练模型加载失败时按 allow_baseline_fallback 回退基线。
+        """
         dc = self.config.detect
-        if dc.baseline_enabled:
+        # baseline_enabled 作为 kind 的兼容别名：显式 kind 优先。
+        if dc.kind == "baseline_blob" or dc.baseline_enabled:
             self.detector_kind = "baseline_blob"
             self.detector_degraded = False
-            return self._build_blob(dc)
-        # M4b：训练模型检测器。权重缺失/加载失败按策略处理。
+            return get_detector("baseline_blob", blob_cfg=self._blob_cfg(dc))
+        # 训练模型检测器（默认）。权重缺失/加载失败按策略处理。
+        uri = _resolve_model_uri(self.config.model.default_uri)
         try:
-            det = YoloDetector()
-            det.load(_resolve_model_uri(self.config.model.default_uri), self.config.model.backend)
+            det = get_detector("trained_yolo", model_uri=uri, backend=self.config.model.backend)
             self.detector_kind = "trained_yolo"
             self.detector_degraded = False
-            _LOG.info("detector loaded: trained_yolo (uri=%s)", self.config.model.default_uri)
+            _LOG.info("detector loaded: trained_yolo (uri=%s)", uri)
             return det
         except Exception as exc:
             if not dc.allow_baseline_fallback:
-                from backend.domain.errors import ModelUnavailableError
-
                 raise ModelUnavailableError(f"训练模型加载失败: {exc}") from exc
             _LOG.error("M4b 权重加载失败，已回退 M4a 基线（评级不可用于正式判定）：%s", exc)
             self.detector_kind = "baseline_blob"
             self.detector_degraded = True
-            return self._build_blob(dc)
+            return get_detector("baseline_blob", blob_cfg=self._blob_cfg(dc))
 
     @staticmethod
-    def _build_blob(dc) -> BlobDetector:
-        return BlobDetector(
-            BlobConfig(
-                min_area_px=dc.min_area_px,
-                max_area_px=dc.max_area_px,
-                min_size_px=dc.min_size_px,
-                noise_sigma_ratio=dc.noise_sigma_ratio,
-                abs_threshold=dc.abs_threshold,
-                dark_only=dc.dark_only,
-            )
+    def _blob_cfg(dc) -> BlobConfig:
+        return BlobConfig(
+            min_area_px=dc.min_area_px,
+            max_area_px=dc.max_area_px,
+            min_size_px=dc.min_size_px,
+            noise_sigma_ratio=dc.noise_sigma_ratio,
+            abs_threshold=dc.abs_threshold,
+            dark_only=dc.dark_only,
         )
 
     def _build_preprocessor(self) -> OpencvPreprocessor:
@@ -238,10 +224,14 @@ class Registry:
         )
 
     def _build_grader(self) -> StandardGrader:
-        """按配置装配默认标准判定器（NB/T47013，多标准适配见 grader_for）。"""
+        """按配置装配默认标准判定器（NB/T47013，多标准适配见 grader_for）。
+
+        统一经 get_grader 装配，使 config.detect.review_conf 在所有路径生效
+        （此前 _build_grader 与 registry.get_grader 的 Nb47013Grader 构造签名分叉）。
+        """
         sc = self.config.standard
         tables = load_standard_tables(sc.default_id, filename=sc.tables_filename)
-        return Nb47013Grader(tables, review_uncertainty=self.config.detect.review_conf)
+        return get_grader(sc.default_id, tables, review_uncertainty=self.config.detect.review_conf)
 
     def grader_for(self, standard_id: str) -> StandardGrader:
         """按 standard_id 路由判定器（§6.1 多标准适配）。
@@ -265,7 +255,7 @@ class Registry:
                 loader=lambda uri: self.detector.load(uri, self.config.model.backend),
             )
         # 不可变审计日志（§12.5）：模型热切换记入，工业合规追溯。
-        # actor = 登录操作员（T3 鉴权闭环）；缺省回退 "system"。
+        # actor = 请求头操作员（X-Operator-Name）；缺省回退 "system"。
         self.repository.append_audit(
             actor=actor or "system",
             action="model_activate",
@@ -337,6 +327,14 @@ class Registry:
                 },
                 **self.model.status,
             }
+
+
+def get_operator_name(
+    x_operator_name: str | None = Header(default=None, alias="X-Operator-Name"),
+) -> str:
+    """从请求头解析操作员姓名（单机科研自用，无用户系统）；缺省返回 "local"。"""
+    name = (x_operator_name or "").strip()
+    return name or "local"
 
 
 _registry: Registry | None = None
