@@ -9,7 +9,8 @@
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from pathlib import Path
+from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -77,3 +78,41 @@ class Syncer(Protocol):
     def push(self, record) -> None: ...
     def pull(self) -> list: ...
     def federate(self, weights) -> None: ...
+
+
+@runtime_checkable
+class QueuePort(Protocol):
+    """本地待同步队列端口（§7.6 依赖倒置，Task #9）。
+
+    domain 只声明"持久化追加 + 观测计数"，不触碰文件系统；
+    JSONL 落盘等 IO 由 infra 实现（JsonlQueue）经构造注入。
+    """
+
+    def append(self, record) -> None: ...
+    def count(self) -> int: ...
+
+
+@runtime_checkable
+class HttpPushPort(Protocol):
+    """HTTP 推送端口（§7.6 依赖倒置，Task #9）。
+
+    domain 只声明"尽力而为 POST"，失败不得抛（同步不阻断主流程）；
+    urllib 传输由 infra 实现（UrllibJsonPoster）经构造注入。
+    """
+
+    def post(self, endpoint: str, token: str | None, record) -> None: ...
+
+
+@runtime_checkable
+class PoolStore(Protocol):
+    """训练池存储端口（§5.6 依赖倒置，Task #9）。
+
+    domain 只声明"写标注 / 列标注 / 指纹 / manifest 读写"，文件系统 IO 由
+    infra 实现（FilePoolStore）经调用方装配注入；domain 运行期不触碰磁盘。
+    """
+
+    def write_label(self, stem: str, content: str) -> Path: ...
+    def list_labels(self) -> list[str]: ...  # 相对文件名（如 "a.txt"），排序稳定
+    def fingerprint(self) -> str | None: ...  # 数据版本指纹；无标注则 None
+    def load_manifest(self) -> dict[str, Any] | None: ...
+    def save_manifest(self, manifest: dict[str, Any]) -> Path: ...

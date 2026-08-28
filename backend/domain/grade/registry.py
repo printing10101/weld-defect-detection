@@ -13,6 +13,7 @@ status = enabled（表存在且 authorized）/ unauthorized（表存在未授权
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from backend.domain.errors import GradingAmbiguousError
@@ -22,6 +23,15 @@ from backend.domain.grade.iso17636 import Iso17636Grader
 from backend.domain.grade.nb47013 import Nb47013Grader
 from backend.domain.interfaces import StandardGrader
 from backend.domain.standards.tables.loader import StandardTables, load_standard_tables
+
+
+@dataclass(frozen=True)
+class GraderSpec:
+    """某标准的判定器规格（含静态元数据，供插件注册与 GET /standards 展示，P2）。"""
+
+    standard_id: str
+    cls: type[StandardGrader]
+    meta: dict[str, Any]  # name/grades_defects/levels/table_required/table_filename/note
 
 # standard_id → 实现类（键与规格书 §6.1 / 表文件 standard_id 一致）
 _GRADERS: dict[str, type[StandardGrader]] = {
@@ -72,8 +82,24 @@ _STANDARD_META: dict[str, dict[str, Any]] = {
 
 
 def supported_standard_ids() -> list[str]:
-    """已注册标准 id（含骨架）。"""
+    """已注册标准 id（含骨架与插件）。"""
     return list(_GRADERS)
+
+
+def register_standard(spec: GraderSpec) -> None:
+    """注册/覆盖标准判定器（§19.4 插件发现入口，P2）。
+
+    同 standard_id 已注册且实现类不同 → 抛 GradingAmbiguousError（防插件静默
+    顶替内置）；相同实现（幂等重发现）→ 无操作。注册同时写入静态元数据
+    （name/levels/table_filename 等），使 GET /standards 能力目录即时可见。
+    """
+    existing = _GRADERS.get(spec.standard_id)
+    if existing is not None and existing is not spec.cls:
+        raise GradingAmbiguousError(
+            f"标准 {spec.standard_id!r} 已注册（{existing.__name__}），拒绝覆盖"
+        )
+    _GRADERS[spec.standard_id] = spec.cls
+    _STANDARD_META[spec.standard_id] = dict(spec.meta)
 
 
 def standard_capabilities(standard_id: str) -> dict[str, Any]:
@@ -105,12 +131,14 @@ def all_standard_capabilities() -> list[dict[str, Any]]:
 def get_grader(
     standard_id: str,
     tables: StandardTables | None = None,
+    review_uncertainty: float | None = None,
 ) -> StandardGrader:
     """按 standard_id 装配判定器。
 
     - NB/T47013.2-2015：必须提供已授权数值表（authorized 熔断由 Nb47013Grader 自身执行）；
     - 语义化熔断标准：tables 可为 None（grade() 直接熔断，不读表）；
-    - 未知标准：抛 GradingAmbiguousError（422，需人工复核）。
+    - 未知标准：抛 GradingAmbiguousError（422，需人工复核）；
+    - review_uncertainty：仅 Nb47013Grader 消费（人工兜底阈值），其余适配器忽略。
     """
     impl = _GRADERS.get(standard_id)
     if impl is None:
@@ -119,6 +147,8 @@ def get_grader(
         )
     if impl is Nb47013Grader and tables is None:
         raise GradingAmbiguousError(f"标准 {standard_id} 数值表缺失，禁止输出级别，需人工复核")
+    if impl is Nb47013Grader and review_uncertainty is not None:
+        return impl(tables, review_uncertainty=review_uncertainty)  # type: ignore[arg-type]
     return impl(tables)  # type: ignore[arg-type]  # 熔断类不读表，tables=None 合法
 
 
@@ -126,10 +156,12 @@ def get_grader(
 __all__ = [
     "AsmeSecVGrader",
     "Gb3323Grader",
+    "GraderSpec",
     "Iso17636Grader",
     "Nb47013Grader",
     "all_standard_capabilities",
     "get_grader",
+    "register_standard",
     "standard_capabilities",
     "supported_standard_ids",
 ]

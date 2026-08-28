@@ -1,0 +1,61 @@
+# 默认报告模板（§7.2 报告模板数据化，P2）。
+#
+# 模板 = 数据文件（YAML）；渲染引擎（reportlab 流式排版）不变。
+# 新增/换版式 = 新增模板文件（可仅覆盖部分键，其余继承本默认），不改代码。
+# 自定义模板的键缺失/损坏 → 回退本默认（宽容，不阻断出片）。
+#
+# 字段语义见 backend/infra/reporting/templates.py 的 ReportTemplate。
+name: standard
+doc_title_prefix: 射线检测评片报告
+author: ScanDetection
+cover_title: 射线焊缝缺陷智能检测评片报告
+meta_report_no: 报告编号：{v}
+meta_image_id: 影像编号：{v}
+meta_generated_at: 生成时间：{v}
+
+section_workpiece: 一、工件信息
+workpiece_fields:
+  workpiece_no: 工件号
+  weld_no: 焊口编号
+  modality: 影像模态
+
+section_params: 二、检测参数
+params_fields:
+  pixel_spacing: 像素标定
+  thickness: 母材厚度 T
+  standard: 执行标准
+
+section_iqi: 三、影像质量校验（IQI / 黑度）
+iqi_fields:
+  iqi: 像质计
+  density: 黑度 D
+  density_limit: 黑度门限
+  evaluable: 可评片性
+
+section_defects: 四、缺陷清单与当量尺寸
+defects_empty: 未检出缺陷。
+defect_columns:
+  - "#"
+  - 类别
+  - 形状
+  - 长 L(mm)
+  - 宽 W(mm)
+  - 面积(mm²)
+  - 周长(mm)
+  - 评级
+
+section_comparison: 五、检测影像对比（送检原始影像 vs 检测标注影像）
+
+section_basis: 六、判定依据条款
+basis_empty: 无自动判定依据（标准数值未授权或无需判定）。
+
+section_conclusion: 七、结论
+level_text: 综合评定级别：{level} 级
+no_level_text: 无法自动评级，需人工复核。
+review_warn: ⚠ 本报告标注需要人工复核。
+signer_text: 签字：{signer}
+fingerprint_text: 数字指纹：SHA-256:{fp}（报告内容防篡改校验）
+
+disclaimer_label: 免责声明：{text}
+fallback: "—"
+not_provided: 未提供

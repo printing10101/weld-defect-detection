@@ -22,6 +22,8 @@ import cv2
 import numpy as np
 
 from backend.domain.dto import BBox, DefectShape, Detection, Geometry
+from backend.domain.errors import ModelUnavailableError
+from backend.domain.interfaces import Quantifier
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +79,21 @@ class BBoxQuantifier:
         )
 
 
+    def quantify(
+        self,
+        detection: Detection,
+        pixel_spacing_mm: float,
+        *,
+        image: np.ndarray | None = None,
+        cfg: MaskRefineCfg | None = None,
+    ) -> Geometry:
+        """统一量化入口（§T8 装配）：包围盒近似，忽略 image/cfg。
+
+        与 MaskQuantifier.quantify 同签名，使两链路调用点一致、可经注册表互换。
+        """
+        return self.measure(detection, pixel_spacing_mm)
+
+
 # ---------------------------------------------------------------------------
 # M4b：掩膜精修量化（图像感知）
 # ---------------------------------------------------------------------------
@@ -90,6 +107,22 @@ class MaskQuantifier:
     def measure(self, detection: Detection, pixel_spacing_mm: float) -> Geometry:
         """冻结接口：包围盒近似（与 BBoxQuantifier 一致）。"""
         return BBoxQuantifier().measure(detection, pixel_spacing_mm)
+
+    def quantify(
+        self,
+        detection: Detection,
+        pixel_spacing_mm: float,
+        *,
+        image: np.ndarray | None = None,
+        cfg: MaskRefineCfg | None = None,
+    ) -> Geometry:
+        """统一量化入口（§T8 装配）：有图则掩膜精修，无图回退包围盒近似。
+
+        与 BBoxQuantifier.quantify 同签名，使两链路调用点一致、可经注册表互换。
+        """
+        if image is None:
+            return self.measure(detection, pixel_spacing_mm)
+        return self.quantify_from_image(image, detection, pixel_spacing_mm, cfg)
 
     # ---- 掩膜提取 ----------------------------------------------------------
     @staticmethod
@@ -237,3 +270,78 @@ def refine_detections(
     """批量精修检测框（M4b 入口，供 detect 路由与全链路复用）。"""
     mq = MaskQuantifier()
     return [mq.refine(image, d, cfg) for d in detections]
+
+
+# ---------------------------------------------------------------------------
+# 量化器注册表（§T8，对齐 detect/registry.py 与 grade/registry.py 模式）
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class QuantifierSpec:
+    """量化器规格（注册表条目）。"""
+
+    kind: str
+    display_name: str
+    cls: type[Quantifier]
+    needs_image: bool  # True=图像感知（掩膜精修），False=包围盒近似（仅需检测框）
+
+
+_QUANTIFIER_SPECS: dict[str, QuantifierSpec] = {
+    "bbox": QuantifierSpec(
+        kind="bbox",
+        display_name="包围盒近似量化器 (M4a)",
+        cls=BBoxQuantifier,
+        needs_image=False,
+    ),
+    "mask": QuantifierSpec(
+        kind="mask",
+        display_name="掩膜精修量化器 (M4b)",
+        cls=MaskQuantifier,
+        needs_image=True,
+    ),
+}
+
+
+def supported_quantifier_kinds() -> list[str]:
+    """返回已注册量化器种类（注册表键，含插件）。"""
+    return sorted(_QUANTIFIER_SPECS)
+
+
+def register_quantifier_kind(spec: QuantifierSpec) -> None:
+    """注册/覆盖量化器种类（§19.4 插件发现入口，P2）。
+
+    同 kind 已注册且实现类不同 → 抛 ModelUnavailableError（防插件静默顶替内置）；
+    相同实现（幂等重发现）→ 无操作。
+    """
+    existing = _QUANTIFIER_SPECS.get(spec.kind)
+    if existing is not None and existing.cls is not spec.cls:
+        raise ModelUnavailableError(
+            f"量化器种类 {spec.kind!r} 已注册（{existing.cls.__name__}），拒绝覆盖"
+        )
+    _QUANTIFIER_SPECS[spec.kind] = spec
+
+
+def quantifier_capabilities(kind: str) -> dict:
+    """返回某量化器能力描述；未知种类抛 ModelUnavailableError（§14，复用而非新增）。"""
+    spec = _QUANTIFIER_SPECS.get(kind)
+    if spec is None:
+        raise ModelUnavailableError(f"未知量化器种类: {kind!r}")
+    return {
+        "kind": spec.kind,
+        "display_name": spec.display_name,
+        "needs_image": spec.needs_image,
+    }
+
+
+def get_quantifier(kind: str = "bbox") -> Quantifier:
+    """按种类取得量化器实例（依赖倒置：调用方经注册表装配，不在 app 层 new 实现）。
+
+    未知种类抛 ModelUnavailableError（§14，复用而非新增错误码）。量化参数
+    （如掩膜精修 MaskRefineCfg）在调用 ``quantify(..., cfg=...)`` 时透传，
+    此处仅负责构造与装配，保持构造签名一致。
+    """
+    spec = _QUANTIFIER_SPECS.get(kind)
+    if spec is None:
+        raise ModelUnavailableError(
+            f"未知量化器种类: {kind!r}（可选: {supported_quantifier_kinds()}）"
+        )
+    return spec.cls()

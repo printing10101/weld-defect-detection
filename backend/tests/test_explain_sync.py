@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
+from backend.infra.sync_io import JsonlQueue
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -93,7 +94,7 @@ def test_local_adapter_contract(tmp_path) -> None:
     from backend.domain.sync import LocalAdapter
 
     queue = tmp_path / "sync" / "pending.jsonl"
-    adapter = LocalAdapter(queue)
+    adapter = LocalAdapter(JsonlQueue(queue))
 
     # v1 本地优先：push 只落本地 JSONL，不发网络
     adapter.push({"image_id": "img_1", "level": "II"})

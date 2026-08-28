@@ -15,13 +15,13 @@
 
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from backend.domain.dto import DefectClass, Detection
+from backend.domain.interfaces import PoolStore
 
 # 安全关键/稀有类（漏检代价高 → 主动学习优先采样）
 _HIGH_VALUE_CLASSES = {
@@ -130,65 +130,43 @@ def export_training_labels(
     image_w: float,
     image_h: float,
     *,
-    pool_dir: str | Path,
+    store: PoolStore,
     class_overrides: dict[str, int] | None = None,
 ) -> Path:
-    """把人工确认的缺陷导出为 YOLO 标注文件（训练池回流）。
+    """把人工确认的缺陷导出为 YOLO 标注文件（训练池回流，IO 经 PoolStore 注入）。
 
-    pool_dir/{image_stem}.txt 写入所有确认缺陷的 normalized 标注；
+    store 写入 {image_stem}.txt（同 stem 覆盖，防重复导出旧标注残留）；
     class_overrides 按 detection.id 修正类别（人工复核改判）。
-    返回标注文件路径（同 stem 已有文件时覆盖，防重复导出旧标注残留）。
+    返回标注文件路径。
     """
-    root = Path(pool_dir)
-    root.mkdir(parents=True, exist_ok=True)
     lines = []
     for d in detections:
         cid = class_overrides.get(d.id) if class_overrides else None
         lines.append(to_yolo_label(d, image_w, image_h, class_id_override=cid))
-    # 仅取文件名成分，杜绝 image_stem 含 ".."/绝对路径导致的目录穿越（纵深防御）
-    out = root / f"{Path(image_stem).name}.txt"
-    out.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
-    return out
+    content = "\n".join(lines) + ("\n" if lines else "")
+    return store.write_label(image_stem, content)
 
 
-def training_pool_manifest(pool_dir: str | Path) -> dict[str, Any]:
+def training_pool_manifest(store: PoolStore) -> dict[str, Any]:
     """训练池数据版本 manifest（§7.4 指纹语义 + §5.6 划分记录）。
 
-    返回 {sample_count, fingerprint, files, exported_at}；目录不存在时
+    返回 {sample_count, fingerprint, files, exported_at}；无标注时
     sample_count=0 / fingerprint=None（不臆造）。
     """
-    root = Path(pool_dir)
-    if not root.is_dir():
-        return {"sample_count": 0, "fingerprint": None, "files": [], "exported_at": None}
-    files = sorted(str(p.relative_to(root)) for p in root.rglob("*.txt") if p.is_file())
-    fingerprint = None
-    if files:
-        from backend.evaluation.harness import golden_set_fingerprint
-
-        fingerprint = golden_set_fingerprint(root)
+    files = store.list_labels()
     return {
         "sample_count": len(files),
-        "fingerprint": fingerprint,
+        "fingerprint": store.fingerprint(),
         "files": files,
         "exported_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
 
 
-def load_pool_manifest(pool_dir: str | Path) -> dict[str, Any] | None:
+def load_pool_manifest(store: PoolStore) -> dict[str, Any] | None:
     """读取持久化 manifest（data/active/pool_manifest.json）；无则 None。"""
-    path = Path(pool_dir) / ".." / "pool_manifest.json"
-    path = path.resolve()
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+    return store.load_manifest()
 
 
-def save_pool_manifest(pool_dir: str | Path, manifest: dict[str, Any]) -> Path:
+def save_pool_manifest(store: PoolStore, manifest: dict[str, Any]) -> Path:
     """持久化 manifest 到 pool_dir 同级的 pool_manifest.json。"""
-    path = Path(pool_dir).resolve().parent / "pool_manifest.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    return path
+    return store.save_manifest(manifest)

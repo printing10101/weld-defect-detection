@@ -25,6 +25,7 @@ import numpy as np
 from backend.domain.active_learning import export_training_labels, high_value_score
 from backend.domain.dto import Detection
 from backend.infra.config import load_config, resolve_config_path
+from backend.infra.pool_store import FilePoolStore
 
 _EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff")
 
@@ -186,7 +187,9 @@ def export_top(
         dets = detector.infer(gray, conf=conf, iou=iou, class_conf=class_conf)
         if not dets:
             continue
-        export_training_labels(stem, dets, float(w), float(h), pool_dir=pool_dir)
+        export_training_labels(
+            stem, dets, float(w), float(h), store=FilePoolStore(pool_dir)
+        )
         exported += 1
     return exported
 

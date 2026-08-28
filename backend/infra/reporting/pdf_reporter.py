@@ -42,6 +42,7 @@ from reportlab.platypus import (
 
 from backend.domain.report.content import build_report_content
 from backend.infra.reporting.pdfa import postprocess_to_pdfa
+from backend.infra.reporting.templates import ReportTemplate, load_report_template
 from backend.infra.repository import InspectionRepository
 
 
@@ -149,7 +150,8 @@ class PdfReporter:
         gray：可选，pipeline 已加载的灰度底片（numpy）。传入则复用，避免对整张
         大底片二次解码（§优化 F12）；缺省时自行从 image["path"] 解码。
         """
-        del template  # v1 统一模板（参数预留）
+        # 报告模板数据化（§7.2 P2）：模板名 → YAML 数据文件；未知/损坏回退 standard。
+        tpl = load_report_template(template)
         image = self._repo.get_image(image_id)
         if image is None:
             raise ValueError(f"image not found: {image_id}")
@@ -171,7 +173,7 @@ class PdfReporter:
         pdf_path = self._out / f"{image_id}.pdf"
         # 先渲染 reportlab PDF 到中间文件，再转写为 PDF/A-1b（§7.2 归档合规）
         rl_path = pdf_path.with_suffix(".rl.pdf")
-        _render(rl_path, content, graph_bytes, orig_bytes, self._font)
+        _render(rl_path, content, graph_bytes, orig_bytes, self._font, tpl)
         try:
             postprocess_to_pdfa(rl_path, pdf_path)
         finally:
@@ -439,8 +441,13 @@ def _render(
     graph_bytes: bytes | None,
     orig_bytes: bytes | None,
     font: str,
+    tpl: ReportTemplate,
 ) -> None:
-    """渲染报告 PDF（reportlab platypus 流式排版）。"""
+    """渲染报告 PDF（reportlab platypus 流式排版）。
+
+    版式文案由模板数据驱动（§7.2 P2）：标题/小节/字段标签/回退文案/表头
+    均取自 ReportTemplate，渲染算法不变——换模板 = 换 YAML，不改代码。
+    """
     c = _cast(content)
     doc = SimpleDocTemplate(
         str(pdf_path),
@@ -449,103 +456,123 @@ def _render(
         rightMargin=_MARGIN,
         topMargin=_MARGIN,
         bottomMargin=_MARGIN,
-        title=f"射线检测评片报告 {c.image_id}",
-        author="ScanDetection",
+        title=f"{tpl.doc_title_prefix} {c.image_id}",
+        author=tpl.author,
     )
     styles = _make_styles(font)
     flow: list[Flowable] = []
 
     # 封面标题
-    flow.append(Paragraph("射线焊缝缺陷智能检测评片报告", styles["title"]))
+    flow.append(Paragraph(tpl.cover_title, styles["title"]))
     flow.append(Spacer(1, 4 * mm))
-    flow.append(Paragraph(f"报告编号：{c.report_id or '—'}", styles["meta"]))
-    flow.append(Paragraph(f"影像编号：{c.image_id}", styles["meta"]))
-    flow.append(Paragraph(f"生成时间：{c.generated_at}", styles["meta"]))
+    flow.append(
+        Paragraph(tpl.meta_report_no.format(v=c.report_id or tpl.fallback), styles["meta"])
+    )
+    flow.append(Paragraph(tpl.meta_image_id.format(v=c.image_id), styles["meta"]))
+    flow.append(Paragraph(tpl.meta_generated_at.format(v=c.generated_at), styles["meta"]))
     flow.append(Spacer(1, 6 * mm))
 
     # 工件信息
-    flow.append(_section("一、工件信息", styles))
+    wf = tpl.workpiece_fields
+    flow.append(_section(tpl.section_workpiece, styles))
     flow.append(
         _kv_table(
             [
-                ("工件号", c.workpiece_no or "—"),
-                ("焊口编号", c.weld_no or "—"),
-                ("影像模态", f"{c.modality}（{c.source_type}）"),
+                (wf.get("workpiece_no", "工件号"), c.workpiece_no or tpl.fallback),
+                (wf.get("weld_no", "焊口编号"), c.weld_no or tpl.fallback),
+                (wf.get("modality", "影像模态"), f"{c.modality}（{c.source_type}）"),
             ],
             styles,
         )
     )
 
     # 检测参数
-    flow.append(_section("二、检测参数", styles))
+    pf = tpl.params_fields
+    flow.append(_section(tpl.section_params, styles))
     flow.append(
         _kv_table(
             [
-                ("像素标定", f"{c.pixel_spacing_mm:.4f} mm/px" if c.pixel_spacing_mm else "未提供"),
                 (
-                    "母材厚度 T",
-                    f"{c.base_metal_thickness_mm} mm" if c.base_metal_thickness_mm else "未提供",
+                    pf.get("pixel_spacing", "像素标定"),
+                    f"{c.pixel_spacing_mm:.4f} mm/px" if c.pixel_spacing_mm else tpl.not_provided,
                 ),
-                ("执行标准", c.standard_ref or "—"),
+                (
+                    pf.get("thickness", "母材厚度 T"),
+                    f"{c.base_metal_thickness_mm} mm" if c.base_metal_thickness_mm else tpl.not_provided,
+                ),
+                (pf.get("standard", "执行标准"), c.standard_ref or tpl.fallback),
             ],
             styles,
         )
     )
 
     # 影像质量校验
-    flow.append(_section("三、影像质量校验（IQI / 黑度）", styles))
+    iqf = tpl.iqi_fields
+    flow.append(_section(tpl.section_iqi, styles))
     iqi_txt = "通过" if c.iqi_pass else ("不通过" if c.iqi_pass is False else "未校验")
-    achieved = (c.iqi_detail or {}).get("achieved") or "—"
-    required = (c.iqi_detail or {}).get("required") or "—"
+    achieved = (c.iqi_detail or {}).get("achieved") or tpl.fallback
+    required = (c.iqi_detail or {}).get("required") or tpl.fallback
     flow.append(
         _kv_table(
             [
-                ("像质计", f"{iqi_txt}（达到丝号 {achieved} / 要求 {required}）"),
-                ("黑度 D", f"{c.density:.3f}" if c.density is not None else "—"),
-                ("黑度门限", "AB 级 2.0–4.5" if c.density_ok is not None else "—"),
-                ("可评片性", "可评片" if c.evaluable else "不可评片（影像质量不达标）"),
+                (
+                    iqf.get("iqi", "像质计"),
+                    f"{iqi_txt}（达到丝号 {achieved} / 要求 {required}）",
+                ),
+                (
+                    iqf.get("density", "黑度 D"),
+                    f"{c.density:.3f}" if c.density is not None else tpl.fallback,
+                ),
+                (
+                    iqf.get("density_limit", "黑度门限"),
+                    "AB 级 2.0–4.5" if c.density_ok is not None else tpl.fallback,
+                ),
+                (
+                    iqf.get("evaluable", "可评片性"),
+                    "可评片" if c.evaluable else "不可评片（影像质量不达标）",
+                ),
             ],
             styles,
         )
     )
 
     # 缺陷清单
-    flow.append(_section("四、缺陷清单与当量尺寸", styles))
+    flow.append(_section(tpl.section_defects, styles))
     if c.defects:
-        flow.append(_defects_table(c.defects, styles))
+        flow.append(_defects_table(c.defects, styles, tpl.defect_columns))
     else:
-        flow.append(Paragraph("未检出缺陷。", styles["body"]))
+        flow.append(Paragraph(tpl.defects_empty, styles["body"]))
 
     # 检测影像对比：送检原始影像 vs 检测标注影像（并排，便于人工判断）
-    flow.append(_section("五、检测影像对比（送检原始影像 vs 检测标注影像）", styles))
+    flow.append(_section(tpl.section_comparison, styles))
     flow.extend(_comparison_flow(orig_bytes, graph_bytes, styles))
 
     # 判定依据
-    flow.append(_section("六、判定依据条款", styles))
+    flow.append(_section(tpl.section_basis, styles))
     if c.basis:
         for i, b in enumerate(c.basis, 1):
             flow.append(Paragraph(f"{i}. {b}", styles["body"]))
     else:
-        flow.append(Paragraph("无自动判定依据（标准数值未授权或无需判定）。", styles["body"]))
+        flow.append(Paragraph(tpl.basis_empty, styles["body"]))
 
     # 结论
-    flow.append(_section("七、结论", styles))
+    flow.append(_section(tpl.section_conclusion, styles))
     if c.joint_level:
-        flow.append(Paragraph(f"综合评定级别：{c.joint_level} 级", styles["verdict"]))
+        flow.append(Paragraph(tpl.level_text.format(level=c.joint_level), styles["verdict"]))
     else:
-        flow.append(Paragraph("无法自动评级，需人工复核。", styles["verdict"]))
+        flow.append(Paragraph(tpl.no_level_text, styles["verdict"]))
     if c.need_review:
-        flow.append(Paragraph("⚠ 本报告标注需要人工复核。", styles["warn"]))
+        flow.append(Paragraph(tpl.review_warn, styles["warn"]))
     flow.append(Spacer(1, 4 * mm))
-    flow.append(Paragraph(f"签字：{c.signer or '____________'}", styles["meta"]))
+    flow.append(
+        Paragraph(tpl.signer_text.format(signer=c.signer or "____________"), styles["meta"])
+    )
     if c.fingerprint:
         flow.append(
-            Paragraph(
-                f"数字指纹：SHA-256:{c.fingerprint[:12]}（报告内容防篡改校验）", styles["meta"]
-            )
+            Paragraph(tpl.fingerprint_text.format(fp=c.fingerprint[:12]), styles["meta"])
         )
     flow.append(Spacer(1, 4 * mm))
-    flow.append(Paragraph(f"免责声明：{c.disclaimer}", styles["fine"]))
+    flow.append(Paragraph(tpl.disclaimer_label.format(text=c.disclaimer), styles["fine"]))
 
     doc.build(flow)
 
@@ -638,8 +665,16 @@ def _kv_table(rows: list[tuple[str, str]], styles: dict[str, ParagraphStyle]) ->
     return t
 
 
-def _defects_table(defects: tuple[dict, ...], styles: dict[str, ParagraphStyle]) -> Table:
-    header = ["#", "类别", "形状", "长 L(mm)", "宽 W(mm)", "面积(mm²)", "周长(mm)", "评级"]
+def _defects_table(
+    defects: tuple[dict, ...],
+    styles: dict[str, ParagraphStyle],
+    columns: tuple[str, ...] = (),
+) -> Table:
+    header = (
+        list(columns)
+        if columns
+        else ["#", "类别", "形状", "长 L(mm)", "宽 W(mm)", "面积(mm²)", "周长(mm)", "评级"]
+    )
     rows = [header]
     for i, d in enumerate(defects, 1):
         rows.append(

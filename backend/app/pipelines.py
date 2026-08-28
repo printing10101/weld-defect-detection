@@ -24,26 +24,14 @@ from backend.domain.iqi import IqiConfig, enrich_grade, verify_iqi
 from backend.domain.preprocess.metrics import QualityCfg as DomainQualityCfg
 from backend.domain.preprocess.metrics import assess_quality
 from backend.domain.pseudo_defect import PseudoDefectCfg, screen_pseudo_defects
-from backend.domain.quantify import BBoxQuantifier
+from backend.domain.quantify import get_quantifier
 from backend.domain.recommend import recommend
 from backend.domain.review import ReviewDecision, ReviewRole, resolve_review
+from backend.domain.spacing import resolve_spacing as _resolve_spacing  # 单一真源（§T8/§6）
 from backend.domain.standards.tables.loader import disclaimer_for
 from backend.infra.image_loader import load_image
 
 _LOG = logging.getLogger("scandetection.pipeline")
-
-
-def _resolve_spacing(requested: float | None, from_meta: float | None) -> tuple[float, bool]:
-    """确定像素标定（mm/px）并标明其是否可信。
-
-    返回 (spacing, known)。三处来源均无效时返回 (1.0, False)：1.0 仅用于让几何
-    换算继续跑通（供人工查看像素级形状），**不得**据此定级——调用方须把
-    context.pixel_spacing_mm 置 None，由 grader 熔断。
-    """
-    for value in (requested, from_meta):
-        if value is not None and value > 0:
-            return float(value), True
-    return 1.0, False
 
 
 def _shape_of(detection, geometry, round_aspect_max: float) -> DefectShape:
@@ -236,10 +224,14 @@ class InspectionPipeline:
         # §6.2 深孔推导：缺陷内部黑度显著高于母材 → 标 deep_hole（直判 IV 的前置信号）。
         # 必须在判定/落库前完成，使 grader 与 defect_rows 都能消费到该标记。
         detections = _derive_deep_hole(detections, meta, density, meta.bit_depth)
-        quantifier = BBoxQuantifier()
+        # 经量化器注册表装配（去除 app 层 new 实现）；/report 历史用包围盒近似，
+        # 显式请求 bbox 保持行为不变，量化参数（掩膜 cfg）无图时忽略。
+        quantifier = get_quantifier("bbox")
         # 像素标定缺失时不再伪造 1.0 mm/px 后照常定级——几何量纲无据即触发熔断。
         spacing, spacing_known = _resolve_spacing(pixel_spacing_mm, meta.pixel_spacing_mm)
-        quantified = [(d, quantifier.measure(d, spacing)) for d in detections]
+        quantified = [
+            (d, quantifier.quantify(d, spacing, image=enhanced, cfg=None)) for d in detections
+        ]
 
         # 5. 标准判定（M5，未授权/信息不足熔断 → 不输出级别）
         context = ImageMeta(
@@ -356,7 +348,7 @@ class InspectionPipeline:
         reg.repository.create_inspection(image_row, defect_rows, report_row)
 
         # 不可变审计日志（§12.5）：评片创建即记一笔，工业合规追溯。
-        # actor = 登录操作员（T3 鉴权闭环）；未携带时回退 "system"（不应发生于鉴权后）。
+        # actor = 请求头操作员（X-Operator-Name）；未携带时回退 "system"。
         reg.repository.append_audit(
             actor=actor or "system",
             action="inspect",
@@ -543,7 +535,7 @@ class InspectionPipeline:
                 reg.repository.update_report(report_id, pdf_path=pdf_path)
 
         # 不可变审计日志（§12.5）：记录级别/复核标记前后值
-        # actor = 提交复核的登录操作员（T3 闭环）；缺省回退 reviewer。
+        # actor = 提交复核的操作员（X-Operator-Name）；缺省回退 reviewer。
         reg.repository.append_audit(
             actor=actor or reviewer,
             action="review",

@@ -55,6 +55,16 @@ def test_judge_missing_thickness_422() -> None:
     assert resp.status_code == 422  # pydantic 校验
 
 
+def test_judge_missing_spacing_fuses_422() -> None:
+    """未提供像素标定 → 不再静默 1.0 mm/px（伪物理），grader 熔断 422（§6/§T8）。"""
+    body = _payload()
+    body.pop("pixel_spacing_mm")
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/judge", json=body)
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["code"] == "GRADING_AMBIGUOUS"
+
+
 def test_judge_empty_payload_422() -> None:
     with TestClient(app) as client:
         resp = client.post("/api/v1/judge", json={})

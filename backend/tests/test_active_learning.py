@@ -15,6 +15,7 @@ from backend.domain.active_learning import (
     training_pool_manifest,
 )
 from backend.domain.dto import BBox, DefectClass, Detection
+from backend.infra.pool_store import FilePoolStore
 
 
 def _det(
@@ -95,7 +96,9 @@ def test_to_yolo_label_normalized_and_clipped() -> None:
 def test_export_training_labels_writes_pool(tmp_path: Path) -> None:
     pool = tmp_path / "training_pool"
     detections = [_det(DefectClass.POROSITY), _det(DefectClass.SLAG, x=50)]
-    out = export_training_labels("PG101-1-1", detections, 1000, 800, pool_dir=pool)
+    out = export_training_labels(
+        "PG101-1-1", detections, 1000, 800, store=FilePoolStore(pool)
+    )
     assert out.exists()
     lines = out.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 2
@@ -106,24 +109,32 @@ def test_export_training_labels_writes_pool(tmp_path: Path) -> None:
 def test_export_with_class_override(tmp_path: Path) -> None:
     """人工改判：把误检气孔(0) 改判为裂纹(4)。"""
     d = _det(DefectClass.POROSITY)
-    out = export_training_labels("x", [d], 1000, 800, pool_dir=tmp_path, class_overrides={d.id: 4})
+    out = export_training_labels(
+        "x",
+        [d],
+        1000,
+        800,
+        store=FilePoolStore(tmp_path),
+        class_overrides={d.id: 4},
+    )
     assert out.read_text(encoding="utf-8").strip().startswith("4 ")
 
 
 def test_pool_manifest_counts_and_fingerprint(tmp_path: Path) -> None:
     pool = tmp_path / "pool"
-    manifest = training_pool_manifest(pool)  # 目录不存在 → 0/None（不臆造）
+    store = FilePoolStore(pool)
+    manifest = training_pool_manifest(store)  # 目录不存在 → 0/None（不臆造）
     assert manifest["sample_count"] == 0
     assert manifest["fingerprint"] is None
 
-    export_training_labels("a", [_det(DefectClass.POROSITY)], 100, 100, pool_dir=pool)
-    export_training_labels("b", [_det(DefectClass.CRACK)], 100, 100, pool_dir=pool)
-    m2 = training_pool_manifest(pool)
+    export_training_labels("a", [_det(DefectClass.POROSITY)], 100, 100, store=store)
+    export_training_labels("b", [_det(DefectClass.CRACK)], 100, 100, store=store)
+    m2 = training_pool_manifest(store)
     assert m2["sample_count"] == 2
     assert m2["fingerprint"]  # 数据版本指纹
     # 内容变化 → 指纹变
-    export_training_labels("c", [_det(DefectClass.SLAG)], 100, 100, pool_dir=pool)
-    assert training_pool_manifest(pool)["fingerprint"] != m2["fingerprint"]
+    export_training_labels("c", [_det(DefectClass.SLAG)], 100, 100, store=store)
+    assert training_pool_manifest(store)["fingerprint"] != m2["fingerprint"]
 
 
 # ---------------------------------------------------------------------------

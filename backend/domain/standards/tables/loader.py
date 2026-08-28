@@ -12,7 +12,9 @@ from typing import Any
 
 import yaml
 
-_TABLES_DIR = Path(__file__).parent
+from backend.domain.standards.tables.ports import TableSource
+
+_DEFAULT_TABLES_DIR = Path(__file__).parent
 
 _REQUIRED_KEYS = {
     "standard_id",
@@ -67,30 +69,64 @@ def disclaimer_for(tables: StandardTables) -> str:
     return f"{head}\n{tail}"
 
 
-def load_standard_tables(standard_id: str, filename: str | None = None) -> StandardTables:
-    """加载并校验标准数值表。文件缺失或结构不符直接抛错（启动即失败）。
+def load_standard_tables(
+    standard_id: str,
+    filename: str | None = None,
+    source: TableSource | None = None,
+) -> StandardTables:
+    """加载并校验标准数值表（依赖倒置：经 TableSource 端口）。
 
     filename 缺省时由 standard_id 派生（含 '/' 等字符时需显式传入，如
     'nb47013.yaml' 对应 'NB/T47013.2-2015'）。
+    source 缺省时回退到已注册的默认数据源（生产由 app 注入 infra.FileTableSource，
+    使 domain 不接触文件系统；未注册时使用域内置引导默认，保障独立/测试可用）。
     """
-    name = filename or f"{standard_id}.yaml"
-    # 支持绝对路径（测试注入 authorized 表副本用）；否则按 tables/ 目录解析
-    path = Path(name) if Path(name).is_absolute() else _TABLES_DIR / name
-    if not path.exists():
-        raise FileNotFoundError(f"no standard tables for: {standard_id} ({name})")
-    with open(path, "r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or {}
-    _validate(raw)
-    if raw["standard_id"] != standard_id:
-        raise ValueError(f"table standard_id mismatch: {raw['standard_id']} != {standard_id}")
-    return StandardTables(
-        standard_id=str(raw["standard_id"]),
-        version=str(raw["version"]),
-        authorized=bool(raw["authorized"]),
-        data=raw,
-        authorized_copy=bool(raw.get("authorized_copy", False)),
-        source_note=str(raw.get("source_note", "")).strip(),
-    )
+    src = source or get_default_table_source()
+    return src.load(standard_id, filename)
+
+
+# ---- 数据源默认实现与注册 ------------------------------------------------
+# 生产环境由 app（dependencies）在启动时调用 set_default_table_source 注入
+# infra.FileTableSource，domain 因此完全不接触文件系统（§T8 验收硬化）。
+# 以下 _DefaultFileTableSource 为域内置引导默认：仅用于未注入场景（单元/独立运行），
+# 明确标注为 bootstrap，不应在生产路径使用。
+
+_DEFAULT_SOURCE: TableSource = None  # type: ignore[assignment]
+
+
+class _DefaultFileTableSource:
+    """域内置文件数据源（引导默认；生产由 infra.FileTableSource 取代）。"""
+
+    def load(self, standard_id: str, filename: str | None = None) -> StandardTables:
+        name = filename or f"{standard_id}.yaml"
+        # 支持绝对路径（测试注入 authorized 表副本用）；否则按 tables/ 目录解析
+        path = Path(name) if Path(name).is_absolute() else _DEFAULT_TABLES_DIR / name
+        if not path.exists():
+            raise FileNotFoundError(f"no standard tables for: {standard_id} ({name})")
+        with open(path, "r", encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+        _validate(raw)
+        if raw["standard_id"] != standard_id:
+            raise ValueError(f"table standard_id mismatch: {raw['standard_id']} != {standard_id}")
+        return StandardTables(
+            standard_id=str(raw["standard_id"]),
+            version=str(raw["version"]),
+            authorized=bool(raw["authorized"]),
+            data=raw,
+            authorized_copy=bool(raw.get("authorized_copy", False)),
+            source_note=str(raw.get("source_note", "")).strip(),
+        )
+
+
+def set_default_table_source(source: TableSource) -> None:
+    """注册默认数据源（生产：infra.FileTableSource；测试可注入内存实现）。"""
+    global _DEFAULT_SOURCE
+    _DEFAULT_SOURCE = source
+
+
+def get_default_table_source() -> TableSource:
+    """返回默认数据源；未注册时回退域内置引导默认（文件 YAML）。"""
+    return _DEFAULT_SOURCE or _DefaultFileTableSource()
 
 
 def _validate(raw: dict[str, Any]) -> None:

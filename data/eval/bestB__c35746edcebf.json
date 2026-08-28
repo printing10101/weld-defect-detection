@@ -1,18 +1,48 @@
 {
   "model_id": "bestB::c35746edcebf",
   "metrics": {
-    "mAP50": 0.0643,
-    "recall": 0.303,
-    "precision": 0.0075,
-    "gt_total": 33,
+    "mAP50": 0.0154,
+    "recall": 0.1184,
+    "precision": 0.001,
+    "gt_total": 76,
     "by_class": {
       "0": {
-        "ap50": 0.0643,
-        "recall": 0.303,
-        "precision": 0.0075,
-        "gt_count": 33
+        "ap50": 0.0391,
+        "recall": 0.3,
+        "precision": 0.0026,
+        "gt_count": 30
+      },
+      "5": {
+        "ap50": 0.0,
+        "recall": 0.0,
+        "precision": 0.0,
+        "gt_count": 10
+      },
+      "3": {
+        "ap50": 0.0,
+        "recall": 0.0,
+        "precision": 0.0,
+        "gt_count": 7
+      },
+      "4": {
+        "ap50": 0.0,
+        "recall": 0.0,
+        "precision": 0.0,
+        "gt_count": 11
+      },
+      "1": {
+        "ap50": 0.0,
+        "recall": 0.0,
+        "precision": 0.0,
+        "gt_count": 6
+      },
+      "2": {
+        "ap50": 0.0,
+        "recall": 0.0,
+        "precision": 0.0,
+        "gt_count": 12
       }
     }
   },
-  "golden_set": "04c64722ed2809df"
+  "golden_set": "6721832b6968944e"
 }

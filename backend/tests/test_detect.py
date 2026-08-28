@@ -4,12 +4,20 @@ from __future__ import annotations
 
 import cv2
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
 from backend.domain.detect.blob_detector import BlobConfig, BlobDetector
 from backend.domain.dto import BBox, DefectClass, Detection
-from backend.domain.quantify import BBoxQuantifier
+from backend.domain.errors import ModelUnavailableError
+from backend.domain.quantify import (
+    BBoxQuantifier,
+    MaskQuantifier,
+    get_quantifier,
+    quantifier_capabilities,
+    supported_quantifier_kinds,
+)
 
 
 def _synthetic_defect_image(size: int = 256, seed: int = 0) -> np.ndarray:
@@ -46,6 +54,51 @@ def test_quantify_pixel_spacing() -> None:
     assert g.position_x_mm == 1.0
 
 
+def test_quantifier_registry_lists_and_resolves() -> None:
+    """量化器注册表（§T8）：种类清单、装配解析、未知种类复用 §14 MODEL_UNAVAILABLE。"""
+    assert set(supported_quantifier_kinds()) == {"bbox", "mask"}
+    assert isinstance(get_quantifier("bbox"), BBoxQuantifier)
+    assert isinstance(get_quantifier("mask"), MaskQuantifier)
+    # 默认种类 = bbox（/report 历史行为，经注册表装配）
+    assert isinstance(get_quantifier(), BBoxQuantifier)
+    with pytest.raises(ModelUnavailableError):
+        get_quantifier("nope")
+    with pytest.raises(ModelUnavailableError):
+        quantifier_capabilities("nope")
+    assert quantifier_capabilities("mask")["needs_image"] is True
+    assert quantifier_capabilities("bbox")["needs_image"] is False
+
+
+def test_quantifier_unified_quantify_call() -> None:
+    """统一量化入口：两量化器同签名 quantify(...)，调用点一致、可互换（§T8 装配）。"""
+    det = Detection(
+        id="d1",
+        bbox=BBox(10, 20, 100, 50),
+        class_id=DefectClass.POROSITY,
+        score=0.5,
+        uncertainty=0.5,
+    )
+    # bbox：忽略 image/cfg，等价 measure
+    g_bbox = get_quantifier("bbox").quantify(det, 0.1, image=None, cfg=None)
+    assert g_bbox.length_mm == 10.0
+    # mask 无图：回退包围盒近似
+    g_mask_fallback = get_quantifier("mask").quantify(det, 0.1)
+    assert g_mask_fallback.length_mm == 10.0
+    # mask 有图：走掩膜精修（紧贴暗斑的框 → 掩膜面积 < 包围盒面积，证明精修路径生效）
+    img = _synthetic_defect_image()
+    det_blob = Detection(
+        id="b1",
+        bbox=BBox(68, 68, 24, 24),  # 紧贴 (80,80) r=12 暗斑
+        class_id=DefectClass.POROSITY,
+        score=0.6,
+        uncertainty=0.2,
+    )
+    g_mask_img = get_quantifier("mask").quantify(det_blob, 0.1, image=img, cfg=None)
+    assert g_mask_img.length_mm > 0
+    assert g_mask_img.area_mm2 > 0
+    assert g_mask_img.area_mm2 < g_bbox.area_mm2  # 圆形掩膜面积 < 外接框面积
+
+
 def test_detect_api() -> None:
     img = _synthetic_defect_image()
     ok, buf = cv2.imencode(".png", img)
@@ -63,6 +116,36 @@ def test_detect_api() -> None:
     for key in ("L_mm", "W_mm", "area_mm2", "perimeter_mm", "aspect_ratio", "confidence"):
         assert key in first
     assert body["annotated_image"]  # 标注图 base64 非空
+
+
+def test_detect_api_uncalibrated_no_pseudo_mm() -> None:
+    """未提供像素标定（无请求参数、合成 PNG 无 DICOM 元数据）→ 不输出伪物理尺寸。
+
+    与 /report 链路（grader 熔断）保持单一语义：calibrated=False 且物理字段为 None，
+    aspect_ratio 等无量纲量仍有效（§T8/§6）。
+    """
+    img = _synthetic_defect_image()
+    ok, buf = cv2.imencode(".png", img)
+    assert ok
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/detect",
+            files={"image": ("t.png", buf.tobytes(), "image/png")},
+            # 故意不传 pixel_spacing_mm
+        )
+    assert resp.status_code == 200
+    defects = resp.json()["defects"]
+    assert len(defects) >= 2
+    for d in defects:
+        assert d["calibrated"] is False
+        assert d["L_mm"] is None
+        assert d["W_mm"] is None
+        assert d["area_mm2"] is None
+        assert d["perimeter_mm"] is None
+        assert d["position"] is None
+        # 无量纲形状量仍有效
+        assert isinstance(d["aspect_ratio"], (int, float))
+        assert d["bbox"]  # 像素框始终有效
 
 
 # ---------------------------------------------------------------------------
