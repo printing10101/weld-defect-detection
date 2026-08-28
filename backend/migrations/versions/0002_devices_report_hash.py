@@ -1,13 +1,13 @@
-"""devices/calibrations + report 数字签名字段 (§12.4 / §7.2)
+"""devices/calibrations + report 数字签名字段
 
 Revision ID: 0002_devices_report_hash
 Revises: 0001_initial
-Create Date: 2026-08-14
+Create Date:
 
 增量迁移：
 - 新增 devices（设备档案）与 calibrations（标定记录，跨设备一致率 ≤5% 校验）；
 - reports 增加 report_hash（内容指纹 SHA-256）与 signed_at（签发时间），
-  支撑 §7.2 报告数字签名与 POST /report/{id}/verify 防篡改校验。
+  支撑  报告数字签名与 POST /report/{id}/verify 防篡改校验。
 
 与 backend.infra.db.Base.metadata（create_all）对齐；默认值由 ORM 写入时设置，
 不在迁移中加 server_default（与 0001 约定一致）。

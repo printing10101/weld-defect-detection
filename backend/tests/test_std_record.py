@@ -1,4 +1,4 @@
-"""附录A 评价记录表 + 人员资质 单测（DB50/T 1807-2025 §5 / §11.3）。"""
+"""附录A 评价记录表 + 人员资质 单测（DB50/T 1807-2025  / ）。"""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def people() -> list[Personnel]:
 
 
 # ---------------------------------------------------------------------------
-# 资质（§5）
+# 资质
 # ---------------------------------------------------------------------------
 
 
@@ -83,7 +83,7 @@ def test_check_personnel_expired_and_missing():
 
 
 def test_check_personnel_bad_date_conservative():
-    # 有效期格式非法 → 保守判过期（取严）
+    # 有效期格式非法 → 保守判过期（从严）
     res = check_personnel(
         [Personnel("张三", "RT(D)-II", "evaluator", valid_until="not-a-date"),
          Personnel("李四", "RT-II", "labeler")]

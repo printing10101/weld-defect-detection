@@ -1,4 +1,4 @@
-"""契约测试（§T7 / §19.6）：验证 DTO/接口/异常符合 §T2 冻结契约。"""
+"""契约测试：验证 DTO/接口/异常符合  冻结契约。"""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def test_interfaces_have_expected_methods() -> None:
 
 
 def test_standard_registry_contract() -> None:
-    """§6.1 标准注册表：默认实现可装配；骨架标准已登记；未知熔断。"""
+    """ 标准注册表：默认实现可装配；骨架标准已登记；未知熔断。"""
     from backend.domain.errors import GradingAmbiguousError
     from backend.domain.grade.gb3323 import Gb3323Grader
     from backend.domain.grade.registry import get_grader, supported_standard_ids
@@ -57,7 +57,7 @@ def test_standard_registry_contract() -> None:
     assert "GB/T3323-2019" in ids  # 预留骨架已登记
     assert "ASME-V" in ids
     assert "ISO17636" in ids
-    # 骨架标准可装配（tables 可缺省），grade() 时熔断
+    # 骨架标准可装配（tables 可缺省），grade 时熔断
     assert isinstance(get_grader("GB/T3323-2019"), Gb3323Grader)
     try:
         get_grader("NOT-A-STANDARD")

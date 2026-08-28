@@ -1,4 +1,4 @@
-"""M7 测试：主动学习闭环（§5.5/§5.6）。"""
+""" 测试：主动学习闭环。"""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def _det(
 
 
 # ---------------------------------------------------------------------------
-# 采样器（§5.6 高价值样本）
+# 采样器
 # ---------------------------------------------------------------------------
 
 
@@ -75,7 +75,7 @@ def test_select_high_value_orders_and_filters() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 标注回流（§5.5 人工确认 → YOLO 训练池）
+# 标注回流
 # ---------------------------------------------------------------------------
 
 
@@ -121,7 +121,7 @@ def test_export_with_class_override(tmp_path: Path) -> None:
 def test_pool_manifest_counts_and_fingerprint(tmp_path: Path) -> None:
     pool = tmp_path / "pool"
     store = FilePoolStore(pool)
-    manifest = training_pool_manifest(store)  # 目录不存在 → 0/None（不臆造）
+    manifest = training_pool_manifest(store)  # 目录不存在 → 0/None
     assert manifest["sample_count"] == 0
     assert manifest["fingerprint"] is None
 

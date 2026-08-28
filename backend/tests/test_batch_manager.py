@@ -1,4 +1,4 @@
-"""M6 单元测试：BatchManager 任务队列（§12.1，不依赖 API）。
+""" 单元测试：BatchManager 任务队列。
 
 用假 pipeline 覆盖：多 worker 并行、失败隔离、状态快照持久化与重启恢复
 （断点续跑的可查部分）、取消标记。

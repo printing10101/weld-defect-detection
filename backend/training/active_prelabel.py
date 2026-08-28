@@ -1,9 +1,9 @@
-"""主动预标注 + 不确定性采样闭环（P0-G）。
+"""主动预标注 + 不确定性采样闭环。
 
 把 ai_prelabel.py 的**硬编码字典**升级为真实推理闭环：
 1. 用已部署训练模型（YoloDetector，config 驱动）对 data/real_label 未标注图推理；
-2. 写出 YOLO 预标注到 prelabels/（绝不覆盖用户已保存的 labels/，与 promote_seeds 语义一致）；
-3. 按 M4 不确定性 + 主动学习价值聚合排序（复用 domain/active_learning.high_value_score），
+2. 写出 YOLO 预标注到 prelabels/（不覆盖用户已保存的 labels/，与 promote_seeds 一致）；
+3. 按  不确定性 + 主动学习价值聚合排序（复用 domain/active_learning.high_value_score），
    输出 data/real_label/active_queue.json —— 人工核对优先级队列（高价值/高不确定优先送标）；
 4. --export-top N：把前 N 个高价值样本的预标注导出到训练池（复用
    active_learning.export_training_labels），供下一轮训练合并。

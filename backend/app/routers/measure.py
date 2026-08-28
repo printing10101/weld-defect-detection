@@ -1,4 +1,4 @@
-"""图像质量测量 API（DB50/T 1807-2025 §6.1.6）。
+"""图像质量测量 API（DB50/T 1807-2025 ）。
 
 POST /api/v1/measure/snr          —— 归一化信噪比 SNRn（GB/T 26141.1 口径）
 POST /api/v1/measure/duplex-wire  —— 双丝像质计空间分辨率（ISO 17636-2 双丝法）

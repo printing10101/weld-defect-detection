@@ -1,4 +1,4 @@
-"""Roboflow X 光焊缝数据集接入（M4b，绕开 SWRD 115GB 死穴）。
+"""Roboflow X 光焊缝数据集接入（，绕开 SWRD 115GB 死穴）。
 
 已核实许可、可用于比赛的候选集：
 - Danila "X-ray Weld Defect" : Public Domain, 416 张, YOLOv8, 640px（推荐主训练集补充）

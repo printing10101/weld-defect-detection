@@ -1,5 +1,5 @@
 /**
- * 前端类型（§T6）：镜像后端 Pydantic 响应模型（backend/app/routers/*.py）
+ * 前端类型：镜像后端 Pydantic 响应模型（backend/app/routers/*.py）
  * 与领域枚举/结构（backend/domain/dto.py 的 BBox、Detection、DefectClass 等）。
  * 本文件是仓库唯一的前端契约真相；后端同名 response_model 新增/改名时，
  * 须同步本文件，由 backend/tests/test_frontend_contract.py 做字段对账防漂移。
@@ -63,10 +63,10 @@ export interface ReportOut {
   defect_count: number;
   /** 标准来源免责声明（工业过渡路径）：authorized_copy=false 时为强声明 */
   disclaimer: string | null;
-  /** 合规处置建议（P0-E）：accept | conditional | rework | recheck */
+  /** 合规处置建议：accept | conditional | rework | recheck */
   disposition: string | null;
   disposition_label: string | null;
-  /** readonly：useJourney 的 readonly() 深度只读化后保持可赋值 */
+  /** readonly：useJourney 的 readonly 深度只读化后保持可赋值 */
   disposition_actions: readonly string[];
   pdf_url: string;
 }
@@ -144,7 +144,7 @@ export const PIPELINE_STAGES: readonly string[] = [
 ] as const;
 
 
-/* ── 主动学习（M7 · POST /api/v1/active/…）── */
+/* ── 主动学习（ · POST /api/v1/active/…）── */
 
 /** 高价值样本候选（主动学习采样结果） */
 export interface ActiveCandidate {
@@ -194,7 +194,7 @@ export interface ActivePoolOut {
   exported_at: string | null;
 }
 
-/* ── 批量处理（§12.1 · POST /api/v1/batch、GET /batch/{id}、GET /batches、retry/cancel）── */
+/* ── 批量处理── */
 
 export type BatchTaskStatus = "pending" | "running" | "done" | "failed" | "cancelled";
 
@@ -251,7 +251,7 @@ export interface BatchRetryOut {
 }
 
 
-/* ── 设备标定（§12.4 · /api/v1/devices…）与报告数字签名校验（§7.2）── */
+/* ── 设备标定与报告数字签名校验── */
 
 export type CalibrationStatus = "ok" | "over";
 
@@ -299,7 +299,7 @@ export interface CalibrationIn {
   notes?: string | null;
 }
 
-/** POST /api/v1/report/{id}/verify → VerifyOut（§7.2 数字签名校验） */
+/** POST /api/v1/report/{id}/verify → VerifyOut */
 export interface VerifyOut {
   report_id: string;
   valid: boolean | null;
@@ -320,7 +320,7 @@ export interface ReportDetection {
   need_review: boolean;
 }
 
-/** GET /api/v1/report/{id}/detections → ReportDetectionsOut（§5.5/§5.6 主动学习回流数据源） */
+/** GET /api/v1/report/{id}/detections → ReportDetectionsOut */
 export interface ReportDetectionsOut {
   report_id: string;
   image_id: string;
@@ -330,7 +330,7 @@ export interface ReportDetectionsOut {
   defects: ReportDetection[];
 }
 
-/** 底片查看器变换状态（FilmViewer 双片对比同步用，DB50/T 1807 §6.1.5） */
+/** 底片查看器变换状态（FilmViewer 双片对比同步用，DB50/T 1807 ） */
 export interface Transform {
   scale: number;
   tx: number;

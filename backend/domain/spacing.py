@@ -1,4 +1,4 @@
-"""像素标定解析（§T8/§6 单一真源，domain 层）。
+"""像素标定解析。
 
 ``/detect`` 与 ``/report`` 两条链路此前各自解析像素标定（mm/px），语义分裂：
 ``/report`` 链路由 ``_resolve_spacing`` 返回 ``(spacing, known)``，未标定时

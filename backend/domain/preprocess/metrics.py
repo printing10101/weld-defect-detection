@@ -1,4 +1,4 @@
-"""预处理质量度量（§4.4）。纯算法，无 I/O。
+"""预处理质量度量。纯算法，无 I/O。
 
 - 有参考：PSNR / SSIM（skimage）
 - 无参考：拉普拉斯法噪声估计（σ ≈ std(Laplacian)/√6，适用于高斯噪声）
@@ -6,9 +6,9 @@
   + 复合射线底片质量指数（RQI）作为实际门禁。
 
 说明：官方 BRISQUE 的"分数"依赖训练的 SVR（libsvm）模型文件，离线部署未捆绑
-（且本沙箱无 sklearn）。因此 `brisque_features()` 提供 faithful 的 36 维无参考特征
+（且本沙箱无 sklearn）。因此 `brisque_features` 提供 faithful 的 36 维无参考特征
 向量（可作为训练/回归输入或失真描述），门禁判定改用可解释的 RQI 复合分（噪声 /
-锐度 / 对比度 / 动态范围 / 均匀性 / 伪缺陷），两者在同一 `assess_quality()` 中产出。
+锐度 / 对比度 / 动态范围 / 均匀性 / 伪缺陷），两者在同一 `assess_quality` 中产出。
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ def estimate_noise(image: np.ndarray) -> float:
 
 
 # ---------------------------------------------------------------------------
-# §4.4 BRISQUE 风格无参考特征提取
+# BRISQUE 风格无参考特征提取
 # ---------------------------------------------------------------------------
 _BRISQUE_C = 1.0 / 255.0  # MSCN 归一化常数（避免分母为零）
 
@@ -83,7 +83,7 @@ def _gaussian_kernel(size: int, sigma: float) -> np.ndarray:
 
 
 def _mscn_coefficients(gray: np.ndarray) -> np.ndarray:
-    """Mean-Subtracted Contrast-Normalized 系数（§4.4，BRISQUE 核心）。
+    """Mean-Subtracted Contrast-Normalized 系数。
 
     MSCN = (I − μ) / (σ + C)，μ/σ 由 7×7 高斯（σ=7/6）局部估计，输出近似零均值、
     单位方差，集中刻画局部对比度结构（自然影像服从特定广义高斯分布）。
@@ -180,12 +180,12 @@ def _aggd_params(x: np.ndarray) -> tuple[float, float, float, float]:
 
 
 def brisque_features(gray: np.ndarray) -> np.ndarray:
-    """BRISQUE 风格无参考特征向量（36 维，§4.4）。
+    """BRISQUE 风格无参考特征向量（36 维，）。
 
     2 个尺度（原图 + 0.5× 下采样）×（MSCN 的 GGD 2 参数 + 4 乘积的 AGGD 各 4 参数）
     = 2 × (2 + 16) = 36 维。该向量描述底片局部对比度结构失真，可作质量回归/SVR 输入。
     注：官方 BRISQUE *分数* 需训练好的 SVR 模型（libsvm），离线未捆绑；门禁判定见
-    `assess_quality()` 的 RQI 复合分。
+    `assess_quality` 的 RQI 复合分。
     """
     if gray.ndim == 3:
         gray = cv2.cvtColor(gray, cv2.COLOR_BGR2GRAY)
@@ -214,11 +214,11 @@ def brisque_features(gray: np.ndarray) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# §4.4 复合射线底片质量指数（RQI）——实际门禁判定
+# 复合射线底片质量指数（RQI）——实际门禁判定
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class QualityCfg:
-    """射线底片质量门禁配置（§4.4，§T8 三处同步）。
+    """射线底片质量门禁配置。
 
     门禁采用可解释 RQI（0–100，越高越好）= Σ wᵢ·sᵢ，sᵢ∈[0,1] 为各子指标分。
     min_score 以下判不合格；block_on_quality=True 时不合格阻断评片（默认 True，
@@ -238,7 +238,7 @@ class QualityCfg:
     block_on_quality: bool = True  # True=不合格阻断评片；False=仅告警+need_review
     noise_good: float = 4.0  # 噪声σ ≤ 此值满分
     noise_bad: float = 14.0  # 噪声σ ≥ 此值 0 分
-    sharp_good: float = 1.5  # 平均梯度幅值满分阈值（真实底片实测 ~0.7–8.7，原 18 严重偏高）
+    sharp_good: float = 1.5  # 平均梯度幅值满分阈值（按真实底片 ~0.7–8.7 标定）
     contrast_good: float = 25.0  # 信号对比度（中值滤波后 std）满分阈值
     dr_good: float = 0.6  # 动态范围利用率（(p99−p1)/255）满分阈值
     uniformity_low_freq: float = 0.012  # 低频核占比（相对短边）
@@ -250,13 +250,13 @@ class QualityCfg:
     blur_lap_bad: float = 30.0  # Laplacian 方差低于此值判失焦/模糊（真实底片实测 ≥45）
     exposure_entropy_bad: float = 0.62  # 直方图熵(归一化)低于此值判过/欠曝（真实底片实测 ≥0.73）
     stain_smooth_bad: float = (
-        0.15  # 平滑异常斑块占比高于此值判污渍（真实底片实测 ≤0.14；此阈值为保守安全网）
+        0.15  # 平滑异常斑块占比高于此值判污渍（真实底片 ≤0.14，留安全余量）
     )
 
 
 @dataclass(frozen=True)
 class QualityReport:
-    """质量度量结果（§4.4）。"""
+    """质量度量结果。"""
 
     score: float  # RQI 复合质量分（0–100，越高越好）
     passed: bool  # 是否达到 min_score
@@ -332,7 +332,7 @@ def _stain_smooth_frac(
 
 
 def assess_quality(gray: np.ndarray, cfg: QualityCfg) -> QualityReport:
-    """对底片做无参考质量评估（§4.4），返回 RQI 复合分 + 36 维 BRISQUE 特征。
+    """对底片做无参考质量评估，返回 RQI 复合分 + 36 维 BRISQUE 特征。
 
     子指标：噪声(拉普拉斯法)、锐度(平均梯度幅值)、对比度(中值滤波后 std)、
     动态范围利用率(p1–p99)、均匀性(低频漂移)、伪缺陷(尘点)。加权得 RQI。

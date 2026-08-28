@@ -1,20 +1,20 @@
-"""YoloDetector：M4b 训练模型检测器（实现 DefectDetector，ADR-002）。
+"""YoloDetector： 训练模型检测器（实现 DefectDetector，）。
 
 - load(model_uri, backend):
-    backend="onnx"  → ONNX Runtime 推理（部署默认，ADR-002）
+    backend="onnx"  → ONNX Runtime 推理（部署默认，）
     backend="torch"/"yolo" → Ultralytics YOLOv8/v11 推理（训练后验证/开发）
 - infer(image, conf, iou, class_conf=None) → list[Detection]
     image: 单通道灰度 (H,W)/(H,W,1) 或 3 通道 (H,W,3) uint8
     输出像素坐标 BBox(x, y, w, h, 左上角)，class_id=DefectClass(value)，
     score，uncertainty 由 estimate_uncertainty 综合（置信度余量+尺寸+类别安全关键度，
-    见 §5.5；非 MC Dropout，属可解释代理），shape 按长宽比（round/linear）。
+    见；非 MC Dropout，属可解释代理），shape 按长宽比（round/linear）。
     class_conf: 可选逐类置信度阈值 {class_id: threshold}，指定后该类用专属
         阈值过滤、未指定的类回落全局 conf。稀有且安全关键缺陷（裂纹/未熔合）
         设更低阈值以优先召回，气孔设更高阈值抑制海量误检（见 DetectCfg.class_conf）。
 
 人工兜底：检测器只输出 Detection；need_review 由 StandardGrader
 （Nb47013Grader）按 uncertainty 阈值（detect.review_conf）与零容忍规则综合判定
-（§6 / ADR-010）。torch/ultralytics 与 onnxruntime 均为延迟导入，未安装不阻断模块加载。
+。torch/ultralytics 与 onnxruntime 均为延迟导入，未安装不阻断模块加载。
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ _LOG = logging.getLogger("scandetection.detector")
 
 
 class YoloDetector:
-    """模型无关检测器实现（ADR-002），可热替换主干而不动编排层。"""
+    """模型无关检测器实现，可热替换主干而不动编排层。"""
 
     def __init__(self) -> None:
         self._backend: str = "onnx"
@@ -109,8 +109,8 @@ class YoloDetector:
 
     # ---- 共用：后处理 --------------------------------------------------------
     # 约定：boxes 中每个元素为 (x, y, w, h, cls, score)
-    #   x,y = 左上角像素坐标（未 letterbox 还原后的原图坐标）
-    #   w,h = 框宽/高（像素）  cls = 类别索引  score = 置信度
+    # x,y = 左上角像素坐标（未 letterbox 还原后的原图坐标）
+    # w,h = 框宽/高（像素）  cls = 类别索引  score = 置信度
     @staticmethod
     def _to_detections(
         boxes, conf: float, class_conf: dict[int, float] | None = None
@@ -144,7 +144,7 @@ class YoloDetector:
         class_conf: dict[int, float] | None = None,
         scales: tuple[float, ...] = (0.8, 1.0, 1.25),
     ) -> list[Detection]:
-        """多尺度推理 TTA（P1-A，借鉴 LF-YOLO 多尺度策略）。
+        """多尺度推理 TTA（，借鉴 LF-YOLO 多尺度策略）。
 
         在各尺度（0.8 / 1.0 / 1.25）下分别 letterbox 推理，坐标还原到原图后
         跨尺度 NMS 去重。小幅提升小目标（气孔）与细长缺陷（裂纹）召回；
@@ -249,14 +249,8 @@ class YoloDetector:
         out = np.asarray(
             sess.run(None, {self._onnx_input: blob})[0]
         )  # [1, 4+nc, 8400] 或 [1, 8400, 4+nc]
-        # 鲁棒定向：归一为 (anchors, 4+nc)。
-        # 本环境导出的 ONNX 为通道优先布局 [1, 4+nc, anchors]（如 [1,10,8400]），
-        # 此时 shape[1]==4+nc 应转置；若为 [1, anchors, 4+nc] 则无需转置。
-        # 旧逻辑 `if out.shape[1] > out.shape[2]` 在本布局下恒为 False（10>8400 不成立），
-        # 张量被误读为 [10, 8400]，分类头被错误折叠、所有检出退化为气孔 —— 已修正。
-        # 布局自适应：通道维(4+nc)远小于锚框维 → 通道优先需转置。
-        # 不能用 len(DefectClass) 判断——类别扩容（如新增内凹，7 类）后旧 6 类模型
-        # 仍需正确解析（2026-08-28 实测：7 类枚举 + 6 类模型曾致张量误读、分数爆表）。
+        # 归一为 (anchors, 4+nc)：通道维远小于锚框维，据此判断是否转置。
+        # 不按当前类别数推断——旧模型输出通道数与枚举类数可以不一致。
         if out.ndim == 3 and out.shape[1] < out.shape[2]:
             # 通道优先 (batch, 4+nc, anchors) → 转置为 (batch, anchors, 4+nc)
             out = out.transpose(0, 2, 1)
@@ -264,11 +258,10 @@ class YoloDetector:
         boxes_xywh = preds[:, :4]
         scores_all = preds[:, 4:]
         # 分类通道语义自适应：
-        #  - 若张量含负值 → 原始 logits（如坍塌/旧版导出），需 sigmoid 还原概率；
-        #  - 若全部 ∈ [0,1]（本环境 legacy 导出已融合 sigmoid 的概率）→ 直接使用，
-        #    绝不能二次 sigmoid：否则背景锚框概率(~0)会被压成 0.5，越过任意 <0.5 阈值，
-        #    导致每图 ~三千框的灾难性误检（实测如此）。
-        # 用 min<0 判定 logits：背景锚框的 logit 必为负，概率则恒 ≥0。
+        # - 含负值 → 原始 logits，需 sigmoid 还原概率；
+        # - 全部 ∈ [0,1] → 已是概率，二次 sigmoid 会把背景锚框抬到 ~0.5，
+        #   造成全图误检。
+        # 用 min<0 判定：背景锚框的 logit 必为负，概率恒 ≥0。
         if scores_all.min() < -1e-3:
             scores_all = 1.0 / (1.0 + np.exp(-np.clip(scores_all, -50.0, 50.0)))
         cls = scores_all.argmax(1)

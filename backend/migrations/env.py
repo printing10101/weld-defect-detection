@@ -1,4 +1,4 @@
-"""Alembic 环境（§13.6 / P2-5）。
+"""Alembic 环境。
 
 - target_metadata 取自 backend.infra.db.Base.metadata（模型即 schema 真源，
   支持 `alembic revision --autogenerate`）；

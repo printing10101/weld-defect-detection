@@ -1,9 +1,9 @@
-#!/usr/bin/env python3
-"""真实全集检测质量基线（§15.6 / 生产主线 M1 评估）。
+# !/usr/bin/env python3
+"""真实全集检测质量基线。
 
 在全部真实底片（data/real_label/{images,labels}）上用**部署 ONNX 路径**
 （onnxruntime CPU，与后端推理一致）跑推理，计算逐类 mAP@0.5 / 召回 / 精确，
-产出 JSON 指标 + Markdown 报告，作为"数据扩量 / M4 校准 / 罕见类召回"的事实基线。
+产出 JSON 指标 + Markdown 报告，作为"数据扩量 /  校准 / 罕见类召回"的事实基线。
 
 设计要点：
 - 输入图像走字节读取 + cv2.imdecode（规避 Windows 非 ASCII 路径静默失败）。

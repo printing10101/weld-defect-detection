@@ -1,4 +1,4 @@
-"""#4 评估回归门禁集成测试（§15.6 / §7.4，P1 强制门禁）。
+"""#4 评估回归门禁集成测试。
 
 用已提交的确定性 Golden Set + 基线 (baseline.json)，以 BlobDetector 跑完整评估
 流水线，并断言 check_regression 通过（即当前指标未退化超容差）。

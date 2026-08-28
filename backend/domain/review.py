@@ -1,11 +1,11 @@
-"""人工复核闭环核心逻辑（§12.2 / M7，纯逻辑无 I/O）。
+"""人工复核闭环核心逻辑。
 
-规格书 §12.2 要求"初评→复评→仲裁"双人评片一致性工作流：系统自动评级作为
+设计文档  要求"初评→复评→仲裁"双人评片一致性工作流：系统自动评级作为
 "评片员 A"，人工复核提交作为"评片员 B"，用 Cohen's κ 量化一致性；κ 低于阈值
 即分歧过大，升级第三名仲裁。本模块只做判定计算，不碰数据库/文件系统，便于
-单测与在 app 层装配（§19.1 分层铁律：domain 禁业务 I/O）。
+单测与在 app 层装配。
 
-不替代 §6 标准判定逻辑，仅在其外层加合规壳。
+不替代  标准判定逻辑，仅在其外层加合规壳。
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ _DEFAULT_KAPPA_THRESHOLD = 0.8  # §15.3 高度一致阈值（κ≥0.8）
 
 
 class ReviewRole(str, enum.Enum):
-    """复核角色（§12.2 状态机）。"""
+    """复核角色。"""
 
     INITIAL = "initial"  # 初评
     SECONDARY = "secondary"  # 复评
@@ -59,7 +59,7 @@ def cohen_kappa(rater_a: list[str], rater_b: list[str]) -> float:
 
 
 def classify_agreement(kappa: float, threshold: float = _DEFAULT_KAPPA_THRESHOLD) -> bool:
-    """κ 是否达到高度一致阈值（§15.3）。"""
+    """κ 是否达到高度一致阈值。"""
     return kappa >= threshold
 
 
@@ -112,7 +112,7 @@ def resolve_review(
 
     # κ 仅基于"成对缺陷"：评片员实际复核（出现在 reviewer_grades 中）的缺陷，
     # 才代表其独立判断。未复核缺陷若计为"与自动级一致"会虚增一致性、掩盖真实
-    # 分歧（§12.2 一致性量化精神）。reviewer_grades 为空 → 空列表 → cohen_kappa
+    # 分歧。reviewer_grades 为空 → 空列表 → cohen_kappa
     # 返回 1.0，即"无复核证据"时按现行约定视为一致（与既有测试/流程一致）。
     paired_a: list[str] = []
     paired_b: list[str] = []

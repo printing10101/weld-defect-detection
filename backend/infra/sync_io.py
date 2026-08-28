@@ -1,8 +1,8 @@
-"""端边云同步 IO 实现（§7.6，QueuePort/HttpPushPort 依赖倒置，Task #9）。
+"""端边云同步 IO 实现。
 
 domain/sync.py 只持有端口契约与编排；JSONL 落盘（JsonlQueue）与 HTTP 推送
 （UrllibJsonPoster）的 IO 均落在 infra，经依赖注入装配——domain 运行期
-不直接触碰文件系统/网络（§T8 验收硬化，对齐 TableSource 先例）。
+不直接触碰文件系统/网络。
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ class UrllibJsonPoster(HttpPushPort):
     """urllib JSON POST（尽力而为：失败仅告警，不阻断主流程）。
 
     传输加密由调用方负责（建议 https + 端点鉴权），本实现不内置 TLS 终止逻辑。
-    超时经配置注入（§13.6 配置中心化：sync.http_timeout）。
+    超时经配置注入。
     """
 
     def __init__(self, timeout: float = 10.0) -> None:

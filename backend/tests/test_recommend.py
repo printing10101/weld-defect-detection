@@ -1,4 +1,4 @@
-"""P0-E 合规处置建议引擎测试（domain/recommend + POST /recommend）。"""
+""" 合规处置建议引擎测试（domain/recommend + POST /recommend）。"""
 
 from __future__ import annotations
 
@@ -135,7 +135,7 @@ class TestRecommendApi:
                 json={
                     "base_metal_thickness_mm": 10.0,
                     "pixel_spacing_mm": 0.1,
-                    # GB/T3323 数值表未转录/未授权 → 判定器熔断（§T8 语义化熔断）
+                    # GB/T3323 数值表未转录/未授权 → 判定器熔断
                     "standard_id": "GB/T3323-2019",
                     "defects": [
                         {"id": "c1", "class_id": 1, "bbox": [10, 10, 20, 20], "confidence": 0.6}

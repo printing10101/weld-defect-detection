@@ -1,4 +1,4 @@
-"""领域层：缺陷检测器（§5，模型无关，ADR-002）。
+"""领域层：缺陷检测器。
 
 检测器实现满足 DefectDetector 契约（interfaces.py），经 detect/registry 装配。
 application 层禁止自行 new 检测器——统一走 ``get_detector``。

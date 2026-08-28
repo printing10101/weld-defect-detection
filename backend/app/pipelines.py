@@ -1,9 +1,9 @@
-"""用例编排（§19.2 权威位置：app/pipelines.py）。
+"""用例编排。
 
 校验 → 预处理 → 检测 → 量化 → 判定 → 落库 → 报告 的全链路编排。
-只做编排不写算法；领域接口经 Registry 装配（§T4），存储走 infra repository。
+只做编排不写算法；领域接口经 Registry 装配，存储走 infra repository。
 
-熔断语义（§T8）：标准数值未授权时 grader 抛 GradingAmbiguousError，
+熔断语义：标准数值未授权时 grader 抛 GradingAmbiguousError，
 编排捕获后落库 joint_level=None + need_review=True（不输出级别），
 报告生成"需人工复核"版本——不违反"禁止输出级别"。
 """
@@ -42,7 +42,7 @@ def _shape_of(detection, geometry, round_aspect_max: float) -> DefectShape:
 
 
 # 深孔判定阈值（启发式，待真实底片标定）：缺陷内部光学黑度超过母材黑度的比例。
-# 黑度（光学密度 D）越高=透射越多=缺陷越深（§6.2 深孔直判 IV 的物理依据）。
+# 黑度（光学密度 D）越高=透射越多=缺陷越深。
 # 设为 1.2 表示"内部黑度比母材高 20% 以上"才判深孔，避免把普通气孔一律错判 IV。
 # 8bit 底片无 density_array 时跳过（deep_hole 保持 False，由人工/其它信号兜底）。
 DEEP_HOLE_DENSITY_RATIO = 1.2
@@ -54,10 +54,10 @@ def _derive_deep_hole(
     base_density: float,
     bit_depth: int | None,
 ) -> list[Detection]:
-    """从 density_array 推导 deep_hole 标记（§6.2 / P1-4）。
+    """从 density_array 推导 deep_hole 标记。
 
     Detection 为冻结 dataclass，故返回带 deep_hole 标记的新实例列表。
-    density_array 缺失或 base_density 无效时原样返回（不臆造）。
+    density_array 缺失或 base_density 无效时原样返回。
     """
     if meta.density_array is None or base_density <= 0:
         return detections
@@ -119,7 +119,7 @@ class InspectionPipeline:
         """执行全链路并落库+生成报告，返回结果 dict。
 
         force=False（默认）时，底片不可评（黑度越界或 IQI 不达标）直接抛
-        IQIFailError（409），符合规格书"不通过则阻断评片并提示重拍"的硬前置；
+        IQIFailError（409），符合设计文档"不通过则阻断评片并提示重拍"的硬前置；
         force=True 时仍出片，但**不输出级别**（need_review=True），因为
         不合格底片不构成评定依据。
         """
@@ -132,8 +132,8 @@ class InspectionPipeline:
         # 1. 影像加载（infra）
         gray, meta = load_image(image_path)
 
-        # 2. 影像质量校验：黑度 + IQI（复用 M2 领域逻辑）
-        #    黑度须基于原始存储灰阶 + 位深，避免显示用的 min-max 拉伸破坏绝对光学密度。
+        # 2. 影像质量校验：黑度 + IQI（复用 领域逻辑）
+        # 黑度须基于原始存储灰阶 + 位深，避免显示用的 min-max 拉伸破坏绝对光学密度。
         density = float(
             estimate_density(
                 meta.density_array if meta.density_array is not None else gray,
@@ -153,9 +153,9 @@ class InspectionPipeline:
             sensitivity=tuple(reg.config.iqi.sensitivity),
         )
         iqi = verify_iqi(gray, iqi_cfg, roi=iqi_roi, iqi_type=reg.config.iqi.type)
-        # 用透照厚度 + 参考表补全 A/AB/B 等级（厚度缺失则 grade=None，不臆造）。
+        # 用透照厚度 + 参考表补全 A/AB/B 等级（厚度缺失则 grade=None）。
         iqi = enrich_grade(iqi, base_metal_thickness_mm, iqi_cfg.sensitivity)
-        # 伪缺陷筛查（§4.2：划痕/尘点/显影不均），仅严重项默认阻断。
+        # 伪缺陷筛查，仅严重项默认阻断。
         # 将 infra 配置适配为 domain 类型（与 IqiConfig 同模式，隔离 pydantic）。
         pd_cfg = reg.config.pseudo_defect
         pd_domain = PseudoDefectCfg(
@@ -174,7 +174,7 @@ class InspectionPipeline:
             block_on_dust=pd_cfg.block_on_dust,
         )
         pd = screen_pseudo_defects(gray, pd_domain)
-        # §4.4 质量度量门禁：在原始底片上评估（反映底片本身质量，与增强无关）。
+        # 质量度量门禁：在原始底片上评估（反映底片本身质量，与增强无关）。
         q_cfg = reg.config.quality
         quality = assess_quality(gray, DomainQualityCfg(**q_cfg.model_dump()))
         quality_fail_block = bool(q_cfg.block_on_quality and not quality.passed)
@@ -198,9 +198,9 @@ class InspectionPipeline:
         suffix = image_path.suffix or ".png"
         saved = self._persist_image(image_path, image_id, suffix)
 
-        # 4. 预处理 + 检测 + 量化（M4a 基线 / M4b 训练模型，同一接口）
-        #    预处理（保边去噪+增强）在原始 gray 上做，检测在增强图上跑；
-        #    IQI/黑度/伪缺陷/质量门禁已在原始 gray 上完成，不受增强影响。
+        # 4. 预处理 + 检测 + 量化（ 基线 /  训练模型，同一接口）
+        # 预处理（保边去噪+增强）在原始 gray 上做，检测在增强图上跑；
+        # IQI/黑度/伪缺陷/质量门禁已在原始 gray 上完成，不受增强影响。
         dc = reg.config.detect
         pp_cfg = reg.config.preprocess
         enhanced = gray
@@ -221,7 +221,7 @@ class InspectionPipeline:
         detections = reg.detector.infer(
             enhanced, conf=dc.infer_conf, iou=dc.infer_iou, class_conf=dc.class_conf
         )
-        # §6.2 深孔推导：缺陷内部黑度显著高于母材 → 标 deep_hole（直判 IV 的前置信号）。
+        # 深孔推导：缺陷内部黑度显著高于母材 → 标 deep_hole（直判 IV 的前置信号）。
         # 必须在判定/落库前完成，使 grader 与 defect_rows 都能消费到该标记。
         detections = _derive_deep_hole(detections, meta, density, meta.bit_depth)
         # 经量化器注册表装配（去除 app 层 new 实现）；/report 历史用包围盒近似，
@@ -233,7 +233,7 @@ class InspectionPipeline:
             (d, quantifier.quantify(d, spacing, image=enhanced, cfg=None)) for d in detections
         ]
 
-        # 5. 标准判定（M5，未授权/信息不足熔断 → 不输出级别）
+        # 5. 标准判定（，未授权/信息不足熔断 → 不输出级别）
         context = ImageMeta(
             modality=meta.modality,
             pixel_spacing_mm=spacing if spacing_known else None,
@@ -259,11 +259,11 @@ class InspectionPipeline:
         need_review = bool(need_review or quality_warn)
 
         std_id = standard_id or reg.config.standard.default_id
-        # 工业过渡路径（T1）：免责声明只依赖标准表（standard-level），与判定结果无关，
+        # 工业过渡路径：免责声明只依赖标准表（standard-level），与判定结果无关，
         # 故无论评级成功或熔断均统一生成（authorized_copy=false 时为强声明）。
         disclaimer = disclaimer_for(reg.grader.tables)  # type: ignore[attr-defined]
 
-        # 合规处置建议（P0-E）：消费评级输出，独立适配器（domain/recommend），
+        # 合规处置建议：消费评级输出，独立适配器（domain/recommend），
         # 不参与判定；熔断时降级为「需人工复核」，永不阻塞出片。
         rec = recommend(
             joint_level,
@@ -347,7 +347,7 @@ class InspectionPipeline:
         }
         reg.repository.create_inspection(image_row, defect_rows, report_row)
 
-        # 不可变审计日志（§12.5）：评片创建即记一笔，工业合规追溯。
+        # 不可变审计日志：评片创建即记一笔，工业合规追溯。
         # actor = 请求头操作员（X-Operator-Name）；未携带时回退 "system"。
         reg.repository.append_audit(
             actor=actor or "system",
@@ -365,7 +365,7 @@ class InspectionPipeline:
         )
 
         # 7. 报告 PDF（Reporter 契约；读库拿数据 → 渲染 → 回填路径）
-        #    F12：复用已加载的灰度底片 gray，避免 pdf_reporter 对整张大底片二次解码
+        # 复用已加载的灰度底片 gray，避免 pdf_reporter 对整张大底片二次解码
         pdf_path = reg.reporter.build(image_id, template, gray=gray)
         reg.repository.update_report(report_id, pdf_path=pdf_path)
 
@@ -410,13 +410,13 @@ class InspectionPipeline:
         if report_id:
             repo.update_report(report_id, pdf_path=pdf_path)
         else:
-            # 影像尚无报告行：原实现直接 uuid4() 后 update_report，报告行不存在
+            # 影像尚无报告行：原实现直接 uuid4 后 update_report，报告行不存在
             # → KeyError 或凭空返回一个查不到的 report_id（下载必 404）。这里先建行。
             report_id = uuid.uuid4().hex
             repo.create_report_row(report_id, image_id)
             repo.update_report(report_id, pdf_path=pdf_path)
         stored_defects = image.get("defects") or []
-        # 合规处置建议（P0-E）：由库里存的级别+缺陷类别重算（不重跑判定）。
+        # 合规处置建议：由库里存的级别+缺陷类别重算（不重跑判定）。
         # 重建最小 Detection 仅需 class_id（零容忍判定），bbox 用占位零框。
         rec_defects = [
             Detection(
@@ -455,7 +455,7 @@ class InspectionPipeline:
         images_dir.mkdir(parents=True, exist_ok=True)
         dest = images_dir / f"{image_id}{suffix}"
         shutil.copyfile(src, dest)
-        # §7.5 静态加密：encrypt=True 且密钥可用时，落盘影像副本加密
+        # 静态加密：encrypt=True 且密钥可用时，落盘影像副本加密
         # （AES-256-GCM，魔数 SDC1 前缀）。密钥缺失时降级明文并告警——
         # 桌面单机默认无密钥仍可运行，但日志明确提示未加密。
         if self._reg.config.security.encrypt:
@@ -470,7 +470,7 @@ class InspectionPipeline:
             dest.write_bytes(cipher.encrypt(plaintext))
         return dest
 
-    # ---- 人工复核缺陷增删改（DB50/T 1807-2025 §6.1.4）----
+    # ---- 人工复核缺陷增删改（DB50/T 1807-2025 ）----
     # 增/改/删后自动重评级并重生成报告（不重跑检测器）；每次变更由仓储层写审计哈希链。
 
     def add_defect(
@@ -602,7 +602,7 @@ class InspectionPipeline:
         note: str | None = None,
         actor: str | None = None,
     ) -> dict:
-        """人工复核闭环（§12.2）：聚合自动级别 → 计算 κ → 落库 → 重生成 PDF/A → 审计。
+        """人工复核闭环：聚合自动级别 → 计算 κ → 落库 → 重生成 PDF/A → 审计。
 
         参数：
         - defect_grades: [{defect_id, joint_level}] 复核对部分缺陷的级别覆盖；
@@ -655,7 +655,7 @@ class InspectionPipeline:
             if report_id:
                 reg.repository.update_report(report_id, pdf_path=pdf_path)
 
-        # 不可变审计日志（§12.5）：记录级别/复核标记前后值
+        # 不可变审计日志：记录级别/复核标记前后值
         # actor = 提交复核的操作员（X-Operator-Name）；缺省回退 reviewer。
         reg.repository.append_audit(
             actor=actor or reviewer,

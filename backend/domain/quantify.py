@@ -1,15 +1,15 @@
-"""缺陷量化（§5.4，M4a/M4b 实现）。
+"""缺陷量化。
 
 提供两种量化器，均实现冻结的 Quantifier 契约（measure(detection, pixel_spacing_mm) -> Geometry）：
 
-- ``BBoxQuantifier``（M4a）：检测框矩形近似，供契约测试与无图场景。
-- ``MaskQuantifier``（M4b 掩膜精修）：从增强图 ROI 内自适应阈值提取真实缺陷
+- ``BBoxQuantifier``：检测框矩形近似，供契约测试与无图场景。
+- ``MaskQuantifier``（ 掩膜精修）：从增强图 ROI 内自适应阈值提取真实缺陷
   轮廓 → 最小外接矩形（MinAreaRect）得**有向**长/短边、轮廓面积/周长，比包围盒
-  对不规则夹渣、裂纹分支、贴边缺陷更准（§5.3/§5.4；NFR §15.2 量化误差≤5%）。
+  对不规则夹渣、裂纹分支、贴边缺陷更准。
 
 为何不直接上 SAM2：SAM2 需 torch(本环境 CPU-only)+ 权重下载，未随部署包捆绑；
 轮廓法仅用 cv2/numpy、零新增权重即可达到"掩膜级量化"目标，且可被后续 SAM 类
-分割器经 DefectDetector 式接口热插替换（§19.4 扩展菜谱）。
+分割器经 DefectDetector 式接口热插替换。
 
 像素标定：物理尺寸 = 像素尺寸 × pixel_spacing_mm。
 """
@@ -27,11 +27,11 @@ from backend.domain.interfaces import Quantifier
 
 
 # ---------------------------------------------------------------------------
-# 配置（§T8：domain 默认值 + infra/config.py + default.yaml + schema.yaml 四地同步）
+# 配置
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class MaskRefineCfg:
-    """掩膜精修量化配置（M4b，§T8 四地同步）。
+    """掩膜精修量化配置（， 四地同步）。
 
     enabled=False 时 MaskQuantifier 退化为包围盒近似（与 BBoxQuantifier 等价）。
     """
@@ -58,10 +58,10 @@ def _to_uint8(image: np.ndarray) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# M4a：包围盒量化（冻结接口实现）
+# 包围盒量化（冻结接口实现）
 # ---------------------------------------------------------------------------
 class BBoxQuantifier:
-    """M4a 量化：检测框 → 几何属性（矩形近似，供全链路验证与契约测试）。"""
+    """ 量化：检测框 → 几何属性（矩形近似，供全链路验证与契约测试）。"""
 
     def measure(self, detection: Detection, pixel_spacing_mm: float) -> Geometry:
         w_px = float(detection.bbox.w)
@@ -86,7 +86,7 @@ class BBoxQuantifier:
         image: np.ndarray | None = None,
         cfg: MaskRefineCfg | None = None,
     ) -> Geometry:
-        """统一量化入口（§T8 装配）：包围盒近似，忽略 image/cfg。
+        """统一量化入口：包围盒近似，忽略 image/cfg。
 
         与 MaskQuantifier.quantify 同签名，使两链路调用点一致、可经注册表互换。
         """
@@ -94,10 +94,10 @@ class BBoxQuantifier:
 
 
 # ---------------------------------------------------------------------------
-# M4b：掩膜精修量化（图像感知）
+# 掩膜精修量化（图像感知）
 # ---------------------------------------------------------------------------
 class MaskQuantifier:
-    """M4b 掩膜精修量化：轮廓法得准确 L/W/面积/周长（§5.3/§5.4）。
+    """ 掩膜精修量化：轮廓法得准确 L/W/面积/周长。
 
     实现冻结 Quantifier 契约（``measure`` 为包围盒近似，供无图/测试场景），
     并额外提供图像感知的 ``quantify_from_image`` 与 ``refine``。
@@ -115,7 +115,7 @@ class MaskQuantifier:
         image: np.ndarray | None = None,
         cfg: MaskRefineCfg | None = None,
     ) -> Geometry:
-        """统一量化入口（§T8 装配）：有图则掩膜精修，无图回退包围盒近似。
+        """统一量化入口：有图则掩膜精修，无图回退包围盒近似。
 
         与 BBoxQuantifier.quantify 同签名，使两链路调用点一致、可经注册表互换。
         """
@@ -266,13 +266,13 @@ class MaskQuantifier:
 def refine_detections(
     image: np.ndarray, detections: list[Detection], cfg: MaskRefineCfg | None = None
 ) -> list[Detection]:
-    """批量精修检测框（M4b 入口，供 detect 路由与全链路复用）。"""
+    """批量精修检测框（ 入口，供 detect 路由与全链路复用）。"""
     mq = MaskQuantifier()
     return [mq.refine(image, d, cfg) for d in detections]
 
 
 # ---------------------------------------------------------------------------
-# 量化器注册表（§T8，对齐 detect/registry.py 与 grade/registry.py 模式）
+# 量化器注册表
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class QuantifierSpec:
@@ -306,7 +306,7 @@ def supported_quantifier_kinds() -> list[str]:
 
 
 def register_quantifier_kind(spec: QuantifierSpec) -> None:
-    """注册/覆盖量化器种类（§19.4 插件发现入口，P2）。
+    """注册/覆盖量化器种类。
 
     同 kind 已注册且实现类不同 → 抛 ModelUnavailableError（防插件静默顶替内置）；
     相同实现（幂等重发现）→ 无操作。
@@ -320,7 +320,7 @@ def register_quantifier_kind(spec: QuantifierSpec) -> None:
 
 
 def quantifier_capabilities(kind: str) -> dict:
-    """返回某量化器能力描述；未知种类抛 ModelUnavailableError（§14，复用而非新增）。"""
+    """返回某量化器能力描述；未知种类抛 ModelUnavailableError。"""
     spec = _QUANTIFIER_SPECS.get(kind)
     if spec is None:
         raise ModelUnavailableError(f"未知量化器种类: {kind!r}")
@@ -334,7 +334,7 @@ def quantifier_capabilities(kind: str) -> dict:
 def get_quantifier(kind: str = "bbox") -> Quantifier:
     """按种类取得量化器实例（依赖倒置：调用方经注册表装配，不在 app 层 new 实现）。
 
-    未知种类抛 ModelUnavailableError（§14，复用而非新增错误码）。量化参数
+    未知种类抛 ModelUnavailableError。量化参数
     （如掩膜精修 MaskRefineCfg）在调用 ``quantify(..., cfg=...)`` 时透传，
     此处仅负责构造与装配，保持构造签名一致。
     """

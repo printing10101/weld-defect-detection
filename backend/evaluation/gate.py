@@ -1,4 +1,4 @@
-"""评估回归门禁（§15.6 / §7.4，P1 落地）。
+"""评估回归门禁。
 
 提供 `run_eval_gate`：用固定 Golden Set + BlobDetector（零训练、无 ML 依赖，
 CI 可跑）跑 `run_golden_evaluation`，再与已提交的基线 (baseline.json) 做

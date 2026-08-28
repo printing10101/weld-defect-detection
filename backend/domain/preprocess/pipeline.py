@@ -1,7 +1,7 @@
-"""预处理算法（§4.3，M3 实现）。纯算法，无 I/O。
+"""预处理算法。纯算法，无 I/O。
 
 实现冻结的 Preprocessor 契约（backend/domain/interfaces.py）。
-策略与硬约束（§4.3/§11）：以"不损害缺陷边缘"为第一约束；
+策略与硬约束：以"不损害缺陷边缘"为第一约束；
 可调参数经构造器注入（来自 configs，禁硬编码）。
 - 降噪：bilateral（保边去噪）+ 轻度 median（胶片颗粒）
 - 增强：Gamma（低黑度补偿）+ CLAHE（局部灰度不均）
@@ -99,7 +99,7 @@ class OpencvPreprocessor:
         image: np.ndarray,
         roi: tuple[int, int, int, int] | None = None,
     ) -> np.ndarray:
-        """Canny 边缘：自适应阈值（梯度分位数，§4.3）+ ROI 限定。
+        """Canny 边缘：自适应阈值（梯度分位数，）+ ROI 限定。
 
         注：Otsu 在稀疏缺陷边缘场景阈值过高导致漏检，故采用
         Sobel 梯度幅值的 90 分位作为高阈值（有下限 20），低阈值取半。

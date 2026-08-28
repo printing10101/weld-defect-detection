@@ -1,4 +1,4 @@
-"""Golden Set 评估闭环编排（§7.4 / §15.6，M6→生产接线，P1 落地）。
+"""Golden Set 评估闭环编排。
 
 把已实现的评估工具（harness / drift / tracking）真正接通到生产路径：
 - 加载固定 Golden Set（images + YOLO 真值标签）→ 跑检测器 → 计算 mAP/召回/精确；
@@ -9,7 +9,7 @@
 - `run_golden_evaluation` 接受已加载的 `detector`（避免重复加载 ONNX），也可传入
   preprocess_fn 复现生产增强链路，保证 Golden Set mAP 与生产一致；
 - Golden Set 缺失 → 抛 FileNotFoundError（端点据此返回 409，提示先准备评估集）；
-- 漂移基线首跑自动建立（不报漂移），后续运行与基线比较触发告警（§7.4）；
+- 漂移基线首跑自动建立（不报漂移），后续运行与基线比较触发告警；
 - 纯 numpy + 标准库，无外部服务依赖，可离线 CI 调用。
 """
 

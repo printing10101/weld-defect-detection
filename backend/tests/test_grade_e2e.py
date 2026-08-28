@@ -1,4 +1,4 @@
-"""发运版 NB/T47013 数值表端到端自洽测试（§6 / M5 启用验证）。
+"""发运版 NB/T47013 数值表端到端自洽测试。
 
 直接加载**发运版** nb47013.yaml（非测试内联 fixture），断言其在代表性
 案例下产出符合标准预期的级别，锁定发运数据自洽；并验证：
@@ -83,7 +83,7 @@ def test_e2e_large_round_porosity_is_iv() -> None:
 
 
 def test_e2e_fuse_when_thickness_invalid() -> None:
-    """防腐护栏不变量：即便 authorized=true，缺有效母材厚度仍熔断（不臆造级别）。"""
+    """防腐护栏不变量：即便 authorized=true，缺有效母材厚度仍熔断。"""
     g = Nb47013Grader(_tables())
     with pytest.raises(GradingAmbiguousError):
         g.grade([_det(DefectClass.POROSITY, 20, 20)], _ctx(0.0))  # T=0 无效

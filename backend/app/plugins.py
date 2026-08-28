@@ -1,4 +1,4 @@
-"""插件发现与装配（§19.4 扩展菜谱 → 真插件机制，P2）。
+"""插件发现与装配。
 
 第三方/扩展包经 setuptools entry-point 声明实现，启动期发现并登记进 domain
 注册表，核心代码零改动（"接口不动、实现可插拔"）：
@@ -12,7 +12,7 @@
     [project.entry-points."scandetection.detectors"]
     rt_detr = "my_pkg.detector:SPEC"      # SPEC 为 DetectorSpec 实例
 
-``bootstrap_plugins()`` 进程级幂等（once 标志），未安装任何插件时静默无操作；
+``bootstrap_plugins`` 进程级幂等（once 标志），未安装任何插件时静默无操作；
 单个插件加载/注册失败仅告警，不阻断启动（与同步"尽力而为"同哲学）。
 """
 
@@ -29,7 +29,7 @@ from backend.domain.quantify import register_quantifier_kind
 
 _LOG = logging.getLogger("scandetection.plugins")
 
-# entry-point 组 → 注册函数（新扩展面在此登记，与 §19.4 扩展菜谱对齐）
+# entry-point 组 → 注册函数（新扩展面在此登记，与 扩展菜谱对齐）
 # 各注册函数接受各自的 Spec 类型；统一以 Any 标注以便复合为同构清单，
 # 实际调用点 _register 按每个 spec 的具体类型在运行期约束。
 _GROUPS: list[tuple[str, Callable[[Any], None]]] = [

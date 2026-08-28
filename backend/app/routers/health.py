@@ -1,7 +1,7 @@
-"""健康检查（§14 GET /api/v1/health）。
+"""健康检查。
 
-存活探针走 try_get_registry() 非阻塞获取：启动期（registry 后台装配中）即返回
-status=starting（HTTP 200），端口绑定后立即可应答；业务端点仍走 get_registry()
+存活探针走 try_get_registry 非阻塞获取：启动期（registry 后台装配中）即返回
+status=starting（HTTP 200），端口绑定后立即可应答；业务端点仍走 get_registry
 阻塞等待装配完成。status 表达 liveness，starting 表示进程存活但模型仍在加载。
 """
 

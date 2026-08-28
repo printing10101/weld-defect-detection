@@ -1,4 +1,4 @@
-/** workspace store 单元测试（T4-1 / T4-4）：操作员状态的持久化与响应式一致性。 */
+/** workspace store 单元测试（ / ）：操作员状态的持久化与响应式一致性。 */
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useWorkspaceStore } from "./workspace";

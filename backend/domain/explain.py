@@ -1,8 +1,8 @@
-"""可解释性热力图（§12.3，M6 实现）。
+"""可解释性热力图。
 
-规格书要求"类激活热力图（Grad-CAM / 注意力）叠加原图"，帮助评片员秒懂
+设计文档要求"类激活热力图（Grad-CAM / 注意力）叠加原图"，帮助评片员秒懂
 模型关注区。本环境部署推理为 ONNX 路径（无梯度回传，且 default venv 无
-torch/onnxruntime 训练栈），真 Grad-CAM 不可行——与 M4「SAM→Contour 精修」
+torch/onnxruntime 训练栈），真 Grad-CAM 不可行——与 「SAM→Contour 精修」
 同思路，这里提供**模型无关的注意力近似**：
 
 1. 在目标缺陷 bbox ROI 内计算局部显著性（Sobel 梯度幅值 + 高斯平滑）——

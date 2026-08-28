@@ -1,4 +1,4 @@
-"""M4：模型注册表与热切换 API 测试（§7.4）。
+"""：模型注册表与热切换 API 测试。
 
 - 单元：ModelRegistry 扫描权重目录、列出条目、activate 调 loader 并重载、活跃指针持久化、未知 id 抛 KeyError。
 - 集成：通过 TestClient 验证 GET /models 与 POST /models/{id}/activate（依赖覆盖指向临时权重目录）。

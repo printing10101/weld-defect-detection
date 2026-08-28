@@ -1,4 +1,4 @@
-"""M6 集成测试：report 全链路（评片→落库→PDF）与 records 检索统计。"""
+""" 集成测试：report 全链路（评片→落库→PDF）与 records 检索统计。"""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from backend.app.main import app
 def _authorized_grader(auth_table) -> Iterator[None]:
     """report 全链路需要正常评级：用 authorized 测试表替换全局 grader。
 
-    生产表 authorized=false 会熔断（§T8），故本模块注入测试表副本；
+    生产表 authorized=false 会熔断，故本模块注入测试表副本；
     注：本机 pytest 按文件名字母序执行，test_judge_api（依赖熔断）先于本模块。
 
     合成底片为低黑度噪声图，RQI/硬门禁天然不过质量门槛——本模块测的是
@@ -54,7 +54,7 @@ def _synthetic(path) -> None:
 def _post_report(client: TestClient, image_path, **form) -> dict:
     """提交评片。
 
-    合成底片黑度不达标（evaluable=False），按规格书"不通过则阻断评片"
+    合成底片黑度不达标（evaluable=False），按设计文档"不通过则阻断评片"
     默认会被 409 拦截；测试链路显式带 force=true 走"出片但不定级"分支。
     """
     form.setdefault("force", "true")
@@ -69,7 +69,7 @@ def _post_report(client: TestClient, image_path, **form) -> dict:
 
 
 def test_report_blocks_unevaluable_film(tmp_path) -> None:
-    """§规格 129 行：黑度/IQI 不通过是硬前置，必须阻断评片（409 IQI_FAIL）。"""
+    """ 129 行：黑度/IQI 不通过是硬前置，必须阻断评片（409 IQI_FAIL）。"""
     img = tmp_path / "syn_block.png"
     _synthetic(img)
     with TestClient(app) as client, open(img, "rb") as f:
@@ -103,7 +103,7 @@ def test_report_full_pipeline(tmp_path) -> None:
     assert body["need_review"] is True
     assert body["defect_count"] >= 1
     assert body["pdf_url"].startswith("/api/v1/report/")
-    # T1：报告端点必须随结果返回强免责声明（authorized_copy=false），
+    # 报告端点必须随结果返回强免责声明（authorized_copy=false），
     # 与 judge 端点同源，明确"非标准授权正本 / 不替代责任工程师法定评定"。
     assert body["disclaimer"] is not None
     assert "非标准授权正本" in body["disclaimer"]
@@ -190,7 +190,7 @@ def test_report_regenerate_by_image_id(tmp_path) -> None:
     assert body["image_id"] == first["image_id"]
     assert body["report_id"]  # 新报告（同影像重新生成）
     assert body["joint_level"] == first["joint_level"]
-    # P0-E：合规处置建议随报告输出（新评片与重新生成两条路径都应有）
+    # 合规处置建议随报告输出（新评片与重新生成两条路径都应有）
     for resp in (first, body):
         assert resp["disposition"] in {"accept", "conditional", "rework", "recheck"}
         assert isinstance(resp["disposition_label"], str) and resp["disposition_label"]

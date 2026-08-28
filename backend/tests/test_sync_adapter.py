@@ -1,4 +1,4 @@
-"""P2-6：HttpSyncAdapter 测试（§7.6 端边云同步适配器选择）。
+"""P2-6：HttpSyncAdapter 测试。
 
 - HttpSyncAdapter 必须带 endpoint 构造，否则 ValueError；
 - push 在网络不可达时本地留档、不抛（尽力而为）；
@@ -132,7 +132,7 @@ def test_jsonl_queue_io_extracted_to_infra(tmp_path) -> None:
 
 
 def test_http_timeout_and_cors_origins_centralized() -> None:
-    """§13.6 配置中心化（P2）：HTTP 同步超时与 CORS 源均为配置单一权威。"""
+    """ 配置中心化（P2）：HTTP 同步超时与 CORS 源均为配置单一权威。"""
     from backend.infra.config import load_config
 
     cfg = load_config()
@@ -147,7 +147,7 @@ def test_http_timeout_and_cors_origins_centralized() -> None:
 
 
 # ---------------------------------------------------------------------------
-# P3：v3 CloudAdapter 联邦占位（§7.6，契约完整、fail-loud）
+# P3：v3 CloudAdapter 联邦占位
 # ---------------------------------------------------------------------------
 
 

@@ -1,10 +1,10 @@
 """SWRD 自动获取 + 转换（CC BY 4.0，可训练 + 可用于比赛，须署名）。
 
 SWRD 官方（tz-ndt.com）为浏览器登录下载，无法脚本直链。本模块职责：
-1. print_download_guide()：给出人工下载步骤与署名要求（合规红线）。
+1. print_download_guide：给出人工下载步骤与署名要求（合规红线）。
 2. verify(src)：校验 data/external/swrd 是否含图像与标注。
-3. ingest()：用户浏览器下载落盘后，调用 swrd_converter.convert() 转 YOLO，
-   再 dataset_builder.build_dataset() 装配训练集；返回 data.yaml 路径。
+3. ingest：用户浏览器下载落盘后，调用 swrd_converter.convert 转 YOLO，
+   再 dataset_builder.build_dataset 装配训练集；返回 data.yaml 路径。
 4. 可选：若设置了环境变量 SWRD_MIRROR_URL 且可达，尝试自动下载（未来扩展点）。
 
 引用（比赛/论文须署名，DATA_LICENSE.md 已存 BibTeX）：

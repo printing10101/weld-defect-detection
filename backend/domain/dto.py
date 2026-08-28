@@ -1,6 +1,6 @@
-"""跨层 DTO（冻结契约，§T2 / 规格书 §13.3）。
+"""跨层 DTO（冻结契约， / 设计文档 ）。
 
-修改任何字段/枚举值须先走 ADR 流程（§19.8），并同步：
+修改任何字段/枚举值须先走 ADR 流程，并同步：
 - backend/domain/interfaces.py
 - backend/app/routers（Pydantic schema）
 - src/src/types/api.ts（前端类型）
@@ -15,14 +15,14 @@ import numpy as np
 
 
 class DefectClass(Enum):
-    """焊缝缺陷类别（§1.3，ADR-010 扩展为 6 类；DB50/T 1807 对标扩展为 7 类）。
+    """焊缝缺陷类别。
 
     0 POROSITY 气孔
     1 SLAG 夹渣/夹杂
     2 INCOMPLETE_PENETRATION 未焊透
     3 LACK_OF_FUSION 未熔合
     4 CRACK 裂纹
-    5 UNDERCUT 咬边（ADR-010 新增：竞赛评分项 + SWRD 第 6 类）
+    5 UNDERCUT 咬边（ 新增：竞赛评分项 + SWRD 第 6 类）
     6 CONCAVITY 内凹（DB50/T 1807 单面焊重点关注缺陷；追加在末尾，
       不改动 0-5 现有索引，已训练模型/历史检测结果不受影响）
     """
@@ -44,7 +44,7 @@ class DefectShape(Enum):
 
 
 class JointLevel(Enum):
-    """评级 I–IV（§5）。"""
+    """评级 I–IV。"""
 
     I = "I"
     II = "II"
@@ -53,7 +53,7 @@ class JointLevel(Enum):
 
 
 class Modality(Enum):
-    """影像模态（§4.1）。"""
+    """影像模态。"""
 
     CR = "CR"
     DR = "DR"
@@ -73,7 +73,7 @@ class BBox:
 
 @dataclass(frozen=True)
 class Detection:
-    """单个缺陷检测结果（§14 Detection schema 的领域形态）。"""
+    """单个缺陷检测结果。"""
 
     id: str
     bbox: BBox
@@ -87,7 +87,7 @@ class Detection:
 
 @dataclass(frozen=True)
 class Geometry:
-    """量化几何属性（§5.4）。"""
+    """量化几何属性。"""
 
     length_mm: float
     width_mm: float
@@ -100,7 +100,7 @@ class Geometry:
 
 @dataclass(frozen=True)
 class GradeResult:
-    """标准判定结果（§6.5）。"""
+    """标准判定结果。"""
 
     joint_level: JointLevel
     per_defect_grade: tuple[JointLevel, ...]
@@ -108,14 +108,14 @@ class GradeResult:
     need_review: bool
     standard_id: str
     standard_version: str
-    # 标准来源免责声明（工业过渡路径，T1）：authorized_copy=false 时为强声明，
+    # 标准来源免责声明（工业过渡路径，）：authorized_copy=false 时为强声明，
     # 提示"数值转录自公开解读、非授权正本、不替代责任工程师法定评定"。
     disclaimer: str | None = None
 
 
 @dataclass(frozen=True)
 class IQIResult:
-    """像质计校验结果（§4.2）。"""
+    """像质计校验结果。"""
 
     iqi_type: str
     achieved: str | None
@@ -126,7 +126,7 @@ class IQIResult:
 
 @dataclass(frozen=True)
 class ImageMeta:
-    """判定上下文（母材厚度等，§6.1）。"""
+    """判定上下文（母材厚度等，）。"""
 
     modality: Modality
     pixel_spacing_mm: float | None = None

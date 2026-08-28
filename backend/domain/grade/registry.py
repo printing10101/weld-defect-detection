@@ -1,10 +1,10 @@
-"""标准判定器注册表（§6.1 多标准适配）。
+"""标准判定器注册表。
 
 v1 实现 NB/T47013.2-2015 评级引擎；GB/T 3323 / ASME-V / ISO 17636 为已注册
 适配器（语义化熔断：标准语义下不输出级别，禁止静默错判）。
 
 ``get_grader`` 按 standard_id 路由实现类并装配数值表；未知标准抛
-GradingAmbiguousError（复用 §14 错误码，不新增契约）。
+GradingAmbiguousError（复用  错误码，不新增契约）。
 
 ``standard_capabilities`` 输出标准能力目录（GET /standards 数据源）：
 status = enabled（表存在且 authorized）/ unauthorized（表存在未授权）
@@ -34,7 +34,7 @@ class GraderSpec:
     meta: dict[str, Any]  # name/grades_defects/levels/table_required/table_filename/note
 
 
-# standard_id → 实现类（键与规格书 §6.1 / 表文件 standard_id 一致）
+# standard_id → 实现类（键与设计文档  / 表文件 standard_id 一致）
 _GRADERS: dict[str, type[StandardGrader]] = {
     "NB/T47013.2-2015": Nb47013Grader,
     "GB/T3323-2019": Gb3323Grader,
@@ -42,7 +42,7 @@ _GRADERS: dict[str, type[StandardGrader]] = {
     "ISO17636": Iso17636Grader,
 }
 
-# 标准能力目录（§6.1 多标准适配元数据，供 GET /standards 展示）。
+# 标准能力目录。
 # status 为动态值（见 standard_capabilities），此处仅给静态语义。
 _STANDARD_META: dict[str, dict[str, Any]] = {
     "NB/T47013.2-2015": {
@@ -88,7 +88,7 @@ def supported_standard_ids() -> list[str]:
 
 
 def register_standard(spec: GraderSpec) -> None:
-    """注册/覆盖标准判定器（§19.4 插件发现入口，P2）。
+    """注册/覆盖标准判定器。
 
     同 standard_id 已注册且实现类不同 → 抛 GradingAmbiguousError（防插件静默
     顶替内置）；相同实现（幂等重发现）→ 无操作。注册同时写入静态元数据
@@ -137,7 +137,7 @@ def get_grader(
     """按 standard_id 装配判定器。
 
     - NB/T47013.2-2015：必须提供已授权数值表（authorized 熔断由 Nb47013Grader 自身执行）；
-    - 语义化熔断标准：tables 可为 None（grade() 直接熔断，不读表）；
+    - 语义化熔断标准：tables 可为 None（grade 直接熔断，不读表）；
     - 未知标准：抛 GradingAmbiguousError（422，需人工复核）；
     - review_uncertainty：仅 Nb47013Grader 消费（人工兜底阈值），其余适配器忽略。
     """

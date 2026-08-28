@@ -1,8 +1,8 @@
-"""训练池存储 IO 实现（§5.6，PoolStore 依赖倒置，Task #9）。
+"""训练池存储 IO 实现。
 
 domain/active_learning.py 只持有端口契约与纯逻辑（标注格式化 / manifest 结构）；
 pool 目录的 mkdir / 写标注 / 列文件 / 指纹 / manifest 读写 IO 均落在 infra，
-经调用方装配注入——domain 运行期不直接触碰文件系统（§T8 验收硬化）。
+经调用方装配注入——domain 运行期不直接触碰文件系统。
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ class FilePoolStore(PoolStore):
         )
 
     def fingerprint(self) -> str | None:
-        """数据版本指纹（§7.4 语义）；无标注返回 None（不臆造）。"""
+        """数据版本指纹；无标注返回 None。"""
         if not self.list_labels():
             return None
         return golden_set_fingerprint(self._root)

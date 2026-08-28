@@ -1,4 +1,4 @@
-"""影像接入（§4.1）：DICOM / 通用图像 → ndarray + ImageMeta。
+"""影像接入：DICOM / 通用图像 → ndarray + ImageMeta。
 
 属于基础设施层（I/O）：只做解码与元数据抽取，不含业务判定。
 输出约定：uint8 单通道灰度（供算法层使用）；ImageMeta 携带 modality / pixel_spacing。
@@ -48,15 +48,15 @@ def _load_dicom(p: Path) -> tuple[np.ndarray, ImageMeta]:
     # MONOCHROME1：值越低代表透过越少（底片黑度越高），反转以统一"高值=亮"
     if str(getattr(ds, "PhotometricInterpretation", "MONOCHROME2")).strip() == "MONOCHROME1":
         arr = arr.max() - arr
-    # 多帧/彩色 DICOM（§4.1 "含多帧"）按 SamplesPerPixel / NumberOfFrames 判定，
+    # 多帧/彩色 DICOM按 SamplesPerPixel / NumberOfFrames 判定，
     # 不依赖最后维是否为 3/4（否则宽=3/4 的单通道多帧会被误判为彩色）。
     spp = int(getattr(ds, "SamplesPerPixel", 1) or 1)
     nframes = int(getattr(ds, "NumberOfFrames", 1) or 1)
-    # 多帧/彩色 DICOM（§4.1 "含多帧"）选单帧：返回 (2D 灰阶, 原始帧像素)
+    # 多帧/彩色 DICOM选单帧：返回 (2D 灰阶, 原始帧像素)
     frame, raw_frame = _select_dicom_frame(arr, stored, samples_per_pixel=spp, num_frames=nframes)
     gray = _to_uint8(frame)
     # 保留原始存储像素（未做 rescale/归一化）供黑度测量，
-    # 否则逐图 min-max 拉伸会抹掉黑度这一绝对量（§4.2）。
+    # 否则逐图 min-max 拉伸会抹掉黑度这一绝对量。
     bits = int(getattr(ds, "BitsStored", None) or (16 if stored.dtype == np.uint16 else 8))
     return gray, ImageMeta(
         modality=Modality.DICOM,

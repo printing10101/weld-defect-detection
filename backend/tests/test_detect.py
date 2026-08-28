@@ -1,4 +1,4 @@
-"""M4a 检测与量化测试（§5）：基线检测器 + 几何换算 + API。"""
+""" 检测与量化测试：基线检测器 + 几何换算 + API。"""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def test_quantify_pixel_spacing() -> None:
 
 
 def test_quantifier_registry_lists_and_resolves() -> None:
-    """量化器注册表（§T8）：种类清单、装配解析、未知种类复用 §14 MODEL_UNAVAILABLE。"""
+    """量化器注册表：种类清单、装配解析、未知种类复用  MODEL_UNAVAILABLE。"""
     assert set(supported_quantifier_kinds()) == {"bbox", "mask"}
     assert isinstance(get_quantifier("bbox"), BBoxQuantifier)
     assert isinstance(get_quantifier("mask"), MaskQuantifier)
@@ -70,7 +70,7 @@ def test_quantifier_registry_lists_and_resolves() -> None:
 
 
 def test_quantifier_unified_quantify_call() -> None:
-    """统一量化入口：两量化器同签名 quantify(...)，调用点一致、可互换（§T8 装配）。"""
+    """统一量化入口：两量化器同签名 quantify(...)，调用点一致、可互换。"""
     det = Detection(
         id="d1",
         bbox=BBox(10, 20, 100, 50),
@@ -122,7 +122,7 @@ def test_detect_api_uncalibrated_no_pseudo_mm() -> None:
     """未提供像素标定（无请求参数、合成 PNG 无 DICOM 元数据）→ 不输出伪物理尺寸。
 
     与 /report 链路（grader 熔断）保持单一语义：calibrated=False 且物理字段为 None，
-    aspect_ratio 等无量纲量仍有效（§T8/§6）。
+    aspect_ratio 等无量纲量仍有效。
     """
     img = _synthetic_defect_image()
     ok, buf = cv2.imencode(".png", img)
@@ -149,7 +149,7 @@ def test_detect_api_uncalibrated_no_pseudo_mm() -> None:
 
 
 # ---------------------------------------------------------------------------
-# M4：不确定性估计（§5.5，模型无关代理）
+# 不确定性估计
 # ---------------------------------------------------------------------------
 from backend.domain.detect.uncertainty import estimate_uncertainty
 from backend.domain.detect.yolo_detector import YoloDetector

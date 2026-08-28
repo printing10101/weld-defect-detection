@@ -1,12 +1,12 @@
-"""人工复核 / 仲裁闭环（§12.2 / M7）。
+"""人工复核 / 仲裁闭环。
 
 POST /api/v1/review：提交一次复核（初评/复评/仲裁），后端计算与自动评级的
 Cohen's κ 一致性；κ≥阈值则达成共识并落地最终级别（清空 need_review、重生成
 PDF/A），否则升级仲裁。详见 domain/review.resolve_review 与 app/pipelines.apply_review。
 
-缺陷增删改（DB50/T 1807-2025 §6.1.4）：POST /api/v1/review/{image_id}/defects、
+缺陷增删改（DB50/T 1807-2025 ）：POST /api/v1/review/{image_id}/defects、
 PATCH/DELETE /api/v1/review/defects/{defect_id}——全程审计留痕，变更后自动重评级
-并重生成报告（比标准严：operator/reason 必填）。
+并重生成报告（操作员与理由必填，审计留痕）。
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ def review(
     reg: Annotated[Registry, Depends(get_registry)],
     operator: Annotated[str, Depends(get_operator_name)],
 ) -> ReviewOut:
-    # 复核人默认取请求头操作员（闭合 T1/T2 操作者身份占位）；显式提供时以显式值为准。
+    # 复核人默认取请求头操作员（闭合 / 操作者身份占位）；显式提供时以显式值为准。
     reviewer = body.reviewer or operator
     pipeline = InspectionPipeline(reg)
     try:
@@ -89,7 +89,7 @@ def review(
 
 
 # ---------------------------------------------------------------------------
-# 缺陷增删改（DB50/T 1807-2025 §6.1.4 复核功能：缺陷增删、类型、位置）
+# 缺陷增删改（DB50/T 1807-2025  复核功能：缺陷增删、类型、位置）
 # ---------------------------------------------------------------------------
 
 

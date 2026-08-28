@@ -1,10 +1,10 @@
-"""PDF 报告生成（reportlab，§7.2）。
+"""PDF 报告生成（reportlab，）。
 
-规格书首选 weasyprint（HTML→PDF/A），但其在 Windows 缺 GTK/Pango 系统库
+设计文档首选 weasyprint（HTML→PDF/A），但其在 Windows 缺 GTK/Pango 系统库
 （本机实测 import 失败）；v1 改用 reportlab（纯 Python、全离线）。
 中文使用系统黑体（simhei.ttf 已确认存在）。
-M7 起报告经 pdfa.postprocess_to_pdfa 转写为 PDF/A-1b（字体已全量嵌入 + XMP
-标识 + sRGB OutputIntent + 文档 ID），满足 §7.2 长期归档合规。
+ 起报告经 pdfa.postprocess_to_pdfa 转写为 PDF/A-1b（字体已全量嵌入 + XMP
+标识 + sRGB OutputIntent + 文档 ID），满足  长期归档合规。
 
 实现冻结契约 Reporter.build(image_id, template) -> pdf_path（interfaces.py）。
 """
@@ -52,7 +52,7 @@ from backend.infra.repository import InspectionRepository
 
 
 def _font_candidates() -> list[Path]:
-    """跨平台中文字体候选（§部署硬化 #6，去 Windows 硬编码）。
+    """跨平台中文字体候选。
 
     搜索顺序：
       1) SCAN_FONT_DIR 环境变量（部署时指向合规中文字体目录）；
@@ -149,20 +149,20 @@ class PdfReporter:
     def build(self, image_id: str, template: str = "standard", gray=None) -> str:
         """生成 PDF/A-1b 报告，返回绝对路径。image_id 不存在抛 ValueError。
 
-        §7.2 数字签名：按报告关键字段计算内容指纹（SHA-256），写入 PDF 页脚
+         数字签名：按报告关键字段计算内容指纹（SHA-256），写入 PDF 页脚
         并持久化到 reports.report_hash / signed_at，供 verify 端点防篡改校验。
 
         gray：可选，pipeline 已加载的灰度底片（numpy）。传入则复用，避免对整张
-        大底片二次解码（§优化 F12）；缺省时自行从 image["path"] 解码。
+        大底片二次解码；缺省时自行从 image["path"] 解码。
         """
-        # 报告模板数据化（§7.2 P2）：模板名 → YAML 数据文件；未知/损坏回退 standard。
+        # 报告模板数据化：模板名 → YAML 数据文件；未知/损坏回退 standard。
         tpl = load_report_template(template)
         image = self._repo.get_image(image_id)
         if image is None:
             raise ValueError(f"image not found: {image_id}")
         defects = image.get("defects") or []
         report = image.get("report")
-        # 工业过渡路径（T1）：按报告所用标准表自行生成免责声明（与判定器同源），
+        # 工业过渡路径：按报告所用标准表自行生成免责声明（与判定器同源），
         # 表缺失/解析失败时回退默认强声明，不阻断出片。
         disclaimer = _report_disclaimer(image.get("standard_id") or "")
         fingerprint = report_fingerprint(image, defects, report)
@@ -170,13 +170,13 @@ class PdfReporter:
             image, defects, report, disclaimer=disclaimer or None, fingerprint=fingerprint
         )
 
-        # 原图解码：pipeline 已传入灰度图则复用，否则自行解码（F12 避免重复解码）
+        # 原图解码：pipeline 已传入灰度图则复用，否则自行解码（ 避免重复解码）
         if gray is None:
             gray = _read_gray(image["path"])
         orig_bytes = _encode_png(gray)
         graph_bytes = _annotate_png(gray, defects)
         pdf_path = self._out / f"{image_id}.pdf"
-        # 先渲染 reportlab PDF 到中间文件，再转写为 PDF/A-1b（§7.2 归档合规）
+        # 先渲染 reportlab PDF 到中间文件，再转写为 PDF/A-1b
         rl_path = pdf_path.with_suffix(".rl.pdf")
         _render(rl_path, content, graph_bytes, orig_bytes, self._font, tpl)
         try:
@@ -187,7 +187,7 @@ class PdfReporter:
                 rl_path.unlink(missing_ok=True)
             except OSError:
                 pass
-        # 指纹写库（§7.2）：报告行存在则回填，缺行/写入失败不阻断出片。
+        # 指纹写库：报告行存在则回填，缺行/写入失败不阻断出片。
         report_id = (report or {}).get("report_id")
         if report_id:
             try:
@@ -203,7 +203,7 @@ class PdfReporter:
 
 
 def report_fingerprint(image: dict, defects: list[dict], report: dict | None) -> str:
-    """报告内容指纹：关键字段 canonical JSON → SHA-256 hex（§7.2 数字签名）。
+    """报告内容指纹：关键字段 canonical JSON → SHA-256 hex。
 
     覆盖影像标识/工件/厚度/标定、级别/需复核、缺陷明细（类别/几何/当量/级别）、
     判定依据条款与签发人；字段按 key 排序、紧凑序列化，保证同内容稳定可复现。
@@ -244,7 +244,7 @@ def report_fingerprint(image: dict, defects: list[dict], report: dict | None) ->
 
 
 def _report_disclaimer(standard_id: str) -> str:
-    """按报告所用标准表生成免责声明（工业过渡路径，T1）。
+    """按报告所用标准表生成免责声明（工业过渡路径，）。
 
     与后端判定器共用 disclaimer_for，保证 API / PDF / 报告一致。
     """
@@ -275,7 +275,7 @@ def _register_font() -> str:
 def _read_gray(image_path: str) -> np.ndarray | None:
     """以 unicode 安全方式读取灰度图（cv2.imread 在中文路径上会失败）。
 
-    §7.5 静态加密兼容：影像副本可能为 AES-256-GCM 密文（魔数 b"SDC1"），
+     静态加密兼容：影像副本可能为 AES-256-GCM 密文（魔数 b"SDC1"），
     检测到则用 SCAN_CRYPTO_KEY 解密后再解码；明文旧数据直接解码。
     密钥缺失/解密失败时返回 None（报告图谱降级为空，不抛 500）。
     """
@@ -383,11 +383,11 @@ def _defect_label(idx: int, d: dict) -> str:
 
 # ---------------------------------------------------------------------------
 # 正式检测报告版式（对齐特检院无损检测报告格式）：
-#   第1页 封面（报告编号 / 大标题 / 工件字段 / 防伪指纹框）
-#   第2页 注意事项（含单位信息与 AI 辅助声明）
-#   第3页起 正文（页眉机构名 + 质量文件/报告编号 + 六列信息表 +
-#          评定表 + 检测结论框 + 检测/审核/审批签字栏 + 页脚页码）
-#   末页 附图（缺陷位置示意图 + 送检原始影像 + 判定依据 + 指纹）
+# 第1页 封面（报告编号 / 大标题 / 工件字段 / 防伪指纹框）
+# 第2页 注意事项（含单位信息与 AI 辅助声明）
+# 第3页起 正文（页眉机构名 + 质量文件/报告编号 + 六列信息表 +
+# 评定表 + 检测结论框 + 检测/审核/审批签字栏 + 页脚页码）
+# 末页 附图（缺陷位置示意图 + 送检原始影像 + 判定依据 + 指纹）
 # 页码『第x页 共y页』仅计正文与附图页，封面/注意事项不编号（与参考一致）。
 # ---------------------------------------------------------------------------
 
@@ -408,7 +408,7 @@ _NOTES = (
 
 
 class _ReportCanvas(pdfcanvas.Canvas):
-    """两遍渲染页眉/页脚：总页数在 save() 时才可知，故先快照各页再统一补画。
+    """两遍渲染页眉/页脚：总页数在 save 时才可知，故先快照各页再统一补画。
 
     正文页页眉绘制机构名（模板 cover_title），页脚绘制『第x页 共y页』；
     封面与注意事项页不绘制（与参考报告一致）。

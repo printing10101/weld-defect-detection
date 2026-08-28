@@ -1,4 +1,4 @@
-"""影像接入测试（§4.1）：通用图像 + 最小 DICOM。"""
+"""影像接入测试：通用图像 + 最小 DICOM。"""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def _write_min_dicom(path, shape=(16, 16), spacing=(0.1, 0.1)) -> None:
 
 
 def _write_multiframe_dicom(path, frames, shape=(16, 16), spacing=(0.1, 0.1)) -> None:
-    """写多帧单通道 DICOM（§4.1 "含多帧"）。frames: list[np.ndarray] 同 shape。"""
+    """写多帧单通道 DICOM。frames: list[np.ndarray] 同 shape。"""
     file_meta = FileMetaDataset()
     file_meta.MediaStorageSOPClassUID = UID("1.2.840.10008.5.1.4.1.1.7")
     file_meta.MediaStorageSOPInstanceUID = generate_uid()
@@ -90,7 +90,7 @@ def test_missing_file_raises(tmp_path) -> None:
 
 
 def test_multiframe_dicom_selects_best_frame(tmp_path) -> None:
-    """多帧 DICOM（§4.1）应降为单帧 2D 返回，且选中对比最强（标准差最大）帧。"""
+    """多帧 DICOM应降为单帧 2D 返回，且选中对比最强（标准差最大）帧。"""
     flat = np.full((16, 16), 100, np.uint16)  # 低对比
     noisy = (np.random.default_rng(1).normal(100, 40, (16, 16))).astype(np.uint16)  # 高对比
     p = tmp_path / "mf.dcm"

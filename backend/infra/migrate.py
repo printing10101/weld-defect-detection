@@ -1,4 +1,4 @@
-"""启动时 schema 迁移（§13.6 / P2-5）。
+"""启动时 schema 迁移。
 
 用 Alembic 管理 schema 版本，替代"仅靠 create_all 裸建表"：
 - 全新 DB（无 images 表）→ `alembic upgrade head` 建表；

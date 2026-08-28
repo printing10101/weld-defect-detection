@@ -1,8 +1,8 @@
-"""训练/测试集互斥校验（DB50/T 1807-2025 §8.3.1）。
+"""训练/测试集互斥校验（DB50/T 1807-2025 ）。
 
 标准要求：测试数据集中不应包含训练数据集中的数据。
 
-比标准严：
+本实现口径（较标准收紧）：
 - 字节级 md5 完全相同 → 判重叠（直接违规）；
 - 感知哈希（dHash 64bit，汉明距离≤阈值默认 4）相似 → 判"疑似重复"，
   默认同样判失败（可配置放行，但必须留清单供审计）；
@@ -86,7 +86,7 @@ def find_overlaps(
     *,
     phash_hamming: int = 4,
 ) -> OverlapReport:
-    """校验两个图像目录的互斥性（§8.3.1）。"""
+    """校验两个图像目录的互斥性。"""
     train_dir, test_dir = Path(train_dir), Path(test_dir)
     train_files = _image_files(train_dir)
     test_files = _image_files(test_dir)
@@ -150,7 +150,7 @@ MIN_SPLIT_FOR_ENFORCE = 10
 
 
 def enforce_split_disjoint(*dirs: Path) -> list[OverlapReport]:
-    """build_dataset 划分后的互斥门禁（§8.3.1）：两两 split 逐一校验。
+    """build_dataset 划分后的互斥门禁：两两 split 逐一校验。
 
     - 双侧 ≥ MIN_SPLIT_FOR_ENFORCE 张：重叠（字节或感知）→ RuntimeError 阻断；
     - 小样本：仅打印告警（真实治理以 CLI 全量校验为准）。

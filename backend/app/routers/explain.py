@@ -1,4 +1,4 @@
-"""可解释性热力图（§12.3，M6 真实实现）。
+"""可解释性热力图。
 
 对指定 defect_id 生成注意力热力图叠加原图（模型无关近似，见
 domain/explain.py 的替代声明），供人工复核视图秒懂模型关注区。
@@ -37,7 +37,7 @@ async def explain(
     """对指定缺陷生成注意力热力图叠加原图。
 
     defect_id 缺省时对**全部检出缺陷**分别叠加（取最高置信缺陷的叠加结果）。
-    热力图基于 ROI 局部显著性（§12.3 模型无关近似，非真 Grad-CAM——见
+    热力图基于 ROI 局部显著性（ 模型无关近似，非真 Grad-CAM——见
     domain/explain.py 文档的替代声明）。
     """
     async with staged_upload(image, reg.config) as tmp_path:

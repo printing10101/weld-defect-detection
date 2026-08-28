@@ -1,4 +1,4 @@
-"""P1 落地：MLOps 闭环接线测试（§7.4 / §15.6）。
+"""P1 落地：MLOps 闭环接线测试。
 
 - run_golden_evaluation：合成 Golden Set + 假检测器 → 写报告/漂移基线/模型卡/实验；
 - POST /api/v1/models/{id}/evaluate：Golden Set 缺失→409，未知模型→404；

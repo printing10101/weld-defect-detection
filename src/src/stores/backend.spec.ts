@@ -1,4 +1,4 @@
-/** backend store 单元测试（T4-2 / T4-4）：离线/在线全局信号与冷启动轮询。 */
+/** backend store 单元测试（ / ）：离线/在线全局信号与冷启动轮询。 */
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BACKEND_DOWN_EVENT, BACKEND_UP_EVENT } from "../services/api";

@@ -1,4 +1,4 @@
-"""P1-C 缺陷感知采样测试（dataset_builder.oversample_rare + build_dataset 集成）。"""
+""" 缺陷感知采样测试（dataset_builder.oversample_rare + build_dataset 集成）。"""
 
 from __future__ import annotations
 

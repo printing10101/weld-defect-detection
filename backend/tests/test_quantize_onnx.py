@@ -1,4 +1,4 @@
-"""P1-D ONNX INT8 量化验证测试（backend/training/quantize_onnx）。
+""" ONNX INT8 量化验证测试（backend/training/quantize_onnx）。
 
 onnx 包不在 backend/.venv（ML 训练 venv 才有）→ 量化路径测试 importorskip；
 纯 numpy/cv2 的后处理/匹配逻辑在任意 venv 均可测。

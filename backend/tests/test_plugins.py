@@ -1,4 +1,4 @@
-"""P2 真插件机制测试（§19.4 扩展菜谱 → entry-point 发现）。
+"""P2 真插件机制测试。
 
 覆盖：
 - 三个注册表（检测器/标准/量化器）的公开注册 API（register_*）：登记、装配、冲突拒绝；
@@ -193,7 +193,7 @@ def test_register_quantifier_kind_and_resolve() -> None:
 
 
 class _FakeEP:
-    """伪 entry point：仅需 name/load() 供加载器消费。"""
+    """伪 entry point：仅需 name/load 供加载器消费。"""
 
     def __init__(self, name: str, obj) -> None:
         self.name = name

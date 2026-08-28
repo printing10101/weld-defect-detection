@@ -1,4 +1,4 @@
-"""黑度估计与门限测试（§4.2）。"""
+"""黑度估计与门限测试。"""
 
 from __future__ import annotations
 

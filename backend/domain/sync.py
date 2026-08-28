@@ -1,13 +1,13 @@
-"""端边云同步 v1 适配器（§7.6，M6 实现）。
+"""端边云同步 v1 适配器。
 
-规格书：v1 = LocalAdapter（空操作/本地）；v3 = CloudAdapter（联邦平均）。
-v1 语义——数据**不出本机**（§7.5 本地优先）：
+设计文档：v1 = LocalAdapter（空操作/本地）；v3 = CloudAdapter（联邦平均）。
+v1 语义——数据**不出本机**：
 - push：把待同步记录追加到本地待同步队列（经 QueuePort 注入，JSONL 落盘在 infra），
   不发起任何网络调用；
 - pull：本地无远端，恒返回空列表；
 - federate：无远端可联邦，空操作（v3 才实现联邦平均）。
 
-IO 依赖倒置（§T8，Task #9）：JSONL 落盘走 QueuePort、HTTP 推送走 HttpPushPort，
+IO 依赖倒置：JSONL 落盘走 QueuePort、HTTP 推送走 HttpPushPort，
 均由 infra 实现并经构造注入；domain 不直接触碰文件系统/网络。调用方（dependencies）
 装配 infra 实现即切换持久化/传输方案，不影响本适配器契约与上层调用。
 """
@@ -20,7 +20,7 @@ from backend.domain.interfaces import HttpPushPort, QueuePort
 
 
 class LocalAdapter:
-    """本地同步适配器（§7.6 v1：空操作/本地，数据不出本机）。"""
+    """本地同步适配器。"""
 
     name = "local"
 
@@ -48,7 +48,7 @@ class LocalAdapter:
 
 
 class CloudAdapter:
-    """云侧联邦适配器（§7.6 v3 占位契约，P3）。
+    """云侧联邦适配器。
 
     占位语义：接口契约完整（push / pull / federate），但 v3 联邦平均算法
     **未实现**——三个方法均显式抛 ``NotImplementedError``，绝不静默假装已
@@ -59,7 +59,7 @@ class CloudAdapter:
     - ``federate(weights)``：联邦平均（FedAvg）——聚合参与方模型权重，
       ``weights`` 为各端权重/增量（结构待 v3 定义），按轮次聚合后回传或落库；
     - ``push(record)``：把待同步记录推送到云侧（加密传输 + 鉴权由实现保证）；
-    - ``pull()``：拉取云侧联邦结果/模型更新（取代 v1 恒空列表）。
+    - ``pull``：拉取云侧联邦结果/模型更新（取代 v1 恒空列表）。
     配置 ``sync.kind=cloud`` 接入；未实现前启用会得到显式 NotImplementedError，
     而非静默无效果。
     """
@@ -91,7 +91,7 @@ class CloudAdapter:
 
 
 class HttpSyncAdapter:
-    """HTTP 同步适配器（§7.6 v3 前哨：推送到可配置端点，数据不出本机由调用方保证）。
+    """HTTP 同步适配器。
 
     与 LocalAdapter 同契约：
     - push：本地留档（经 QueuePort）+ POST 到 http_endpoint（经 HttpPushPort，

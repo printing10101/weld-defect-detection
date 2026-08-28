@@ -1,4 +1,4 @@
-"""ONNX INT8 量化可行性验证（P1-D，借鉴 micronet PTQ 思路）。
+"""ONNX INT8 量化可行性验证（，借鉴 micronet PTQ 思路）。
 
 自包含脚本（不 import backend 包，避免 ML venv 缺 Web 依赖）：
 1. 对 models/weights/best.onnx 做 PTQ 静态 INT8 量化（用真实底片做校准集；
@@ -6,7 +6,7 @@
 2. 用真实底片子集对比 FP32 vs INT8 的检出（数量 / 匹配框置信度漂移 / 框重合度），
    输出可行性报告（JSON + Markdown）。
 
-⚠️ 关键约束（本机已验证）：legacy ONNX 导出输出已融合 sigmoid 的概率通道
+ 关键约束（本机已验证）：legacy ONNX 导出输出已融合 sigmoid 的概率通道
 （非 logits），量化后须复测 score 分布与逐类阈值，防漏检。
 
 用法（ML venv）：

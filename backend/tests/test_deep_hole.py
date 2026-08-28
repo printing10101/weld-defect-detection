@@ -1,4 +1,4 @@
-"""P1-4：deep_hole 启发式推导（§6.2 深孔直判 IV 前置信号）。
+"""P1-4：deep_hole 启发式推导。
 
 基于 density_array：缺陷内部光学黑度显著高于母材（> DEEP_HOLE_DENSITY_RATIO 倍）
 → 标 deep_hole=True。Detection 为冻结 dataclass，须返回新实例。
@@ -18,7 +18,7 @@ def _meta_with(arr, bit_depth=16) -> ImageMeta:
 
 
 # 母材(值=40000@16bit)的真实光学黑度约 0.21；缺陷内部(值=2000)约 1.52。
-# 用真实值而非臆造的 2.5，才能验证 interior > base*1.2 的判定（§6.2）。
+# 用真实值而非臆造的 2.5，才能验证 interior > base*1.2 的判定。
 _BASE_DENSITY = estimate_density(np.full((4, 4), 40000, dtype=np.uint16), 16)
 
 
@@ -49,7 +49,7 @@ def test_deep_hole_false_when_interior_similar_to_base() -> None:
 
 
 def test_deep_hole_false_when_no_density_array() -> None:
-    # 8bit 底片无 density_array → 不臆造
+    # 8bit 底片无 density_array
     out = _derive_deep_hole([_det()], _meta_with(None), base_density=2.5, bit_depth=8)
     assert out[0].deep_hole is False
 

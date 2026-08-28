@@ -1,4 +1,4 @@
-"""线型 IQI 识别测试（§4.2，M2 基线）。"""
+"""线型 IQI 识别测试。"""
 
 from __future__ import annotations
 
@@ -108,7 +108,7 @@ def test_verify_iqi_default_uses_cfg_type() -> None:
 
 
 # --------------------------------------------------------------------------
-# M2 增强：IQI 自动定位（§4.2 模板匹配/小目标检测）+ A/AB/B 等级映射
+# 增强：IQI 自动定位+ A/AB/B 等级映射
 # --------------------------------------------------------------------------
 
 
@@ -183,7 +183,7 @@ def test_map_sensitivity_grade_tiers() -> None:
     assert map_sensitivity_grade(4, 100.0, table) == "B"
     # achieved=3 @100mm → 连 B 都不及 → None
     assert map_sensitivity_grade(3, 100.0, table) is None
-    # 缺失厚度或丝号 → 不臆造
+    # 缺失厚度或丝号返回空
     assert map_sensitivity_grade(19, None, table) is None
     assert map_sensitivity_grade(None, 1.0, table) is None
 

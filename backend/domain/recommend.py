@@ -1,4 +1,4 @@
-"""合规处置建议引擎（独立适配器，P0-E）。
+"""合规处置建议引擎（独立适配器，）。
 
 双轨纪律：本模块**独立于 domain/grade 主干**，只消费评级输出（级别 + 缺陷类别），
 输出「验收 / 有条件 / 返修 / 判废 / 复核」处置建议，**不参与任何评级计算**、
@@ -11,10 +11,10 @@
 - 系统判定 need_review（高不确定性 / 尺寸临界 / 复核兜底）→ 暂缓处置，人工复核后定；
 - 级别 III → 有条件验收（按设计 / 合同文件评估）；
 - 级别 I / II → 验收合格；
-- 级别不可得（方法标准 / 未授权熔断 / 未知）→ 复核（人工判定），不臆造结论。
+- 级别不可得（方法标准 / 未授权熔断 / 未知）→ 复核（人工判定）。
 
 容错承诺：本引擎**永不抛错**——任何输入（含熔断场景）都退化为「需人工复核」，
-并附免责声明，绝不输出误导性的合格/不合格结论。
+并附免责声明，不输出误导性的合格/不合格结论。
 """
 
 from __future__ import annotations
@@ -105,7 +105,7 @@ def recommend(
     if any(d.class_id in _ZERO_TOLERANCE for d in defects):
         return _rework(standard_id, zero_tolerance=True, disclaimer=dl)
 
-    # 2) 深孔（黑度>母材，§6.2 直判 IV）：不合格
+    # 2) 深孔（黑度>母材， 直判 IV）：不合格
     if any(d.deep_hole for d in defects):
         return _rework(standard_id, zero_tolerance=False, disclaimer=dl)
 
@@ -174,7 +174,7 @@ def recommend(
             disclaimer=dl,
         )
 
-    # 7) 未知级别字符串：不臆造结论，交人工
+    # 7) 未知级别字符串：交人工
     return Recommendation(
         disposition=DISPOSITION_RECHECK,
         disposition_label=_LABELS[DISPOSITION_RECHECK],

@@ -1,11 +1,11 @@
-"""steel-tube 钢管焊缝缺陷数据集接入（M4b，来源 huangyebiaoke/steel-pipe-weld-defect-detection）。
+"""steel-tube 钢管焊缝缺陷数据集接入（，来源 huangyebiaoke/steel-pipe-weld-defect-detection）。
 
 GitHub Releases 773MB zip，已解压到 data/external/steel_tube/extracted/steel-tube-dataset-all/。
 YOLO 格式：yolo/images/{train2021,val2021} + yolo/labels/{train2021,val2021}，8 类：
   0 air-hole 气孔     1 bite-edge 咬边     2 broken-arc 断弧     3 crack 裂缝
   4 hollow-bead 夹珠  5 overlap 焊瘤       6 slag-inclusion 夹渣  7 unfused 未融合
 
-映射到 ScanDetection 6 类（DefectClass，ADR-010）：
+映射到 ScanDetection 6 类（DefectClass，）：
   0 -> POROSITY, 1 -> UNDERCUT, 3 -> CRACK, 6 -> SLAG, 7 -> LACK_OF_FUSION
   2/4/5 无对应类 -> 跳过（断弧/夹珠/焊瘤，避免错误标注污染训练）
 一张图若全部行都被跳过（只有不可映射缺陷）则整图跳过；

@@ -1,4 +1,4 @@
-"""安全文件访问（§13.9 / §T4）：临时目录 + 防路径穿越。"""
+"""安全文件访问：临时目录 + 防路径穿越。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def secure_temp_dir(base: Path | None = None) -> Iterator[Path]:
 def safe_resolve(base: Path, name: str) -> Path:
     """将 name 解析到 base 之下，越界即抛错（防路径穿越）。
 
-    空名 / '.' / '..' 直接拒绝，避免调用方 open() 到目录或越界。
+    空名 / '.' / '..' 直接拒绝，避免调用方 open 到目录或越界。
     """
     if not name or name in (".", ".."):
         raise ValueError("empty or invalid name")

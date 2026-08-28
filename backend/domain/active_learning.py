@@ -1,16 +1,16 @@
-"""主动学习闭环（§5.5/§5.6，M7 实现）。
+"""主动学习闭环。
 
-规格书要求"检测→人工→回流→再训练"的持续学习闭环（数据 centric）：
-1. **采样**：从检测结果中挑高价值样本优先人工标注（§5.6 主动学习）——
+设计文档要求"检测→人工→回流→再训练"的持续学习闭环（数据 centric）：
+1. **采样**：从检测结果中挑高价值样本优先人工标注——
    uncertainty 高（近边界/低置信）、稀有或安全关键类优先；
 2. **回流**：人工确认后的缺陷导出为 YOLO 训练标注（normalized txt），
-   写入训练池目录，并更新数据版本 manifest（复用 §7.4 指纹语义）；
+   写入训练池目录，并更新数据版本 manifest（复用  指纹语义）；
 3. **再训练**：训练池 + 既有标注合并后触发重训（training 脚本/外部执行，
-   本模块只负责数据层产出，不执行训练——分层铁律 §19.1）。
+   本模块只负责数据层产出，不执行训练——分层铁律 ）。
 
 伪标签说明：本模块输出的 YOLO 标注即"人工复核结果写入训练池"的标准形态；
 半监督伪标签（模型自预测低置信兜底）由调用方按 confidence 阈值决定是否
-采纳，本模块不臆造标注类别。
+采纳，本模块不代标类别。
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def high_value_score(detection: Detection, *, safety_base: float = 0.5) -> float
     """单条检测的主动学习采样价值（0~1）。
 
     三因子取 max（任一强烈信号即高价值）：
-    - 不确定性 u：直接采用（M4 估计器语义，接近 1=极不可信 → 必须人工确认）；
+    - 不确定性 u：直接采用（ 估计器语义，接近 1=极不可信 → 必须人工确认）；
     - 近边界信号：score 接近有效阈值（0.05~0.15 区间的低置信候选）；
     - 安全关键/稀有类：置 safety_base 基线，确保重大缺陷即便高置信也采样。
     """
@@ -149,10 +149,10 @@ def export_training_labels(
 
 
 def training_pool_manifest(store: PoolStore) -> dict[str, Any]:
-    """训练池数据版本 manifest（§7.4 指纹语义 + §5.6 划分记录）。
+    """训练池数据版本 manifest。
 
     返回 {sample_count, fingerprint, files, exported_at}；无标注时
-    sample_count=0 / fingerprint=None（不臆造）。
+    sample_count=0 / fingerprint=None。
     """
     files = store.list_labels()
     return {

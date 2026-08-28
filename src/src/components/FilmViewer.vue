@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 底片查看器（DB50/T 1807-2025 §6.1.5 图像操作功能清单）。
+ * 底片查看器（DB50/T 1807-2025  图像操作功能清单）。
  *
  * 功能：放大/缩小/适应屏幕/1:1/还原、平移、旋转、水平/垂直镜像、
  * 正反片转换（反相）、亮度、对比度、窗位窗宽（灰度映射）、锐化、浮雕。
@@ -234,7 +234,7 @@ function render(): void {
   ctx.restore();
 }
 
-// ---- 视图操作（§6.1.5） ----
+// ---- 视图操作 ----
 function fit(): void {
   const el = canvas.value;
   if (!el || !img.value) return;

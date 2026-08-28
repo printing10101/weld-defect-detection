@@ -1,4 +1,4 @@
-"""训练前数据互斥校验 CLI（DB50/T 1807-2025 §8.3.1）。
+"""训练前数据互斥校验 CLI（DB50/T 1807-2025 ）。
 
 用法：
   python -m backend.training.check_dataset_disjoint \

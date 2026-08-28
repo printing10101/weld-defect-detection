@@ -1,4 +1,4 @@
-"""黑度估计与门限（§4.2）。纯算法，无 I/O。
+"""黑度估计与门限。纯算法，无 I/O。
 
 数字化影像中黑度 D 与灰阶 G 的关系（透射式近似）：
     D = log10( 2^bits / (G + 1) )
@@ -32,5 +32,5 @@ def estimate_density(gray: np.ndarray, bit_depth: int | None = None) -> float:
 
 
 def check_density(density: float, low: float = 2.0, high: float = 4.5) -> bool:
-    """AB 级黑度范围判定（门限可配置，§T8 禁硬编码）。"""
+    """AB 级黑度范围判定（门限可配置， 禁硬编码）。"""
     return low <= density <= high

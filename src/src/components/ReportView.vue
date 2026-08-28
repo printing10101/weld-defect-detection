@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 报告解读视图（DESIGN.md：结论先行 + 影像对比 + 操作建议）。
+ * 报告解读视图（设计稿：结论先行 + 影像对比 + 操作建议）。
  * 数据诚实性：全部内容来自 ReportOut 真实字段 + 用户上传文件真实 objectURL：
  * - 级别/待复核/可评片/缺陷数：ReportOut；
  * - 送检原图：用户上传文件的真实 objectURL（无标注）；
@@ -48,7 +48,7 @@ function openPdf(): void {
   window.open(props.result.pdf_url, "_blank", "noopener");
 }
 
-/* ── 主动学习闭环回流（§5.5/§5.6）：取明细 → 人工复核/改判 → 回流训练池 ── */
+/* ── 主动学习闭环回流：取明细 → 人工复核/改判 → 回流训练池 ── */
 const exportOpen = ref(false);
 const loadingDets = ref(false);
 const detsErr = ref<string | null>(null);
@@ -118,7 +118,7 @@ function closeExport(): void {
   exportOpen.value = false;
 }
 
-/* ── 报告数字签名校验（§7.2）：比对内容指纹与签发记录，防篡改 ── */
+/* ── 报告数字签名校验：比对内容指纹与签发记录，防篡改 ── */
 const verifying = ref(false);
 const verifyResult = ref<VerifyOut | null>(null);
 const verifyError = ref<string | null>(null);

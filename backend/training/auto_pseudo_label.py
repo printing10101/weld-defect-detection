@@ -6,10 +6,10 @@
 1. 对 data/real_label 未标注图用部署模型重新推理，拿到逐框 score/uncertainty；
 2. 采纳规则（安全关键系统，宁保守勿引入噪声）：
    - 框置信 score ≥ score_thr（默认 0.6，高置信）；
-   - 且 uncertainty < unc_thr（默认 0.5，非临界——临界缺陷必须人工，绝不自动采纳）；
+   - 且 uncertainty < unc_thr（默认 0.5；临界缺陷必须人工）；
    - 图内至少 1 个采纳框才晋升该图，只写采纳框；
 3. 输出到 data/training/raw/pseudo/{images,labels}（**train-only 源**，不污染
-   val/test 评估）；绝不覆盖用户真实标注（labels/ 已有文件跳过）。
+   val/test 评估）；不覆盖用户真实标注（labels/ 已有文件跳过）。
 
 用法：
   python -m backend.training.auto_pseudo_label --real data/real_label \
@@ -64,13 +64,13 @@ def promote_high_conf(
     lbl_real = real_root / "labels"
 
     stats = {"promoted_images": 0, "promoted_boxes": 0, "skipped_existing": 0, "filtered_images": 0}
-    # 遍历全部图（含已标注），显式跳过已有真实标注——绝不覆盖
+    # 遍历全部图（含已标注），显式跳过已有真实标注
     for img_p in sorted((real_root / "images").iterdir()):
         if img_p.suffix.lower() not in _EXTS:
             continue
         if (lbl_real / f"{img_p.stem}.txt").exists():
             stats["skipped_existing"] += 1
-            continue  # 已有真实标注，绝不覆盖
+            continue  # 已有真实标注
         gray = _read_gray(img_p)
         if gray is None:
             continue

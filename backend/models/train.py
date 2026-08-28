@@ -1,4 +1,4 @@
-"""训练入口（§17，M4 里程碑实现 / M4b）。
+"""训练入口。
 
 用法：
   python -m backend.models.train --epochs 80 --imgsz 640 --model yolov8m.pt
@@ -8,7 +8,7 @@
 1. 数据集就绪：data/training/data.yaml 由 dataset_builder 生成；若缺失则尝试从
    data/external/swrd（download_swrd --ingest）与 data/training/raw/user 重建。
 2. Ultralytics YOLO 训练：预训练主干（yolov8m.pt）+ 强增强 + 冻结/微调策略
-   （详见 DATA_LICENSE.md 与 ADR-002/010）。
+   （详见 DATA_LICENSE.md 与 /010）。
 3. 导出 best.pt → models/weights/best.onnx，供 ONNX Runtime 部署推理。
 
 合规：训练数据须为 CC BY 4.0（SWRD）等可训练+比赛的数据集；用户 165 张 定检

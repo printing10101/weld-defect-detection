@@ -1,6 +1,6 @@
 """P2-7：上传大小上限强制（413）。
 
-detect / report 经由 staged_upload 已有 413/415；batch 先前直接 f.file.read() 无上限，
+detect / report 经由 staged_upload 已有 413/415；batch 先前直接 f.file.read 无上限，
 本次补齐分块读 + 413。这里用极小的 max_bytes 复现超限路径（避免造 200MiB 文件）。
 """
 

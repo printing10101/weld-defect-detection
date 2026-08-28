@@ -1,8 +1,8 @@
-"""FastAPI 应用入口（§T5）。
+"""FastAPI 应用入口。
 
-- 挂载 /api/v1，端点清单见 §14；
+- 挂载 /api/v1，端点清单见；
 - CORS 仅允许本机来源（127.0.0.1）；
-- 全局异常处理器：AppError -> 统一错误包（§13.4），M2 起挂载。
+- 全局异常处理器：AppError -> 统一错误包， 起挂载。
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ def _envelope(code: str, message: str, detail=None) -> dict:
 async def lifespan(app: FastAPI):
     # 先统一日志；重装配（模型加载/DB 迁移，实测 ~2.5s，冷启动更久）移入后台线程，
     # 使 uvicorn 立即绑定端口——前端 /health 探测马上通过（status=starting），
-    # 业务端点首个请求会经 get_registry() 阻塞等待装配完成（语义与原先一致）。
+    # 业务端点首个请求会经 get_registry 阻塞等待装配完成（语义与原先一致）。
     _configure_logging()
 
     def _init_registry() -> None:
@@ -74,7 +74,7 @@ async def lifespan(app: FastAPI):
 
     threading.Thread(target=_init_registry, name="registry-init", daemon=True).start()
     yield
-    # F11：应用退出时优雅关停批量线程池（等运行中任务结束），避免 worker 被硬杀
+    # 应用退出时优雅关停批量线程池（等运行中任务结束），避免 worker 被硬杀
     try:
         from backend.app.dependencies import try_get_registry
 
@@ -86,7 +86,7 @@ async def lifespan(app: FastAPI):
 
 
 def _start_annotator_if_enabled() -> None:
-    """标注器随主应用同进程启动（§12.2 主动学习闭环，P2-8）。
+    """标注器随主应用同进程启动。
 
     仅当 config.annotator.enabled=True；守护线程，主进程退出即终止。
     """
@@ -118,7 +118,7 @@ _LOG = logging.getLogger("scandetection")
 
 
 def _configure_logging() -> None:
-    """统一日志（关键路径可追溯，§13.5）。
+    """统一日志（关键路径可追溯，）。
 
     由配置驱动（observability.log_format）：text=人类可读（本地开发默认），
     json=结构化单行日志（接入采集/ELK 的可观测基础）。固定 INFO 级别。
@@ -134,14 +134,14 @@ def _configure_logging() -> None:
 
 
 def create_app() -> FastAPI:
-    """构造 FastAPI 应用（§T5）。
+    """构造 FastAPI 应用。
 
-    抽为工厂函数：测试可经 create_app() 获得全新实例以验证真实鉴权链路
+    抽为工厂函数：测试可经 create_app 获得全新实例以验证真实鉴权链路
     （不继承 conftest 注入的 admin 覆盖）；模块级 `app` 供现有测试/生产使用。
     """
     app = FastAPI(title="ScanDetection", version="0.1.0", lifespan=lifespan)
 
-    # CORS 允许源由配置驱动（§13.6 配置中心化，P2）：默认覆盖 Tauri webview
+    # CORS 允许源由配置驱动：默认覆盖 Tauri webview
     # （tauri://localhost）+ 本地开发源（127.0.0.1 / :5173）。桌面应用仅监听
     # 本机，风险可控。不再使用 "*"，否则任意外部网站均可跨源读取本机 API
     # （含审计链 / 报告）；部署新增前端源改 configs/default.yaml 即可，不改代码。
@@ -153,7 +153,7 @@ def create_app() -> FastAPI:
         allow_headers=["Content-Type", "X-Operator-Name"],
     )
 
-    # §7.5 / §13.9：安全响应头 + 基础限流（P2-9）。中间件按添加顺序执行，
+    # /：安全响应头 + 基础限流（P2-9）。中间件按添加顺序执行，
     # CORS 在最内层（先于安全头/限流处理），保证 OPTIONS 预检同样获得安全头。
     from backend.app.security import RateLimitMiddleware, SecurityHeadersMiddleware
 
@@ -197,7 +197,7 @@ app = create_app()
 
 
 # ---------------------------------------------------------------------------
-# 统一错误包（§13.4）：领域异常 → 对应 HTTP 状态；校验错误 → 422；其余 → 500（不透传细节）。
+# 统一错误包：领域异常 → 对应 HTTP 状态；校验错误 → 422；其余 → 500（不透传细节）。
 # ---------------------------------------------------------------------------
 @app.exception_handler(AppError)
 async def _app_error_handler(_: Request, exc: AppError) -> JSONResponse:

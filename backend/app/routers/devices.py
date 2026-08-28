@@ -1,4 +1,4 @@
-"""设备标定档案（§12.4，POST/GET /api/v1/devices、POST /devices/{id}/calibrations）。
+"""设备标定档案。
 
 设备向导数据源：注册设备 → 录入标定（实测像素标定 vs 标定件参考值）→
 系统计算相对偏差并判定一致性（≤5% → ok，超差 → over）。

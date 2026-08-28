@@ -1,7 +1,7 @@
-"""DI / registry 单例（§T4）。
+"""DI / registry 单例。
 
 共享状态（模型、队列）唯一入口；线程安全。
-禁止在 router 内直接 new 模型或绕过 registry（§19.3）。
+禁止在 router 内直接 new 模型或绕过 registry。
 """
 
 from __future__ import annotations
@@ -73,12 +73,12 @@ class Registry:
     """应用共享状态容器（单例）。"""
 
     def __init__(self) -> None:
-        # §19.4 插件发现（P2）：先于检测器/判定器装配，使插件注册的种类立即可用；
+        # 插件发现（P2）：先于检测器/判定器装配，使插件注册的种类立即可用；
         # 幂等，未安装插件时静默无操作。
         bootstrap_plugins()
         self._lock = threading.Lock()
         self.config: AppConfig = load_config()
-        # §T8 依赖倒置：将 infra.FileTableSource 注册为默认标准表数据源，
+        # 依赖倒置：将 infra.FileTableSource 注册为默认标准表数据源，
         # 使 domain 在运行期完全不接触文件系统（测试/独立场景回退域内置引导默认）。
         set_default_table_source(FileTableSource())
         # 部署硬化（#6）：启动即创建运行时目录，保证干净环境（首次安装/容器）可立即运行。
@@ -92,7 +92,7 @@ class Registry:
             self.config.model.weights_dir, self.config.model.registry_state_file
         )
         self.detector: DefectDetector = self._build_detector()
-        # 启动期同步：活跃指针对齐当前实际加载的权重 uri（§7.4，M4）。
+        # 启动期同步：活跃指针对齐当前实际加载的权重 uri。
         self.model_registry.mark_active_by_uri(_resolve_model_uri(self.config.model.default_uri))
         self.grader: StandardGrader = self._build_grader()
         self.preprocessor = self._build_preprocessor()
@@ -107,19 +107,19 @@ class Registry:
         self.batch_manager = self._build_batch_manager()
         self.syncer = self._build_syncer()
         self.eval_dir = _resolve_path(str(Path(self.config.paths.data_dir) / "eval"))
-        # §12.4 设备标定档案（跨设备一致性 ≤5%）
+        # 设备标定档案（跨设备一致性 ≤5%）
         from backend.infra.device_store import DeviceStore
 
         self.device_store = DeviceStore(_resolve_path(self.config.paths.db_path))
 
     def eval_report(self, model_id: str) -> dict | None:
-        """读取某模型的评估报告（§7.4 模型卡 metric_map 数据源；无则 None）。"""
+        """读取某模型的评估报告。"""
         from backend.evaluation.harness import load_eval_report
 
         return load_eval_report(model_id, self.eval_dir)
 
     def _build_batch_manager(self) -> BatchManager:
-        """按配置装配批量任务队列（§12.1，M6）。
+        """按配置装配批量任务队列。
 
         pipeline_factory 返回新 InspectionPipeline（每个 worker 独立实例，
         避免跨线程共享 pipeline 内部状态）；状态快照落 data/batch/。
@@ -136,10 +136,10 @@ class Registry:
         return bm
 
     def _build_syncer(self):
-        """装配端边云同步适配器（§7.6）：按 SyncCfg.kind 选择 local / http。
+        """装配端边云同步适配器：按 SyncCfg.kind 选择 local / http。
 
         - local：数据不出本机，待同步队列落 data/sync/pending.jsonl（可观测）；
-        - http ：本地留档 + POST 到 http_endpoint（尽力而为，失败仅告警）。
+        - http：本地留档 + POST 到 http_endpoint（尽力而为，失败仅告警）。
 
         默认 local（数据不出本机）；仅当显式配置 sync.kind=http 才发起网络调用。
         IO 依赖倒置（Task #9）：JSONL 落盘（JsonlQueue）与 HTTP 传输（UrllibJsonPoster）
@@ -152,7 +152,7 @@ class Registry:
         queue = JsonlQueue(queue_path)
         if self.config.sync.kind == "cloud":
             # v3 联邦占位（P3）：契约完整但未实现，push/pull/federate 显式
-            # NotImplementedError（fail-loud，绝不静默假装已同步/已联邦）。
+            # NotImplementedError（未实现即抛错）。
             try:
                 return CloudAdapter(
                     endpoint=self.config.sync.http_endpoint or "",
@@ -173,7 +173,7 @@ class Registry:
         return LocalAdapter(queue)
 
     def _build_detector(self) -> DefectDetector:
-        """按 config.detect.kind 经注册表装配检测器（模型无关，ADR-002）。
+        """按 config.detect.kind 经注册表装配检测器（模型无关，）。
 
         决策（选哪种）仍由本方法负责，构造（如何建）收敛到 get_detector，
         兑现"换检测器不改主干"。训练模型加载失败时按 allow_baseline_fallback 回退基线。
@@ -212,7 +212,7 @@ class Registry:
         )
 
     def _build_preprocessor(self) -> OpencvPreprocessor:
-        """按配置装配预处理实例（§4.3，与 detector/grader 同模式经 Registry 单例）。"""
+        """按配置装配预处理实例。"""
         pc = self.config.preprocess
         return OpencvPreprocessor(
             bilateral_d=pc.bilateral_d,
@@ -237,17 +237,17 @@ class Registry:
         return get_grader(sc.default_id, tables, review_uncertainty=self.config.detect.review_conf)
 
     def grader_for(self, standard_id: str) -> StandardGrader:
-        """按 standard_id 路由判定器（§6.1 多标准适配）。
+        """按 standard_id 路由判定器。
 
         默认标准返回已装配实例（含已授权数值表）；其余标准经 registry 装配
-        （骨架适配器 grade() 熔断 422；未知标准抛 GradingAmbiguousError）。
+        （骨架适配器 grade 熔断 422；未知标准抛 GradingAmbiguousError）。
         """
         if standard_id == self.config.standard.default_id:
             return self.grader
         return get_grader(standard_id)
 
     def activate_model(self, model_id: str, actor: str | None = None) -> ModelEntry:
-        """运行时热切换检测器权重（§7.4，M4）。
+        """运行时热切换检测器权重。
 
         在 registry 锁内执行切换（串行化并发切换请求）；失败时抛出（调用方转 HTTP 错误），
         当前检测器保持不变（fail-safe）。成功持久化活跃指针。
@@ -257,7 +257,7 @@ class Registry:
                 model_id,
                 loader=lambda uri: self.detector.load(uri, self.config.model.backend),
             )
-        # 不可变审计日志（§12.5）：模型热切换记入，工业合规追溯。
+        # 不可变审计日志：模型热切换记入，工业合规追溯。
         # actor = 请求头操作员（X-Operator-Name）；缺省回退 "system"。
         self.repository.append_audit(
             actor=actor or "system",
@@ -268,7 +268,7 @@ class Registry:
             after={"model_id": model_id},
             note=f"activated {model_id}",
         )
-        # 激活后自动跑 Golden Set 评估（§7.4 MLOps 闭环）：使 metric_map 有值，
+        # 激活后自动跑 Golden Set 评估：使 metric_map 有值，
         # 形成"激活→评估→模型卡"的可观测闭环。后台线程执行，不阻塞激活响应；
         # 失败（如 Golden Set 缺失）仅记录告警，不改变已成功的激活。
         if self.config.eval.auto_on_activate:
@@ -311,7 +311,7 @@ class Registry:
 
     @property
     def health(self) -> dict:
-        """存活/版本/模型状态（§14）。
+        """存活/版本/模型状态。
 
         status 表达"存活"（liveness），服务能应答即为 ok；模型降级另用
         degraded/detector_degraded 显式暴露，避免把可用服务误判为不可用，
@@ -362,7 +362,7 @@ def try_get_registry() -> Registry | None:
     """非阻塞获取 registry：未就绪（初始化中/未开始）返回 None。
 
     供 /health 等存活探针使用——启动期即能应答（HTTP 200 + status=starting），
-    无需等待模型加载完成；业务端点仍走 get_registry() 阻塞等待。
+    无需等待模型加载完成；业务端点仍走 get_registry 阻塞等待。
     """
     if _registry is not None:
         return _registry

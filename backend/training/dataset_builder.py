@@ -1,4 +1,4 @@
-"""M4b 训练数据集装配（合并多源 → YOLO 分层划分 → data.yaml）。
+""" 训练数据集装配（合并多源 → YOLO 分层划分 → data.yaml）。
 
 数据源（落盘于 data/training/raw/）：
 - swrd/      : SWRD 转换结果（swrd_converter，CC BY 4.0，3675 张；本机 115GB 装不下时改用 roboflow）
@@ -10,7 +10,7 @@
 （nc=6，names 与 DefectClass 严格一致）。
 
 划分：按"图像所含类别集合"分层抽样，保证每类在 train/val/test 均有代表；
-固定 seed 可复现（§15.6 Golden Set 隔离）。
+固定 seed 可复现。
 """
 
 from __future__ import annotations
@@ -201,13 +201,13 @@ def build_dataset(
     """合并多源 → 分层划分 → 写出 data.yaml。返回 data.yaml 路径。
 
     rare_oversample>0：对 train split 中**含罕见类**的图像过采样 factor 份
-    （缺陷感知采样，P1-C），缓解长尾；val/test 不采样，评估指标不被污染。
+    （缺陷感知采样，），缓解长尾；val/test 不采样，评估指标不被污染。
 
     train_only_sources：仅进 train 的源（如伪标签 pseudo/，模型自预测有噪声，
     只用于扩充训练分布，**不得进入 val/test**，否则评估指标被乐观污染）。
 
     source_limits：按源限流（{源名: 上限}）。外部合成源（如 steel 2699 张）若
-    无差别全量灌入会淹没真实域 → 真实域漂移（2026-08-15 auto_v1 教训）。
+    无差别全量灌入会淹没真实域 → 真实域漂移（ auto_v1 教训）。
     **限流为类别均衡抽样**（auto_v2 教训：随机抽样会把本就稀少的罕见类进一步
     抽掉）：含罕见类（rare_classes，默认 DEFAULT_RARE_CLASSES）的图**优先入选**，
     占限流配额的 60%（按类别轮询保证每罕见类都有代表），剩余配额随机补气孔等常见类。
@@ -277,7 +277,7 @@ def build_dataset(
         splits["train"].extend(train_only_pairs)
         print(f"[dataset] train-only 源并入 train: {len(train_only_pairs)} 张")
 
-    # 缺陷感知采样（P1-C）：仅对 train 过采样罕见类，val/test 保持原始分布
+    # 缺陷感知采样：仅对 train 过采样罕见类，val/test 保持原始分布
     if rare_oversample > 0:
         before = len(splits["train"])
         splits["train"] = oversample_rare(
@@ -302,8 +302,8 @@ def build_dataset(
             if lbl is not None and lbl.exists():
                 shutil.copy(lbl, d_lbl / (Path(name).stem + ".txt"))
 
-    # 测试集/训练集互斥校验（DB50/T 1807-2025 §8.3.1）：字节 md5 + 感知哈希
-    # 双重判定，重叠即抛异常阻断（比标准严：疑似感知重复也默认拦截）。
+    # 测试集/训练集互斥校验（DB50/T 1807-2025 ）：字节 md5 + 感知哈希
+    # 双重判定，重叠即抛异常阻断（疑似感知重复默认拦截）。
     from backend.domain.labeling.dataset_guard import enforce_split_disjoint
 
     enforce_split_disjoint(

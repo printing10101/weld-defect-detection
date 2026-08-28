@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 上传面板（DESIGN.md：DropZone + 参数行内帮助 + 即时校验 + 预览）。
+ * 上传面板（设计稿：DropZone + 参数行内帮助 + 即时校验 + 预览）。
  * 数据诚实性：仅处理用户真实选择的文件；预览为该文件的真实 objectURL；
  * 校验消息针对真实文件（扩展名/大小）。不包含任何预设样例。
  */
@@ -88,7 +88,7 @@ const fileMeta = computed(() => {
   return `${file.value.name} · ${kb} KB`;
 });
 
-// F21：objectURL 必须在释放/卸载时回收，否则浏览器内存泄漏。
+//：objectURL 必须在释放/卸载时回收，否则浏览器内存泄漏。
 function revokePreview(): void {
   if (previewUrl.value) {
     URL.revokeObjectURL(previewUrl.value);

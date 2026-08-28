@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
-"""生成确定性合成 Golden Set（§15.6 评估回归门禁用）。
+# !/usr/bin/env python3
+"""生成确定性合成 Golden Set。
 
 输出目录：data/eval/golden/{images,labels}
 - images/*.png：512x512 灰度合成射线底片风（暗缺陷团块）

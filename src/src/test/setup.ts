@@ -1,5 +1,5 @@
 /**
- * Vitest 全局装夹（T4-4）：
+ * Vitest 全局装夹：
  * - afterEach 卸载挂载组件，避免跨用例泄漏；
  * - jsdom 未实现 URL.createObjectURL/revokeObjectURL，打桩以支持 useJourney 的预览流；
  * - localStorage 垫片：兜底 jsdom 文件型 localStorage（依赖本机路径，CI/离线不可靠）。

@@ -1,4 +1,4 @@
-"""编排层（backend/app/pipelines.py）测试（F31）。
+"""编排层（backend/app/pipelines.py）测试。
 
 不依赖 ML 权重：复用 conftest 注入的 baseline(blob) 检测器 + 临时库，
 覆盖：
@@ -73,7 +73,7 @@ def test_run_inspection_force_persists_and_reports(tmp_path: Path) -> None:
     # 2. 落库：可按 image_id 取回
     stored = reg.repository.get_image(out["image_id"])
     assert stored is not None, "评片结果应已落库"
-    # 3. 不可评底片（未授权标准）→ 产出 None 级别 + 需人工复核（不臆造级别）
+    # 3. 不可评底片（未授权标准）→ 产出 None 级别 + 需人工复核
     assert out["joint_level"] is None
     assert out["need_review"] is True
     # 4. 审计：应有一笔 inspect 记录

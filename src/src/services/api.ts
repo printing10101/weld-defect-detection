@@ -1,6 +1,6 @@
 /**
- * 唯一 API 客户端（§T6）。
- * 所有请求必须经此文件；字段与后端 openapi.json 对齐（§14）。
+ * 唯一 API 客户端。
+ * 所有请求必须经此文件；字段与后端 openapi.json 对齐。
  * 响应数据一律来自真实后端，前端不做任何构造/模拟。
  */
 import type {
@@ -30,7 +30,7 @@ import { getOperatorName } from "./operator";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "/api/v1";
 
-/** 后端统一错误包（§13.4）：{error:{code,message,detail}} 或 HTTPException 的 {detail:{code,message}}。 */
+/** 后端统一错误包：{error:{code,message,detail}} 或 HTTPException 的 {detail:{code,message}}。 */
 export class ApiRequestError extends Error {
   readonly status: number;
   readonly code: string;
@@ -45,14 +45,14 @@ export class ApiRequestError extends Error {
   }
 }
 
-/** 后端离线信号：request() 遇连接不可达/超时派发，供 App 显示全局离线横幅（§优化 F18）。 */
+/** 后端离线信号：request 遇连接不可达/超时派发，供 App 显示全局离线横幅。 */
 export const BACKEND_DOWN_EVENT = "backend:down";
 /** 后端恢复信号：任意成功响应派发，供 App 清除离线横幅。 */
 export const BACKEND_UP_EVENT = "backend:up";
 
-/** 单次请求超时（ms）：本地推理通常数秒，批量/复杂报告留 30s 余量（§D1）。 */
+/** 单次请求超时（ms）：本地推理通常数秒，批量/复杂报告留 30s 余量。 */
 const REQUEST_TIMEOUT_MS = 30_000;
-/** 上传/批量/报告生成：大底片或百张批量易超 30s，单独放宽超时（§优化 F19）。 */
+/** 上传/批量/报告生成：大底片或百张批量易超 30s，单独放宽超时。 */
 const UPLOAD_TIMEOUT_MS = 120_000;
 /** 仅对「后端不可达（连接被拒）」做指数退避重试；超时与 HTTP 错误不重试（避免重复提交）。 */
 const MAX_NETWORK_RETRIES = 2;
@@ -142,7 +142,7 @@ export function getHealth(): Promise<HealthResponse> {
 }
 
 /** 新评片全链路：上传影像 + 表单参数 → 真实报告结果（同步流水线，等待期间为处理中）。
- *  大底片处理可能超过 30s，使用上传专用超时（§优化 F19）。 */
+ *  大底片处理可能超过 30s，使用上传专用超时。 */
 export function createReport(form: FormData): Promise<ReportOut> {
   return request<ReportOut>("/report", { method: "POST", body: form }, UPLOAD_TIMEOUT_MS);
 }
@@ -172,7 +172,7 @@ export function submitReview(body: ReviewIn): Promise<ReviewOut> {
   });
 }
 
-/** 主动学习：从一次评片检出中采样高价值样本（优先人工标注，§5.6）。 */
+/** 主动学习：从一次评片检出中采样高价值样本（优先人工标注，）。 */
 export function activeSample(body: ActiveSampleIn): Promise<ActiveSampleOut> {
   return request<ActiveSampleOut>("/active/sample", {
     method: "POST",
@@ -181,7 +181,7 @@ export function activeSample(body: ActiveSampleIn): Promise<ActiveSampleOut> {
   });
 }
 
-/** 主动学习：人工确认缺陷回流训练池（YOLO 标注 + 版本指纹，§5.5）。 */
+/** 主动学习：人工确认缺陷回流训练池（YOLO 标注 + 版本指纹，）。 */
 export function activeExport(body: ActiveExportIn): Promise<ActiveExportOut> {
   return request<ActiveExportOut>("/active/export", {
     method: "POST",
@@ -195,10 +195,10 @@ export function activePool(): Promise<ActivePoolOut> {
   return request<ActivePoolOut>("/active/pool");
 }
 
-/* ── 批量处理（§12.1）：多图/文件夹导入 → 异步队列 → 进度 → 取消/重试 ── */
+/* ── 批量处理：多图/文件夹导入 → 异步队列 → 进度 → 取消/重试 ── */
 
 /** 提交批量评片：FormData 含 images[]（多文件）+ 公共参数 → batch_id（异步执行）。
- *  百张大底片批量易超 30s，使用上传专用超时（§优化 F19）。 */
+ *  百张大底片批量易超 30s，使用上传专用超时。 */
 export function submitBatch(form: FormData): Promise<BatchSubmitOut> {
   return request<BatchSubmitOut>("/batch", { method: "POST", body: form }, UPLOAD_TIMEOUT_MS);
 }
@@ -223,7 +223,7 @@ export function retryBatch(batchId: string): Promise<BatchRetryOut> {
   return request<BatchRetryOut>(`/batch/${batchId}/retry`, { method: "POST" });
 }
 
-/* ── 设备标定（§12.4）与报告数字签名校验（§7.2） ── */
+/* ── 设备标定与报告数字签名校验 ── */
 
 /** 设备列表（含最近标定摘要与一致性状态）。 */
 export function listDevices(): Promise<DeviceOut[]> {

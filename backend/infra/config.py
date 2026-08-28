@@ -1,4 +1,4 @@
-"""配置加载（§13.6 / §T8）。
+"""配置加载。
 
 - 所有可调参数入 configs/*.yaml，环境变量以 SCAN_ 前缀覆盖；
 - 禁止硬编码端口/路径/密钥；
@@ -26,7 +26,7 @@ _LOG = logging.getLogger("scandetection.config")
 class ServerCfg(BaseModel):
     host: str = "127.0.0.1"
     port: int = 18773
-    # CORS 允许源（§13.6 配置中心化，P2）：Tauri webview + 本地开发源。
+    # CORS 允许源：Tauri webview + 本地开发源。
     # 部署新增前端源（如公司内网门户）改配置即可，不改代码；禁 "*"，
     # 否则任意外部网站均可跨源读取本机 API（含审计链 / 报告）。
     cors_origins: list[str] = [
@@ -50,11 +50,11 @@ class SecurityCfg(BaseModel):
 
 
 class EvalCfg(BaseModel):
-    """评估 / 漂移 / 实验追踪配置（§7.4 / §15.6 MLOps 闭环）。
+    """评估 / 漂移 / 实验追踪配置。
 
     golden_dir        : 固定、版本化评估集（禁止用于训练）；缺失则 evaluate 端点返回 409。
     drift_baseline_path: 漂移监控参考基线（尺寸/置信度/类别分布），首跑自动建立。
-    experiments_dir  : 实验追踪 JSONL 落盘目录（§7.4，MLflow 可演进）。
+    experiments_dir  : 实验追踪 JSONL 落盘目录。
     auto_on_activate : 模型激活后自动跑 Golden Set 评估（使 metric_map 有值）。
     """
 
@@ -65,10 +65,10 @@ class EvalCfg(BaseModel):
 
 
 class SyncCfg(BaseModel):
-    """端边云同步适配器选择（§7.6）。
+    """端边云同步适配器选择。
 
     kind=local：LocalAdapter（数据不出本机，默认）；
-    kind=http ：HttpSyncAdapter（推送到可配置端点，需自行保证传输加密）。
+    kind=http：HttpSyncAdapter（推送到可配置端点，需自行保证传输加密）。
     """
 
     kind: str = "local"  # local | http | cloud（v3 联邦占位，未实现，勿生产启用）
@@ -78,7 +78,7 @@ class SyncCfg(BaseModel):
 
 
 class AnnotatorCfg(BaseModel):
-    """人工标注服务（§12.2 主动学习闭环）是否随主应用同进程启动。
+    """人工标注服务是否随主应用同进程启动。
 
     enabled=True 时，lifespan 内以守护线程拉起标注器（默认 8899），
     使标注→训练池回流在单一进程内闭环，无需手动另开终端。
@@ -163,10 +163,10 @@ class IqiCfg(BaseModel):
 
 
 class PseudoDefectCfg(BaseModel):
-    """伪缺陷筛查阈值（§4.2，默认仅长直划痕阻断评片）。
+    """伪缺陷筛查阈值。
 
     字段集须与 backend/domain/pseudo_defect.py 的 PseudoDefectCfg 对齐
-    （§T8 三处同步：config.py / default.yaml / schema.yaml / domain 默认）。
+。
     """
 
     hough_threshold: int = 60
@@ -199,7 +199,7 @@ class PreprocessCfg(BaseModel):
 
 
 class QualityCfg(BaseModel):
-    """射线底片质量门禁配置（§4.4，§T8 三处同步）。
+    """射线底片质量门禁配置。
 
     门禁用可解释 RQI 复合分（0–100，越高越好）= Σ wᵢ·sᵢ，sᵢ∈[0,1]。
     min_score 以下判不合格；block_on_quality=True 时不合格阻断评片（默认 True，
@@ -231,10 +231,10 @@ class QualityCfg(BaseModel):
 
 
 class MaskRefineCfg(BaseModel):
-    """掩膜精修量化配置（M4b，§T8 四地同步）。
+    """掩膜精修量化配置（， 四地同步）。
 
     字段集须与 backend/domain/quantify.py 的 MaskRefineCfg dataclass 对齐
-    （§T8：domain 默认 + 本模块 pydantic + default.yaml + schema.yaml）。
+。
     """
 
     enabled: bool = True
@@ -249,7 +249,7 @@ class MaskRefineCfg(BaseModel):
 
 class DetectCfg(BaseModel):
     # 安全默认 = 训练模型路径（缺失权重时按 allow_baseline_fallback 策略显式回退并记日志）。
-    # 原默认 True：一旦 default.yaml 缺键，会静默落 blob 基线而无人告警（§部署硬化 配置漂移）。
+    # 原默认 True：一旦 default.yaml 缺键，会静默落 blob 基线而无人告警。
     kind: str = "trained_yolo"  # 检测器种类（注册表键）：trained_yolo=YOLO 训练模型，baseline_blob=连通域基线
     quantifier_kind: str = (
         "mask"  # 量化器种类（注册表键，§T8）：mask=掩膜精修(M4b)，bbox=包围盒近似(M4a)
@@ -260,7 +260,7 @@ class DetectCfg(BaseModel):
     allow_baseline_fallback: bool = True  # 训练模型加载失败时是否回退基线（False=启动即失败）
     infer_conf: float = 0.3  # 推理置信度阈值（§T8：禁硬编码，统一入口）
     infer_iou: float = 0.5  # NMS IoU 阈值
-    # 逐类置信度阈值（ADR-010 扩展）：稀有且安全关键缺陷设更低阈值优先召回，
+    # 逐类置信度阈值（ 扩展）：稀有且安全关键缺陷设更低阈值优先召回，
     # 气孔设更高阈值抑制海量误检。未在此映射中的类回落 infer_conf。
     # 依据：稀有平衡实验（runs/yolo11n_real_rare）显示稀有类信号弱、需低阈值放行，
     # 而气孔占训练样本 94.6%，高阈值可压低误检。裂纹/未熔合属 NB/T47013 重大缺陷，
@@ -285,7 +285,7 @@ class DetectCfg(BaseModel):
 
 
 class UploadCfg(BaseModel):
-    """上传限额（§13.9）：无上限的 multipart 读取会被单请求打爆内存/磁盘。"""
+    """上传限额：无上限的 multipart 读取会被单请求打爆内存/磁盘。"""
 
     max_bytes: int = 200 * 1024 * 1024  # 单文件上限 200 MiB（大幅面 DR 底片留余量）
     allowed_suffixes: tuple[str, ...] = (
@@ -313,10 +313,10 @@ class ReviewCfg(BaseModel):
 class StdEvalCfg(BaseModel):
     """DB50/T 1807-2025 标准评价配置（backend/evaluation/std501807.py）。
 
-    iou_standard/strict : 标准口径 0.1 与严格口径（比标准严，双阈值并行评估，
+    iou_standard/strict : 标准口径 0.1 与严格口径（双阈值并行评估，
                           记录分级取两者较差）。
-    weld_form/method    : single=单面焊（重点关注含内凹/咬边，§8.2.2，默认取严）；
-                          manual/auto 决定 FRR 分级线（§11.1 表1）。
+    weld_form/method    : single=单面焊（重点关注含内凹/咬边）；
+                          manual/auto 决定 FRR 分级线。
     strict_frr          : true=FRR 分级线默认取收紧值（自动 3%/手工 4%，
                           即标准 L2 线），严于标准 L1 线。
     personnel_path      : 评价/标注人员资质记录（TSG Z8001 证书，附录A 用）。
@@ -337,7 +337,7 @@ class StdEvalCfg(BaseModel):
 
 
 class ObservabilityCfg(BaseModel):
-    """可观测性配置（§13.5 / 架构升级：结构化日志 + 进程内指标）。
+    """可观测性配置。
 
     log_format     : text=人类可读（本地开发默认）；json=单行结构化日志，
                      便于接入日志采集（十年数据积累的可观测基础）。
@@ -350,7 +350,7 @@ class ObservabilityCfg(BaseModel):
 
 
 class BatchCfg(BaseModel):
-    """批量任务队列配置（§12.1，§T8 三处同步）。
+    """批量任务队列配置。
 
     桌面单机场景：线程池多 worker 并行推理（run_inspection 全链路逐图跑），
     单图失败隔离不拖垮整批。断点续跑 = 状态快照持久化到 data/batch/，
@@ -388,7 +388,7 @@ class AppConfig(BaseSettings):
 
 
 def load_config() -> AppConfig:
-    """加载配置：configs/default.yaml 为基础，SCAN_* 环境变量优先覆盖（§13.6）。
+    """加载配置：configs/default.yaml 为基础，SCAN_* 环境变量优先覆盖。
 
     注意：pydantic-settings 的 init 参数优先于环境变量，因此不能直接
     `AppConfig(**raw)`（env 会被 yaml 值吞掉）——这里手动把 SCAN_* 合并进
@@ -407,7 +407,7 @@ def load_config() -> AppConfig:
             # 仅合并叶子字段（排除 'paths' 这类段级路径，避免把整段覆盖成字符串导致启动崩溃）
             if len(path) >= 2 and path in known:
                 _apply_env(raw, list(path), value)
-    # §部署硬化：启动期捕获配置漂移（schema 与 default.yaml 不一致 → 静默落默认的高危场景）
+    # 启动期捕获配置漂移（schema 与 default.yaml 不一致 → 静默落默认的高危场景）
     drift = validate_config_against_schema(raw)
     if drift:
         _LOG.error("配置漂移检测（%d 项）:\n  - %s", len(drift), "\n  - ".join(drift))
@@ -461,7 +461,7 @@ def _leaf_paths(node: Any, prefix: tuple[str, ...] = ()) -> set[tuple[str, ...]]
 
 
 def validate_config_against_schema(raw: dict) -> list[str]:
-    """schema.yaml 是权威契约（§T8 三处同步）；与合并后的 raw 比对，返回漂移问题列表。
+    """schema.yaml 是权威契约；与合并后的 raw 比对，返回漂移问题列表。
 
     捕获两类漂移：
     - ① schema 要求但 default.yaml 缺失 → 将静默落 pydantic 默认（如 baseline_enabled
@@ -502,7 +502,7 @@ def resolve_config_path(p: str) -> Path:
 
 
 def ensure_runtime_dirs(config: AppConfig) -> list[Path]:
-    """部署硬化（§部署硬化 #6）：启动时创建全部运行时目录，保证干净环境可立即启动。
+    """部署硬化：启动时创建全部运行时目录，保证干净环境可立即启动。
 
     覆盖 paths（data/tmp/images/reports）、模型权重目录、批量队列与同步队列目录。
     评估 Golden Set 属固定资产，不在此创建（缺失由 /evaluate 返回 409）。

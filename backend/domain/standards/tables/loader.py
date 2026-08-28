@@ -1,7 +1,7 @@
-"""标准数值表加载器（§T8）。
+"""标准数值表加载器。
 
 带结构校验；authorized=false（占位/未获授权）时**禁止**用于级别输出——
-这是防"静默错判"的熔断（§11 风险表），任何判定实现必须先检查 authorized。
+这是防"静默错判"的熔断，任何判定实现必须先检查 authorized。
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ class StandardTables:
     version: str
     authorized: bool
     data: dict[str, Any]
-    # 工业过渡路径（T1）：两个独立概念，避免"数值完整可用"与"持有授权正本"混为一谈。
+    # 工业过渡路径：两个独立概念，避免"数值完整可用"与"持有授权正本"混为一谈。
     # - authorized：数值完整、评级运算可运行（AI 预筛）。False 时熔断不输出级别。
     # - authorized_copy：是否依法持有标准授权正本并完成逐条签核。默认 False。
     authorized_copy: bool = False
@@ -43,7 +43,7 @@ class StandardTables:
 
 
 def disclaimer_for(tables: StandardTables) -> str:
-    """生成标准来源免责声明（工业过渡路径，T1）。
+    """生成标准来源免责声明（工业过渡路径，）。
 
     authorized_copy=False（未持有授权正本）→ 强声明：评级数值转录自公开解读，
     仅供 AI 辅助预筛，不替代责任工程师法定评定。authorized_copy=True → 轻声明。
@@ -87,7 +87,7 @@ def load_standard_tables(
 
 # ---- 数据源默认实现与注册 ------------------------------------------------
 # 生产环境由 app（dependencies）在启动时调用 set_default_table_source 注入
-# infra.FileTableSource，domain 因此完全不接触文件系统（§T8 验收硬化）。
+# infra.FileTableSource，domain 因此完全不接触文件系统。
 # 以下 _DefaultFileTableSource 为域内置引导默认：仅用于未注入场景（单元/独立运行），
 # 明确标注为 bootstrap，不应在生产路径使用。
 
@@ -133,7 +133,7 @@ def _validate(raw: dict[str, Any]) -> None:
     missing = _REQUIRED_KEYS - set(raw)
     if missing:
         raise ValueError(f"standard table missing keys: {sorted(missing)}")
-    # 嵌套结构校验：防止运行时才在评级中 KeyError/TypeError（§T8 要求启动即失败）
+    # 嵌套结构校验：防止运行时才在评级中 KeyError/TypeError
     for key, field in (
         ("round_points", "max_d_mm"),
         ("round_ignore_size_mm", "max_t"),
@@ -152,7 +152,7 @@ def _validate(raw: dict[str, Any]) -> None:
         sub = (raw.get("linear_limits") or {}).get(lv, {})
         if not {"t_factor", "min_mm", "max_mm"} <= set(sub):
             raise ValueError(f"linear_limits.{lv} 缺少 t_factor/min_mm/max_mm")
-    # 条形组内累计（§6.2，12T 评定区）：可选键，存在则必须结构完整
+    # 条形组内累计：可选键，存在则必须结构完整
     group = (raw.get("linear_limits") or {}).get("group")
     if group is not None:
         if not isinstance(group.get("zone_t_factor"), (int, float)) or group["zone_t_factor"] <= 0:
