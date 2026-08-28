@@ -251,8 +251,12 @@ class DetectCfg(BaseModel):
     # 安全默认 = 训练模型路径（缺失权重时按 allow_baseline_fallback 策略显式回退并记日志）。
     # 原默认 True：一旦 default.yaml 缺键，会静默落 blob 基线而无人告警（§部署硬化 配置漂移）。
     kind: str = "trained_yolo"  # 检测器种类（注册表键）：trained_yolo=YOLO 训练模型，baseline_blob=连通域基线
-    quantifier_kind: str = "mask"  # 量化器种类（注册表键，§T8）：mask=掩膜精修(M4b)，bbox=包围盒近似(M4a)
-    baseline_enabled: bool = False  # M4a 基线检测器开关（kind 的兼容别名；显式 kind 优先）；训练模型就绪后保持 false
+    quantifier_kind: str = (
+        "mask"  # 量化器种类（注册表键，§T8）：mask=掩膜精修(M4b)，bbox=包围盒近似(M4a)
+    )
+    baseline_enabled: bool = (
+        False  # M4a 基线检测器开关（kind 的兼容别名；显式 kind 优先）；训练模型就绪后保持 false
+    )
     allow_baseline_fallback: bool = True  # 训练模型加载失败时是否回退基线（False=启动即失败）
     infer_conf: float = 0.3  # 推理置信度阈值（§T8：禁硬编码，统一入口）
     infer_iou: float = 0.5  # NMS IoU 阈值
@@ -268,6 +272,7 @@ class DetectCfg(BaseModel):
         3: 0.08,  # LACK_OF_FUSION 未熔合（重大缺陷，低阈值优先召回）
         4: 0.05,  # CRACK 裂纹（最危险缺陷，最低阈值）
         5: 0.18,  # UNDERCUT 咬边
+        6: 0.10,  # CONCAVITY 内凹（DB50/T 1807 重点关注缺陷，低阈值优先召回）
     }
     round_aspect_max: float = 3.0  # 圆形/条形长宽比分界（NB/T47013：L/W<=3 为圆形）
     min_area_px: int = 30
@@ -305,6 +310,45 @@ class ReviewCfg(BaseModel):
     kappa_threshold: float = 0.8  # Cohen's κ 高度一致阈值（§15.3）；低于则升级仲裁
 
 
+class StdEvalCfg(BaseModel):
+    """DB50/T 1807-2025 标准评价配置（backend/evaluation/std501807.py）。
+
+    iou_standard/strict : 标准口径 0.1 与严格口径（比标准严，双阈值并行评估，
+                          记录分级取两者较差）。
+    weld_form/method    : single=单面焊（重点关注含内凹/咬边，§8.2.2，默认取严）；
+                          manual/auto 决定 FRR 分级线（§11.1 表1）。
+    strict_frr          : true=FRR 分级线默认取收紧值（自动 3%/手工 4%，
+                          即标准 L2 线），严于标准 L1 线。
+    personnel_path      : 评价/标注人员资质记录（TSG Z8001 证书，附录A 用）。
+    """
+
+    iou_standard: float = 0.1
+    iou_strict: float = 0.3
+    weld_form: str = "single"
+    weld_method: str = "manual"
+    strict_frr: bool = True
+    frr_l1_auto: float = 0.08
+    frr_l1_manual: float = 0.10
+    frr_strict_auto: float = 0.03
+    frr_strict_manual: float = 0.04
+    aspect_round_max: float = 3.0
+    eval_dir: str = "data/eval"
+    personnel_path: str = "data/eval/std_personnel.json"
+
+
+class ObservabilityCfg(BaseModel):
+    """可观测性配置（§13.5 / 架构升级：结构化日志 + 进程内指标）。
+
+    log_format     : text=人类可读（本地开发默认）；json=单行结构化日志，
+                     便于接入日志采集（十年数据积累的可观测基础）。
+    enable_metrics : 是否启用进程内指标采集（/api/v1/metrics 导出）。
+                     true 时每请求计数/计时（内存开销极小、恒定）。
+    """
+
+    log_format: str = "text"  # text | json
+    enable_metrics: bool = True
+
+
 class BatchCfg(BaseModel):
     """批量任务队列配置（§12.1，§T8 三处同步）。
 
@@ -316,7 +360,6 @@ class BatchCfg(BaseModel):
     workers: int = 2  # 并行 worker 数（IO/推理并行度；过大会加重 CPU/内存）
     max_per_batch: int = 100  # 单批最大图数（防一次性打爆资源）
     per_image_estimate_sec: float = 8.0  # 单图预估耗时（进度条/预计时间展示用）
-
 
 
 class AppConfig(BaseSettings):
@@ -337,7 +380,9 @@ class AppConfig(BaseSettings):
     upload: UploadCfg = UploadCfg()
     standard: StandardCfg = StandardCfg()
     review: ReviewCfg = ReviewCfg()
+    observability: ObservabilityCfg = ObservabilityCfg()
     batch: BatchCfg = BatchCfg()
+    std_eval: StdEvalCfg = StdEvalCfg()
 
     model_config = {"env_prefix": "SCAN_"}
 
@@ -406,9 +451,7 @@ def _leaf_paths(node: Any, prefix: tuple[str, ...] = ()) -> set[tuple[str, ...]]
     （用真实值，class_conf 是 int 键映射）在形状上的结构性误报：两侧都按
     "标识符键=配置段、其余=单叶子" 归一化，路径精确对齐。
     """
-    if isinstance(node, dict) and all(
-        isinstance(k, str) and _IDENT_RE.match(k) for k in node
-    ):
+    if isinstance(node, dict) and all(isinstance(k, str) and _IDENT_RE.match(k) for k in node):
         out: set[tuple[str, ...]] = set()
         for k, v in node.items():
             out |= _leaf_paths(v, prefix + (str(k),))
@@ -436,9 +479,7 @@ def validate_config_against_schema(raw: dict) -> list[str]:
     actual = _leaf_paths(raw)
     issues: list[str] = []
     for p in sorted(expected - actual):
-        issues.append(
-            f"schema 要求但 default.yaml 缺失: {'.'.join(p)} (将静默落 pydantic 默认)"
-        )
+        issues.append(f"schema 要求但 default.yaml 缺失: {'.'.join(p)} (将静默落 pydantic 默认)")
     for p in sorted(actual - expected):
         issues.append(f"default.yaml 存在但 schema.yaml 未登记: {'.'.join(p)} (新增键未补 schema?)")
     return issues

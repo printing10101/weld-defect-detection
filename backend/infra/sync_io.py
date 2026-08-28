@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.domain.interfaces import HttpPushPort, QueuePort
+from backend.infra.metrics import get_metrics
 
 _LOG = logging.getLogger("scandetection.sync.io")
 
@@ -65,5 +66,7 @@ class UrllibJsonPoster(HttpPushPort):
                 req.add_header("Authorization", f"Bearer {token}")
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 _ = resp.status
+            get_metrics().inc("sync_push_total", labels={"adapter": "http", "result": "success"})
         except Exception as exc:  # noqa: BLE001 - 同步尽力而为，失败不阻断主流程
+            get_metrics().inc("sync_push_total", labels={"adapter": "http", "result": "failure"})
             _LOG.warning("HttpSync push 失败（已本地留档）: %s", exc)

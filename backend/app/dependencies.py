@@ -21,13 +21,12 @@ from backend.domain.grade.registry import get_grader
 from backend.domain.interfaces import DefectDetector, Reporter, StandardGrader
 from backend.domain.preprocess.pipeline import OpencvPreprocessor
 from backend.domain.standards.tables.loader import load_standard_tables, set_default_table_source
-from backend.infra.standards.tables_source import FileTableSource
 from backend.domain.sync import LocalAdapter
 from backend.infra.config import AppConfig, ensure_runtime_dirs, load_config
 from backend.infra.model_registry import ModelEntry, ModelRegistry
 from backend.infra.model_store import LocalModelStore
-from backend.infra.reporting.pdf_reporter import PdfReporter
 from backend.infra.repository import InspectionRepository
+from backend.infra.standards.tables_source import FileTableSource
 
 _LOG = logging.getLogger("scandetection.dependencies")
 
@@ -98,6 +97,10 @@ class Registry:
         self.grader: StandardGrader = self._build_grader()
         self.preprocessor = self._build_preprocessor()
         self.repository = InspectionRepository(_resolve_path(self.config.paths.db_path))
+        # reportlab 导入 ~0.4s，延迟到 Registry 装配时（Registry 本身在后台线程初始化），
+        # 不占用进程导入→端口绑定的关键路径。
+        from backend.infra.reporting.pdf_reporter import PdfReporter
+
         self.reporter: Reporter = PdfReporter(
             self.repository, _resolve_path(self.config.paths.reports_dir)
         )
@@ -342,10 +345,30 @@ _registry_lock = threading.Lock()
 
 
 def get_registry() -> Registry:
-    """获取全局 registry（懒初始化单例）；已初始化后走无锁快路径。"""
+    """获取全局 registry（懒初始化单例）；已初始化后走无锁快路径。
+
+    若后台初始化线程（main.lifespan 启动）正在进行，调用方在此阻塞直至就绪
+    （与原先同步初始化语义一致，仅等待点提前到了首个需要 registry 的请求）。
+    """
     global _registry
     if _registry is None:
         with _registry_lock:
             if _registry is None:
                 _registry = Registry()
     return _registry
+
+
+def try_get_registry() -> Registry | None:
+    """非阻塞获取 registry：未就绪（初始化中/未开始）返回 None。
+
+    供 /health 等存活探针使用——启动期即能应答（HTTP 200 + status=starting），
+    无需等待模型加载完成；业务端点仍走 get_registry() 阻塞等待。
+    """
+    if _registry is not None:
+        return _registry
+    if _registry_lock.acquire(blocking=False):
+        try:
+            return _registry
+        finally:
+            _registry_lock.release()
+    return None

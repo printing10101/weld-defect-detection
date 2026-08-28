@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
 
 
-def build_xray_augment() -> object:
+def build_xray_augment() -> Any:
     """返回 Albumentations Compose（X 光焊缝专用，YOLO bbox 格式）。"""
     try:
         import albumentations as A
@@ -49,7 +50,7 @@ def build_multiscale_augment(
     max_scale: float = 1.4,
     target_hw: tuple[int, int] = (640, 640),
     p: float = 0.5,
-) -> object:
+) -> Any:
     """多尺度训练增强（P1-A，借鉴 LF-YOLO 多尺度策略）。
 
     随机缩放（0.6~1.4x）+ 中心裁剪/填充回固定训练尺寸，迫使网络学习

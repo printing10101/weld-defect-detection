@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -27,6 +28,8 @@ from backend.app.routers import (
     explain,
     health,
     judge,
+    measure,
+    metrics,
     models,
     preprocess,
     recommend,
@@ -34,6 +37,8 @@ from backend.app.routers import (
     report,
     review,
     standards,
+    std_eval,
+    system,
     verify,
 )
 from backend.domain.errors import AppError
@@ -47,25 +52,35 @@ def _envelope(code: str, message: str, detail=None) -> dict:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 先统一日志，再装配 registry（含模型加载）；失败立即暴露，而非延迟到首个请求。
+    # 先统一日志；重装配（模型加载/DB 迁移，实测 ~2.5s，冷启动更久）移入后台线程，
+    # 使 uvicorn 立即绑定端口——前端 /health 探测马上通过（status=starting），
+    # 业务端点首个请求会经 get_registry() 阻塞等待装配完成（语义与原先一致）。
     _configure_logging()
-    # P2-5：启动时把 DB schema 升到 Alembic 头版本（兼容历史 create_all DB：自动 stamp）。
-    try:
-        from backend.infra.migrate import ensure_migrations
 
-        db_path = get_registry().config.paths.db_path
-        version = ensure_migrations(db_path)
-        _LOG.info("schema migrations applied (version=%s)", version)
-    except Exception as exc:  # noqa: BLE001 - 迁移失败不应阻止启动；create_all 兜底
-        _LOG.warning("schema migration skipped (create_all fallback): %s", exc)
-    get_registry()
-    # P2-8：随主应用同进程拉起人工标注器（默认关；开启后主动学习闭环无需另开终端）。
-    _start_annotator_if_enabled()
-    _LOG.info("application startup complete (registry assembled)")
+    def _init_registry() -> None:
+        # P2-5：启动时把 DB schema 升到 Alembic 头版本（兼容历史 create_all DB：自动 stamp）。
+        try:
+            from backend.infra.migrate import ensure_migrations
+
+            db_path = get_registry().config.paths.db_path
+            version = ensure_migrations(db_path)
+            _LOG.info("schema migrations applied (version=%s)", version)
+        except Exception as exc:  # noqa: BLE001 - 迁移失败不应阻止启动；create_all 兜底
+            _LOG.warning("schema migration skipped (create_all fallback): %s", exc)
+        get_registry()
+        # P2-8：随主应用同进程拉起人工标注器（默认关；开启后主动学习闭环无需另开终端）。
+        _start_annotator_if_enabled()
+        _LOG.info("application startup complete (registry assembled)")
+
+    threading.Thread(target=_init_registry, name="registry-init", daemon=True).start()
     yield
     # F11：应用退出时优雅关停批量线程池（等运行中任务结束），避免 worker 被硬杀
     try:
-        get_registry().batch_manager.shutdown()
+        from backend.app.dependencies import try_get_registry
+
+        reg = try_get_registry()
+        if reg is not None:
+            reg.batch_manager.shutdown()
     except Exception as exc:  # noqa: BLE001 - 关停失败不应掩盖其它退出逻辑
         _LOG.warning("batch_manager shutdown skipped: %s", exc)
 
@@ -103,18 +118,19 @@ _LOG = logging.getLogger("scandetection")
 
 
 def _configure_logging() -> None:
-    """统一日志（关键路径可追溯）。
+    """统一日志（关键路径可追溯，§13.5）。
 
-    默认 WARNING 级别会吞掉业务 info/warning；这里显式配成 INFO 并固定格式
-    （时间/级别/模块/消息），使模型加载、推理、判定、审计等关键路径可被观测。
-    force=True 确保本配置优先生效（避免被第三方库的早期 basicConfig 覆盖）。
+    由配置驱动（observability.log_format）：text=人类可读（本地开发默认），
+    json=结构化单行日志（接入采集/ELK 的可观测基础）。固定 INFO 级别。
     """
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S",
-        force=True,
-    )
+    from backend.infra.logging import configure_logging
+
+    try:
+        cfg = load_config()
+        fmt = cfg.observability.log_format
+    except Exception:  # noqa: BLE001 - 配置缺失时回退 text，日志不应成为启动阻断点
+        fmt = "text"
+    configure_logging(fmt)
 
 
 def create_app() -> FastAPI:
@@ -144,8 +160,15 @@ def create_app() -> FastAPI:
     app.add_middleware(RateLimitMiddleware)  # 外层：限流
     app.add_middleware(SecurityHeadersMiddleware)  # 内层：安全头
 
+    # 可观测性：进程内指标中间件（最外层，采集所有 HTTP 请求计数/耗时）。
+    from backend.infra.metrics import MetricsMiddleware, get_metrics
+
+    get_metrics().enabled = cfg.observability.enable_metrics
+    app.add_middleware(MetricsMiddleware)
+
     for router in (
         health.router,
+        metrics.router,
         verify.router,
         preprocess.router,
         standards.router,
@@ -162,6 +185,9 @@ def create_app() -> FastAPI:
         audit.router,
         active.router,
         evaluation.router,
+        std_eval.router,
+        measure.router,
+        system.router,
     ):
         app.include_router(router, prefix="/api/v1")
     return app

@@ -2,15 +2,62 @@
 
 - HttpSyncAdapter 必须带 endpoint 构造，否则 ValueError；
 - push 在网络不可达时本地留档、不抛（尽力而为）；
+- push 成功时端点真实收到记录（含 Bearer token）并计数指标；
 - LocalAdapter 行为不变（数据不出本机）。
 """
 
 from __future__ import annotations
 
+import json
+import threading
+
 import pytest
 
 from backend.domain.sync import CloudAdapter, HttpSyncAdapter, LocalAdapter
 from backend.infra.sync_io import JsonlQueue, UrllibJsonPoster
+
+
+class _CaptureReceiver:
+    """极简线程化 HTTP 接收器：记录收到的路径/头/请求体，供成功路径断言。"""
+
+    def __init__(self):
+        import http.server
+
+        self._seen: list[dict] = []
+        self._lock = threading.Lock()
+        # 内部 Handler 通过闭包捕获接收器实例状态（请求体在 handler 线程写入）。
+        seen = self._seen
+        lock = self._lock
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):  # 协议方法名，ruff N 类规则未启用，无需 noqa
+                length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(length)
+                with lock:
+                    seen.append(
+                        {"path": self.path, "auth": self.headers.get("Authorization"), "body": body}
+                    )
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, format, *args):  # 抑制测试期冗长访问日志（覆写基类签名）
+                return
+
+        self._server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.port = self._server.server_address[1]
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._server.shutdown()
+        self._server.server_close()
+
+    def requests(self) -> list[dict]:
+        with self._lock:
+            return list(self._seen)
 
 
 def test_http_adapter_requires_endpoint() -> None:
@@ -31,6 +78,36 @@ def test_http_adapter_local_fallback_on_network_failure(tmp_path) -> None:
     adapter.push({"image_id": "x", "level": "II"})
     assert queue.exists()
     assert adapter.pending_count == 1
+
+
+def test_http_adapter_push_success_hits_endpoint(tmp_path) -> None:
+    """成功路径：端点真实收到 JSON 负载、正确路径与 Bearer token，并计数成功指标。"""
+    from backend.infra.metrics import get_metrics
+
+    queue = tmp_path / "pending.jsonl"
+    get_metrics().reset()
+    with _CaptureReceiver() as receiver:
+        adapter = HttpSyncAdapter(
+            endpoint=f"http://127.0.0.1:{receiver.port}/api/sync",
+            token="s3cret",
+            queue=JsonlQueue(queue),
+            transport=UrllibJsonPoster(),
+        )
+        adapter.push({"image_id": "img_9", "level": "II"})
+        assert adapter.pending_count == 1  # 本地仍留档（双写语义）
+        got = receiver.requests()
+        assert len(got) == 1
+        assert got[0]["path"] == "/api/sync"
+        assert got[0]["auth"] == "Bearer s3cret"
+        assert json.loads(got[0]["body"]) == {"image_id": "img_9", "level": "II"}
+
+    snap = get_metrics().snapshot()
+    success = [
+        i
+        for i in snap["counters"]["sync_push_total"]
+        if i["labels"] == {"adapter": "http", "result": "success"}
+    ]
+    assert len(success) == 1 and success[0]["value"] == 1
 
 
 def test_local_adapter_unchanged(tmp_path) -> None:
@@ -95,6 +172,7 @@ def test_cloud_adapter_placeholder_fail_loud() -> None:
 def test_cloud_kind_wired_to_placeholder() -> None:
     """sync.kind=cloud → 装配 CloudAdapter；endpoint 缺失 → 回退 local（不阻断启动）。"""
     from types import SimpleNamespace
+    from typing import cast
 
     from backend.app.dependencies import Registry
 
@@ -106,7 +184,7 @@ def test_cloud_kind_wired_to_placeholder() -> None:
             paths=SimpleNamespace(data_dir="data"),
         )
     )
-    assert Registry._build_syncer(stub).name == "cloud"
+    assert Registry._build_syncer(cast(Registry, stub)).name == "cloud"
 
     stub_bad = SimpleNamespace(
         config=SimpleNamespace(
@@ -114,4 +192,4 @@ def test_cloud_kind_wired_to_placeholder() -> None:
             paths=SimpleNamespace(data_dir="data"),
         )
     )
-    assert Registry._build_syncer(stub_bad).name == "local"  # 回退，不阻断启动
+    assert Registry._build_syncer(cast(Registry, stub_bad)).name == "local"  # 回退，不阻断启动

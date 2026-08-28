@@ -60,9 +60,7 @@ def read_gray(path: Path) -> np.ndarray | None:
     return cv2.cvtColor(im, cv2.COLOR_BGRA2GRAY)
 
 
-def letterbox(
-    image: np.ndarray, size: int = _INPUT_SIZE
-) -> tuple[np.ndarray, float, int, int]:
+def letterbox(image: np.ndarray, size: int = _INPUT_SIZE) -> tuple[np.ndarray, float, int, int]:
     """letterbox 缩放 → (blob[1,3,size,size], r, top, left)。"""
     rgb = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
     h, w = rgb.shape[:2]
@@ -112,7 +110,9 @@ def postprocess(
     y1 = (bx[:, 1] - bx[:, 3] / 2 - top) / r
     x2 = (bx[:, 0] + bx[:, 2] / 2 - left) / r
     y2 = (bx[:, 1] + bx[:, 3] / 2 - top) / r
-    raw_boxes = list(zip(x1.tolist(), y1.tolist(), x2.tolist(), y2.tolist(), sc.tolist(), cl.tolist()))
+    raw_boxes = list(
+        zip(x1.tolist(), y1.tolist(), x2.tolist(), y2.tolist(), sc.tolist(), cl.tolist())
+    )
     keep = _nms(raw_boxes, iou)
     out_boxes: list[tuple[float, float, float, float, int, float]] = []
     for i in keep:
@@ -326,9 +326,7 @@ def compare_models(
     )
 
 
-def _match(
-    d32: list, d8: list, iou_match: float
-) -> tuple[int, list[float], list[float]]:
+def _match(d32: list, d8: list, iou_match: float) -> tuple[int, list[float], list[float]]:
     """贪心 IoU 匹配 FP32/INT8 检出（同类别优先），返回 (匹配数, Δscore 列表, IoU 列表)。"""
     deltas: list[float] = []
     ious: list[float] = []
@@ -406,7 +404,9 @@ def main() -> None:
     report.mode = mode
     report.note = note
     Path(args.report).parent.mkdir(parents=True, exist_ok=True)
-    Path(args.report).write_text(json.dumps(asdict(report), ensure_ascii=False, indent=2), encoding="utf-8")
+    Path(args.report).write_text(
+        json.dumps(asdict(report), ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print(f"[quant] 报告 → {args.report}")
     print(
         f"[quant] 结论: {report.verdict}\n"

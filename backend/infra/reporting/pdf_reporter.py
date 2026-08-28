@@ -22,19 +22,24 @@ from pathlib import Path
 import cv2
 import numpy as np
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfgen import canvas as pdfcanvas
 from reportlab.platypus import (
+    BaseDocTemplate,
     Flowable,
+    Frame,
     Image,
     KeepTogether,
+    NextPageTemplate,
+    PageBreak,
+    PageTemplate,
     Paragraph,
-    SimpleDocTemplate,
     Spacer,
     Table,
     TableStyle,
@@ -124,7 +129,7 @@ def _font_candidates() -> list[Path]:
 
 
 _PAGE_W, _PAGE_H = A4
-_MARGIN = 15 * mm
+_MARGIN = 12 * mm
 _MAX_ANNOTATIONS = 50  # 图谱最多标注框数（防超大报告与糊图）
 _EMBED_MAX_SIDE = 1600  # 嵌入报告的影像最长边（px）：底片常见 4k+，原尺寸会撑爆 PDF
 _MAX_IMAGE_H = 95 * mm  # 单张嵌入影像最大高度，防止竖长图撑破版心
@@ -376,45 +381,542 @@ def _defect_label(idx: int, d: dict) -> str:
     return f"#{idx} {level}".strip() if level.isascii() else f"#{idx}"
 
 
-def _comparison_flow(
+# ---------------------------------------------------------------------------
+# 正式检测报告版式（对齐特检院无损检测报告格式）：
+#   第1页 封面（报告编号 / 大标题 / 工件字段 / 防伪指纹框）
+#   第2页 注意事项（含单位信息与 AI 辅助声明）
+#   第3页起 正文（页眉机构名 + 质量文件/报告编号 + 六列信息表 +
+#          评定表 + 检测结论框 + 检测/审核/审批签字栏 + 页脚页码）
+#   末页 附图（缺陷位置示意图 + 送检原始影像 + 判定依据 + 指纹）
+# 页码『第x页 共y页』仅计正文与附图页，封面/注意事项不编号（与参考一致）。
+# ---------------------------------------------------------------------------
+
+_CONTENT_START_PAGE = 3  # 封面、注意事项不计页码，正文从此页起算
+_QUALITY_DOC_NO = "SD-RT-R01-1.00"  # 质量文件编号（版式占位）
+_RT_LEVEL = "RT-Ⅱ"  # 评片/审核人员资格级别（版式占位）
+_ROMAN = {"I": "Ⅰ", "II": "Ⅱ", "III": "Ⅲ", "IV": "Ⅳ"}
+_CLASS_CN = {0: "气孔", 1: "夹渣", 2: "未焊透", 3: "未熔合", 4: "裂纹", 5: "咬边", 6: "内凹"}
+
+_NOTES = (
+    "1、本报告书适用于焊缝射线检测数字化智能评片；",
+    "2、报告书应由计算机打印输出，字迹要工整，涂改无效；",
+    "3、本报告书采用电子版模式发放，请使用单位自行打印和保存；",
+    "4、本报告书无检测、审核、批准人员签字无效；",
+    "5、受检单位对本报告结论如有异议，请在收到报告书之日起15日内，向检测方提出书面意见；",
+    "6、本报告评级结果由人工智能辅助评定生成，最终级别须经责任工程师复核并签核后方可采信。",
+)
+
+
+class _ReportCanvas(pdfcanvas.Canvas):
+    """两遍渲染页眉/页脚：总页数在 save() 时才可知，故先快照各页再统一补画。
+
+    正文页页眉绘制机构名（模板 cover_title），页脚绘制『第x页 共y页』；
+    封面与注意事项页不绘制（与参考报告一致）。
+    """
+
+    def __init__(self, *args, header_text: str = "", font: str = "Helvetica", **kwargs):
+        super().__init__(*args, **kwargs)
+        self._header_text = header_text
+        self._chrome_font = font
+        self._saved_states: list[dict] = []
+
+    def showPage(self) -> None:
+        self._saved_states.append(dict(self.__dict__))
+        self._startPage()  # type: ignore[attr-defined]  # reportlab Canvas 私有 API，stub 未声明
+
+    def save(self) -> None:
+        total = len(self._saved_states)
+        for state in self._saved_states:
+            self.__dict__.update(state)
+            self._draw_chrome(total)
+            pdfcanvas.Canvas.showPage(self)
+        pdfcanvas.Canvas.save(self)
+
+    def _draw_chrome(self, total: int) -> None:
+        page = self._pageNumber  # type: ignore[attr-defined]  # reportlab Canvas 私有属性，stub 未声明
+        if page < _CONTENT_START_PAGE:
+            return
+        n = page - _CONTENT_START_PAGE + 1
+        n_total = total - _CONTENT_START_PAGE + 1
+        self.saveState()
+        self.setFont(self._chrome_font, 14)
+        self.drawCentredString(_PAGE_W / 2.0, _PAGE_H - 30, self._header_text)
+        self.setFont(self._chrome_font, 9)
+        self.drawCentredString(_PAGE_W / 2.0, 22, f"第{n}页 共{n_total}页")
+        self.restoreState()
+
+
+def _render(
+    pdf_path: Path,
+    content: object,
+    graph_bytes: bytes | None,
     orig_bytes: bytes | None,
-    anno_bytes: bytes | None,
-    styles: dict[str, ParagraphStyle],
-) -> list[Flowable]:
-    """生成『送检原始影像 vs 检测标注影像』对照排版（并排，附图注）。"""
-    items: list[tuple[str, bytes]] = []
-    if orig_bytes:
-        items.append(("送检原始影像（未标注）", orig_bytes))
-    if anno_bytes:
-        items.append(("检测标注影像（AI 定位缺陷，红框）", anno_bytes))
+    font: str,
+    tpl: ReportTemplate,
+) -> None:
+    """渲染报告 PDF（正式检测报告版式，reportlab platypus 流式排版）。"""
+    c = _cast(content)
+    styles = _make_styles(font)
+    doc = BaseDocTemplate(
+        str(pdf_path),
+        pagesize=A4,
+        leftMargin=_MARGIN,
+        rightMargin=_MARGIN,
+        topMargin=_MARGIN,
+        bottomMargin=_MARGIN,
+        title=f"{tpl.doc_title_prefix} {c.image_id}",
+        author=tpl.author,
+    )
+    pad = {"leftPadding": 0, "rightPadding": 0, "topPadding": 0, "bottomPadding": 0}
+    full_frame = Frame(
+        _MARGIN, _MARGIN, _PAGE_W - 2 * _MARGIN, _PAGE_H - 2 * _MARGIN, id="full", **pad
+    )
+    # 正文帧顶部让出页眉区（页眉绘制于 y ≈ _PAGE_H-30）
+    main_frame = Frame(
+        _MARGIN,
+        _MARGIN,
+        _PAGE_W - 2 * _MARGIN,
+        _PAGE_H - 2 * _MARGIN - 12 * mm,
+        id="main",
+        **pad,
+    )
+    doc.addPageTemplates(
+        [
+            PageTemplate(id="cover", frames=[full_frame]),
+            PageTemplate(id="notes", frames=[full_frame]),
+            PageTemplate(id="main", frames=[main_frame]),
+        ]
+    )
 
-    if not items:
-        return [Paragraph("（影像不可用，对比图省略）", styles["body"])]
-    if len(items) == 1:
-        cap, b = items[0]
-        return _image_with_caption(b, _PAGE_W - 2 * _MARGIN, cap, styles)
+    flow: list[Flowable] = []
+    flow.extend(_cover_flow(c, tpl, styles))
+    flow.append(NextPageTemplate("notes"))
+    flow.append(PageBreak())
+    flow.extend(_notes_flow(c, tpl, styles))
+    flow.append(NextPageTemplate("main"))
+    flow.append(PageBreak())
+    flow.extend(_main_flow(c, styles))
+    flow.extend(_attachment_flow(c, graph_bytes, orig_bytes, styles))
 
-    # 并排：两列等宽，中间留 4mm 间隙
-    gap = 4 * mm
-    col = (_PAGE_W - 2 * _MARGIN - gap) / 2
-    cells: list[Flowable] = []
-    caps: list[Paragraph] = []
-    for cap, b in items:
-        img = _scaled_image(b, col)
-        cells.append(img)
-        caps.append(Paragraph(cap, styles["caption"]))
-    table = Table([cells, caps], colWidths=[col, col])
-    table.setStyle(
+    doc.build(
+        flow,
+        canvasmaker=lambda *a, **k: _ReportCanvas(*a, header_text=tpl.cover_title, font=font, **k),
+    )
+
+
+def _cover_flow(c, tpl: ReportTemplate, styles: dict[str, ParagraphStyle]) -> list[Flowable]:
+    """封面：报告编号（右上）→ 大标题 → 工件字段 → 防伪指纹框（右下）。"""
+    out: list[Flowable] = []
+    out.append(Paragraph(f"报告编号：{c.report_id or '—'}", styles["cover_report_no"]))
+    out.append(Spacer(1, 48 * mm))
+    out.append(Paragraph(tpl.cover_title, styles["cover_sub"]))
+    out.append(Spacer(1, 8 * mm))
+    out.append(Paragraph("检 测 报 告", styles["cover_big"]))
+    out.append(Spacer(1, 40 * mm))
+    for label, value in (
+        ("工件编号", c.workpiece_no),
+        ("焊口编号", c.weld_no),
+        ("影像编号", c.image_id),
+        ("评定标准", c.standard_ref),
+        ("检测时间", _cn_date(c.generated_at)),
+    ):
+        out.append(Paragraph(f"{label}：{value or '—'}", styles["cover_field"]))
+        out.append(Spacer(1, 6 * mm))
+    out.append(Spacer(1, 28 * mm))
+    # 参考报告同位置为防伪二维码；此处以内容指纹（SHA-256）承担同等防伪校验职责
+    box = Table(
+        [
+            [Paragraph("防伪校验指纹", styles["fp_cap"])],
+            [Paragraph(c.fingerprint or "—", styles["fp_val"])],
+        ],
+        colWidths=[64 * mm],
+    )
+    box.setStyle(
         TableStyle(
             [
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, 0), 0),
-                ("BOTTOMPADDING", (0, 1), (-1, 1), 2),
+                ("BOX", (0, 0), (-1, -1), 0.8, colors.black),
+                ("TOPPADDING", (0, 0), (-1, 0), 4),
+                ("BOTTOMPADDING", (0, -1), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
             ]
         )
     )
-    return [table]
+    box.hAlign = "RIGHT"
+    out.append(box)
+    return out
+
+
+def _notes_flow(c, tpl: ReportTemplate, styles: dict[str, ParagraphStyle]) -> list[Flowable]:
+    """注意事项页：报告使用须知 + AI 辅助声明 + 单位信息。"""
+    out: list[Flowable] = [Paragraph("注 意 事 项", styles["notes_title"]), Spacer(1, 8 * mm)]
+    out.extend(Paragraph(n, styles["notes_body"]) for n in _NOTES)
+    out.append(Spacer(1, 10 * mm))
+    if c.disclaimer:
+        out.append(Paragraph(c.disclaimer, styles["fine"]))
+    out.append(Spacer(1, 30 * mm))
+    for line in (
+        f"单位名称：{tpl.author}",
+        "单位地址：—",
+        "邮政编码：—",
+        "联系电话：—",
+        "电子邮箱：—",
+    ):
+        out.append(Paragraph(line, styles["notes_body"]))
+    return out
+
+
+def _main_flow(c, styles: dict[str, ParagraphStyle]) -> list[Flowable]:
+    """正文页：编号行 + 信息表 + 评定表 + 检测结论 + 签字栏。"""
+    w = _PAGE_W - 2 * _MARGIN
+    out: list[Flowable] = []
+    out.append(
+        Paragraph(
+            f"质量文件编号：{_QUALITY_DOC_NO}　报告编号：{c.report_id or '—'}",
+            styles["doc_no"],
+        )
+    )
+    out.append(Spacer(1, 4 * mm))
+    out.append(_meta_table(c, styles, w))
+    out.append(Spacer(1, 5 * mm))
+    out.append(Paragraph("射线检测结果评定表", styles["table_title"]))
+    out.append(_eval_table(c, styles, w))
+    out.append(Spacer(1, 5 * mm))
+    out.extend(_conclusion_flow(c, styles, w))
+    out.append(Spacer(1, 8 * mm))
+    out.append(_signature_table(c, styles, w))
+    return out
+
+
+def _meta_table(c, styles: dict[str, ParagraphStyle], w: float) -> Table:
+    """六列信息表（标签|值 ×3 一行，共 6 行，对齐参考报告首页表格）。"""
+    iqi = c.iqi_detail or {}
+    achieved = iqi.get("achieved") or "—"
+    required = iqi.get("required") or "—"
+    iqi_txt = ("通过" if c.iqi_pass else "不通过") if c.iqi_pass is not None else "未校验"
+    rows = [
+        (
+            "检件名称",
+            c.workpiece_no or "—",
+            "工件材质",
+            "—",
+            "工件规格",
+            f"{c.base_metal_thickness_mm} mm" if c.base_metal_thickness_mm else "—",
+        ),
+        ("检测部位", "焊缝", "检测时机", "—", "热处理状态", "—"),
+        ("仪器名称", "智能评片系统", "仪器型号", "—", "仪器编号", "—"),
+        (
+            "影像模态",
+            c.modality,
+            "像素标定",
+            f"{c.pixel_spacing_mm:.4f} mm/px" if c.pixel_spacing_mm else "—",
+            "黑度 D",
+            f"{c.density:.3f}" if c.density is not None else "—",
+        ),
+        (
+            "像质计",
+            f"{iqi_txt}（{achieved}/{required}）",
+            "可评片性",
+            "可评片" if c.evaluable else "不可评片",
+            "检测比例",
+            "100%",
+        ),
+        ("检测标准", c.standard_ref or "—", "合格级别", "—", "操作指导书编号", "—"),
+    ]
+    data = [
+        [
+            Paragraph(str(cell), styles["mlabel"] if i % 2 == 0 else styles["mval"])
+            for i, cell in enumerate(r)
+        ]
+        for r in rows
+    ]
+    t = Table(data, colWidths=[w * 0.125, w * 0.21, w * 0.125, w * 0.21, w * 0.125, w * 0.205])
+    t.setStyle(
+        TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 0.6, colors.black),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
+    return t
+
+
+def _eval_table(c, styles: dict[str, ParagraphStyle], w: float) -> Table:
+    """『射线检测结果评定表』：区段编号/缺陷位置/尺寸/性质/评定/备注。"""
+    head = ["区段编号", "缺陷位置", "缺陷尺寸(mm)", "缺陷性质", "评定", "备注"]
+    body = [
+        [
+            f"D{i}",
+            _defect_position(d, c.pixel_spacing_mm),
+            _defect_size(d),
+            _defect_class_name(d),
+            _roman_level(d.get("joint_level")),
+            "需人工复核" if d.get("need_review") else "—",
+        ]
+        for i, d in enumerate(c.defects, 1)
+    ]
+    if not body:
+        body = [["见附图", "—", "—", "未检出缺陷", _roman_level(c.joint_level), "—"]]
+    data = [
+        [Paragraph(str(cell), styles["ehead"] if r == 0 else styles["ecell"]) for cell in row]
+        for r, row in enumerate([head] + body)
+    ]
+    t = Table(data, colWidths=[w * 0.11, w * 0.23, w * 0.15, w * 0.17, w * 0.11, w * 0.23])
+    t.setStyle(
+        TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 0.6, colors.black),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
+    return t
+
+
+def _conclusion_flow(c, styles: dict[str, ParagraphStyle], w: float) -> list[Flowable]:
+    """检测结论框：符合标准要求 / 需人工复核 + 不可评片/复核提示。"""
+    out: list[Flowable] = [Paragraph("检测结论：", styles["concl_label"])]
+    lines: list[Flowable] = []
+    if c.joint_level:
+        std = c.standard_ref or "检测标准"
+        lines.append(
+            Paragraph(f"符合{std}标准{_roman_level(c.joint_level)}要求", styles["concl_val"])
+        )
+    else:
+        lines.append(Paragraph("无法自动评级，需人工复核。", styles["concl_val"]))
+    if not c.evaluable:
+        lines.append(Paragraph("影像质量不达标，不可评片。", styles["concl_sub"]))
+    if c.need_review:
+        lines.append(Paragraph("本报告标注需要人工复核。", styles["concl_sub"]))
+    box = Table([[lines]], colWidths=[w])
+    box.setStyle(
+        TableStyle(
+            [
+                ("BOX", (0, 0), (-1, -1), 0.8, colors.black),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+            ]
+        )
+    )
+    out.append(box)
+    return out
+
+
+def _signature_table(c, styles: dict[str, ParagraphStyle], w: float) -> Table:
+    """签字栏：检测/审核/审批（左）+ 检验机构检验专用章区（右，占位）。"""
+    date = _cn_date(c.generated_at) or "　年　月　日"
+    signer = c.signer or "（签字）"
+    data = [
+        [
+            Paragraph(f"检测（级别）<br/>{_RT_LEVEL}<br/>{signer}<br/>{date}", styles["sig"]),
+            Paragraph("检 验 机 构<br/><br/>检 验 专 用 章", styles["stamp"]),
+        ],
+        [Paragraph(f"审核（级别）<br/>{_RT_LEVEL}<br/>（签字）<br/>{date}", styles["sig"]), ""],
+        [Paragraph(f"审批<br/>（签字）<br/>{date}", styles["sig"]), ""],
+    ]
+    t = Table(data, colWidths=[w * 0.58, w * 0.42])
+    t.setStyle(
+        TableStyle(
+            [
+                ("SPAN", (1, 0), (1, 2)),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    return t
+
+
+def _attachment_flow(
+    c, graph_bytes: bytes | None, orig_bytes: bytes | None, styles: dict[str, ParagraphStyle]
+) -> list[Flowable]:
+    """附图页：缺陷位置示意图（清单+标注图）+ 原始影像 + 判定依据 + 指纹。"""
+    w = _PAGE_W - 2 * _MARGIN
+    out: list[Flowable] = [PageBreak()]
+    out.append(Paragraph("一 检测部位及缺陷位置示意图：附图", styles["section"]))
+    out.append(Spacer(1, 3 * mm))
+    # 清单条数上限：与影像并排的单元格不可分页，过多缺陷会撑爆版心；
+    # 超出部分以总数提示收尾（完整明细已在正文『评定表』逐行列出）。
+    _MAX_LIST = 15
+    shown = list(c.defects)[:_MAX_LIST]
+    lines = [
+        Paragraph(
+            f"D{i} {_defect_class_name(d)}：{_defect_size(d)}，"
+            f"位于 {_defect_position(d, c.pixel_spacing_mm)}",
+            styles["ecell_l"],
+        )
+        for i, d in enumerate(shown, 1)
+    ] or [Paragraph("未检出缺陷。", styles["ecell_l"])]
+    if len(c.defects) > _MAX_LIST:
+        lines.append(Paragraph(f"……共 {len(c.defects)} 处缺陷，明细见评定表。", styles["ecell_l"]))
+    if graph_bytes:
+        img = _scaled_image(graph_bytes, w * 0.6, 75 * mm)
+        grid = Table([[lines, img]], colWidths=[w * 0.38, w * 0.62])
+        grid.setStyle(
+            TableStyle(
+                [
+                    ("BOX", (0, 0), (-1, -1), 0.6, colors.black),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+        out.append(grid)
+    else:
+        out.extend(lines)
+    out.append(Spacer(1, 4 * mm))
+    if orig_bytes:
+        out.append(
+            KeepTogether(
+                [
+                    _scaled_image(orig_bytes, w, 55 * mm),
+                    Paragraph("送检原始影像（未标注）", styles["caption"]),
+                ]
+            )
+        )
+        out.append(Spacer(1, 4 * mm))
+    if c.basis:
+        out.append(Paragraph("二 判定依据条款", styles["section"]))
+        for i, b in enumerate(c.basis, 1):
+            out.append(Paragraph(f"{i}. {b}", styles["fine_l"]))
+        out.append(Spacer(1, 4 * mm))
+    if c.fingerprint:
+        out.append(
+            Paragraph(f"数字指纹：SHA-256:{c.fingerprint}（报告内容防篡改校验）", styles["fine_l"])
+        )
+    out.append(Spacer(1, 6 * mm))
+    date = _cn_date(c.generated_at)
+    out.append(Paragraph(f"检测：{_RT_LEVEL}　　审核：{_RT_LEVEL}　　{date}", styles["sig"]))
+    return out
+
+
+def _roman_level(level: object) -> str:
+    """级别（I/II/III/IV）→ 罗马数字带级（Ⅰ级…）；空值返回 '—'。"""
+    lv = str(level or "").strip().upper()
+    return f"{_ROMAN.get(lv, lv)}级" if lv else "—"
+
+
+def _defect_class_name(d: dict) -> str:
+    """缺陷性质中文名：class_name 优先，缺省按 class_id 映射。"""
+    name = d.get("class_name")
+    if name:
+        return str(name)
+    cid = d.get("class_id")
+    return _CLASS_CN.get(cid, "—") if isinstance(cid, int) else "—"
+
+
+def _defect_position(d: dict, spacing: float | None) -> str:
+    """缺陷位置：bbox 中心坐标（有像素标定换算为 mm，否则 px）。"""
+    bb = d.get("bbox_px")
+    if not bb or len(bb) < 4:
+        return "—"
+    try:
+        x, y, bw, bh = (float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3]))
+    except (TypeError, ValueError):
+        return "—"
+    cx, cy = x + bw / 2.0, y + bh / 2.0
+    if spacing:
+        return f"({cx * spacing:.1f}, {cy * spacing:.1f}) mm"
+    return f"({cx:.0f}, {cy:.0f}) px"
+
+
+def _defect_size(d: dict) -> str:
+    """缺陷尺寸：长×宽（mm）。"""
+    length, width = d.get("length_mm"), d.get("width_mm")
+    if length is not None and width is not None:
+        return f"{length:.1f}×{width:.1f}"
+    return "—"
+
+
+def _cn_date(value: str) -> str:
+    """ISO/时间戳 → 'YYYY年MM月DD日'（解析失败返回原串前 10 位）。"""
+    s = str(value or "").strip()
+    if not s:
+        return ""
+    for candidate in (s[:19].replace(" ", "T"), s[:10]):
+        try:
+            return datetime.fromisoformat(candidate).strftime("%Y年%m月%d日")
+        except ValueError:
+            continue
+    try:
+        return datetime.fromtimestamp(float(s), tz=UTC).strftime("%Y年%m月%d日")
+    except (ValueError, OSError):
+        return s[:10]
+
+
+def _make_styles(font: str) -> dict[str, ParagraphStyle]:
+    """正式报告版式的段落样式（全部使用注册中文字体）。"""
+    return {
+        # 封面
+        "cover_report_no": ParagraphStyle(
+            "crn", fontName=font, fontSize=11, leading=15, alignment=TA_RIGHT
+        ),
+        "cover_sub": ParagraphStyle(
+            "cs", fontName=font, fontSize=16, leading=22, alignment=TA_CENTER
+        ),
+        "cover_big": ParagraphStyle(
+            "cb", fontName=font, fontSize=30, leading=40, alignment=TA_CENTER
+        ),
+        "cover_field": ParagraphStyle("cf", fontName=font, fontSize=14, leading=20),
+        "fp_cap": ParagraphStyle("fpc", fontName=font, fontSize=9, leading=12, alignment=TA_CENTER),
+        "fp_val": ParagraphStyle(
+            "fpv", fontName=font, fontSize=6.5, leading=9, alignment=TA_CENTER
+        ),
+        # 注意事项
+        "notes_title": ParagraphStyle(
+            "nt", fontName=font, fontSize=16, leading=22, alignment=TA_CENTER
+        ),
+        "notes_body": ParagraphStyle("nb", fontName=font, fontSize=10.5, leading=20),
+        # 正文
+        "doc_no": ParagraphStyle("dn", fontName=font, fontSize=9, leading=13, alignment=TA_RIGHT),
+        "table_title": ParagraphStyle(
+            "tt",
+            fontName=font,
+            fontSize=12,
+            leading=16,
+            alignment=TA_CENTER,
+            spaceBefore=4,
+            spaceAfter=4,
+        ),
+        "mlabel": ParagraphStyle("ml", fontName=font, fontSize=9, leading=12, alignment=TA_CENTER),
+        "mval": ParagraphStyle("mv", fontName=font, fontSize=9, leading=12, alignment=TA_CENTER),
+        "ehead": ParagraphStyle("eh", fontName=font, fontSize=9.5, leading=13, alignment=TA_CENTER),
+        "ecell": ParagraphStyle("ec", fontName=font, fontSize=9.5, leading=13, alignment=TA_CENTER),
+        "ecell_l": ParagraphStyle(
+            "ecl", fontName=font, fontSize=9.5, leading=14, alignment=TA_LEFT
+        ),
+        "concl_label": ParagraphStyle("cl", fontName=font, fontSize=11, leading=15),
+        "concl_val": ParagraphStyle(
+            "cv", fontName=font, fontSize=12, leading=18, alignment=TA_CENTER
+        ),
+        "concl_sub": ParagraphStyle(
+            "cs2", fontName=font, fontSize=10, leading=15, alignment=TA_CENTER
+        ),
+        "sig": ParagraphStyle("sg", fontName=font, fontSize=10.5, leading=16),
+        "stamp": ParagraphStyle("st", fontName=font, fontSize=11, leading=18, alignment=TA_CENTER),
+        "section": ParagraphStyle("sec", fontName=font, fontSize=12, leading=16),
+        "caption": ParagraphStyle(
+            "cap",
+            fontName=font,
+            fontSize=8,
+            leading=11,
+            alignment=TA_CENTER,
+            textColor=colors.grey,
+        ),
+        "fine": ParagraphStyle("f", fontName=font, fontSize=8, leading=11),
+        "fine_l": ParagraphStyle("fl", fontName=font, fontSize=8, leading=12),
+    }
 
 
 def _scaled_image(b: bytes, max_w: float, max_h: float = _MAX_IMAGE_H) -> Image:
@@ -429,285 +931,9 @@ def _scaled_image(b: bytes, max_w: float, max_h: float = _MAX_IMAGE_H) -> Image:
     return Image(io.BytesIO(b), width=iw * scale, height=ih * scale)
 
 
-def _image_with_caption(
-    b: bytes, max_w: float, cap: str, styles: dict[str, ParagraphStyle]
-) -> list[Flowable]:
-    return [_scaled_image(b, max_w), Paragraph(cap, styles["caption"])]
-
-
-def _render(
-    pdf_path: Path,
-    content: object,
-    graph_bytes: bytes | None,
-    orig_bytes: bytes | None,
-    font: str,
-    tpl: ReportTemplate,
-) -> None:
-    """渲染报告 PDF（reportlab platypus 流式排版）。
-
-    版式文案由模板数据驱动（§7.2 P2）：标题/小节/字段标签/回退文案/表头
-    均取自 ReportTemplate，渲染算法不变——换模板 = 换 YAML，不改代码。
-    """
-    c = _cast(content)
-    doc = SimpleDocTemplate(
-        str(pdf_path),
-        pagesize=A4,
-        leftMargin=_MARGIN,
-        rightMargin=_MARGIN,
-        topMargin=_MARGIN,
-        bottomMargin=_MARGIN,
-        title=f"{tpl.doc_title_prefix} {c.image_id}",
-        author=tpl.author,
-    )
-    styles = _make_styles(font)
-    flow: list[Flowable] = []
-
-    # 封面标题
-    flow.append(Paragraph(tpl.cover_title, styles["title"]))
-    flow.append(Spacer(1, 4 * mm))
-    flow.append(
-        Paragraph(tpl.meta_report_no.format(v=c.report_id or tpl.fallback), styles["meta"])
-    )
-    flow.append(Paragraph(tpl.meta_image_id.format(v=c.image_id), styles["meta"]))
-    flow.append(Paragraph(tpl.meta_generated_at.format(v=c.generated_at), styles["meta"]))
-    flow.append(Spacer(1, 6 * mm))
-
-    # 工件信息
-    wf = tpl.workpiece_fields
-    flow.append(_section(tpl.section_workpiece, styles))
-    flow.append(
-        _kv_table(
-            [
-                (wf.get("workpiece_no", "工件号"), c.workpiece_no or tpl.fallback),
-                (wf.get("weld_no", "焊口编号"), c.weld_no or tpl.fallback),
-                (wf.get("modality", "影像模态"), f"{c.modality}（{c.source_type}）"),
-            ],
-            styles,
-        )
-    )
-
-    # 检测参数
-    pf = tpl.params_fields
-    flow.append(_section(tpl.section_params, styles))
-    flow.append(
-        _kv_table(
-            [
-                (
-                    pf.get("pixel_spacing", "像素标定"),
-                    f"{c.pixel_spacing_mm:.4f} mm/px" if c.pixel_spacing_mm else tpl.not_provided,
-                ),
-                (
-                    pf.get("thickness", "母材厚度 T"),
-                    f"{c.base_metal_thickness_mm} mm" if c.base_metal_thickness_mm else tpl.not_provided,
-                ),
-                (pf.get("standard", "执行标准"), c.standard_ref or tpl.fallback),
-            ],
-            styles,
-        )
-    )
-
-    # 影像质量校验
-    iqf = tpl.iqi_fields
-    flow.append(_section(tpl.section_iqi, styles))
-    iqi_txt = "通过" if c.iqi_pass else ("不通过" if c.iqi_pass is False else "未校验")
-    achieved = (c.iqi_detail or {}).get("achieved") or tpl.fallback
-    required = (c.iqi_detail or {}).get("required") or tpl.fallback
-    flow.append(
-        _kv_table(
-            [
-                (
-                    iqf.get("iqi", "像质计"),
-                    f"{iqi_txt}（达到丝号 {achieved} / 要求 {required}）",
-                ),
-                (
-                    iqf.get("density", "黑度 D"),
-                    f"{c.density:.3f}" if c.density is not None else tpl.fallback,
-                ),
-                (
-                    iqf.get("density_limit", "黑度门限"),
-                    "AB 级 2.0–4.5" if c.density_ok is not None else tpl.fallback,
-                ),
-                (
-                    iqf.get("evaluable", "可评片性"),
-                    "可评片" if c.evaluable else "不可评片（影像质量不达标）",
-                ),
-            ],
-            styles,
-        )
-    )
-
-    # 缺陷清单
-    flow.append(_section(tpl.section_defects, styles))
-    if c.defects:
-        flow.append(_defects_table(c.defects, styles, tpl.defect_columns))
-    else:
-        flow.append(Paragraph(tpl.defects_empty, styles["body"]))
-
-    # 检测影像对比：送检原始影像 vs 检测标注影像（并排，便于人工判断）
-    flow.append(_section(tpl.section_comparison, styles))
-    flow.extend(_comparison_flow(orig_bytes, graph_bytes, styles))
-
-    # 判定依据
-    flow.append(_section(tpl.section_basis, styles))
-    if c.basis:
-        for i, b in enumerate(c.basis, 1):
-            flow.append(Paragraph(f"{i}. {b}", styles["body"]))
-    else:
-        flow.append(Paragraph(tpl.basis_empty, styles["body"]))
-
-    # 结论
-    flow.append(_section(tpl.section_conclusion, styles))
-    if c.joint_level:
-        flow.append(Paragraph(tpl.level_text.format(level=c.joint_level), styles["verdict"]))
-    else:
-        flow.append(Paragraph(tpl.no_level_text, styles["verdict"]))
-    if c.need_review:
-        flow.append(Paragraph(tpl.review_warn, styles["warn"]))
-    flow.append(Spacer(1, 4 * mm))
-    flow.append(
-        Paragraph(tpl.signer_text.format(signer=c.signer or "____________"), styles["meta"])
-    )
-    if c.fingerprint:
-        flow.append(
-            Paragraph(tpl.fingerprint_text.format(fp=c.fingerprint[:12]), styles["meta"])
-        )
-    flow.append(Spacer(1, 4 * mm))
-    flow.append(Paragraph(tpl.disclaimer_label.format(text=c.disclaimer), styles["fine"]))
-
-    doc.build(flow)
-
-
 def _cast(content: object):
     from backend.domain.report.content import ReportContent
 
     if not isinstance(content, ReportContent):
         raise TypeError("PdfReporter._render 需要 ReportContent")
     return content
-
-
-def _make_styles(font: str) -> dict[str, ParagraphStyle]:
-    base = getSampleStyleSheet()
-    return {
-        "title": ParagraphStyle(
-            "t",
-            parent=base["Title"],
-            fontName=font,
-            fontSize=18,
-            leading=24,
-            alignment=TA_CENTER,
-            spaceAfter=6,
-        ),
-        "meta": ParagraphStyle(
-            "m", parent=base["Normal"], fontName=font, fontSize=9, leading=13, textColor=colors.grey
-        ),
-        "section": ParagraphStyle(
-            "s",
-            parent=base["Heading2"],
-            fontName=font,
-            fontSize=13,
-            leading=17,
-            spaceBefore=6,
-            spaceAfter=4,
-            textColor=colors.HexColor("#1a3a5c"),
-        ),
-        "body": ParagraphStyle("b", parent=base["Normal"], fontName=font, fontSize=10, leading=15),
-        "verdict": ParagraphStyle(
-            "v",
-            parent=base["Normal"],
-            fontName=font,
-            fontSize=13,
-            leading=18,
-            textColor=colors.HexColor("#8b0000"),
-            spaceBefore=2,
-        ),
-        "warn": ParagraphStyle(
-            "w",
-            parent=base["Normal"],
-            fontName=font,
-            fontSize=10,
-            leading=15,
-            textColor=colors.HexColor("#b8860b"),
-        ),
-        "fine": ParagraphStyle(
-            "f", parent=base["Normal"], fontName=font, fontSize=8, leading=11, textColor=colors.grey
-        ),
-        "cell": ParagraphStyle("c", parent=base["Normal"], fontName=font, fontSize=9, leading=12),
-        "caption": ParagraphStyle(
-            "cap",
-            parent=base["Normal"],
-            fontName=font,
-            fontSize=8,
-            leading=11,
-            alignment=TA_CENTER,
-            textColor=colors.grey,
-        ),
-    }
-
-
-def _section(title: str, styles: dict[str, ParagraphStyle]) -> KeepTogether:
-    return KeepTogether([Paragraph(title, styles["section"]), Spacer(1, 1 * mm)])
-
-
-def _kv_table(rows: list[tuple[str, str]], styles: dict[str, ParagraphStyle]) -> Table:
-    data = [[Paragraph(k, styles["cell"]), Paragraph(v, styles["cell"])] for k, v in rows]
-    t = Table(data, colWidths=[40 * mm, None])
-    t.setStyle(
-        TableStyle(
-            [
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#eef2f7")),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ]
-        )
-    )
-    return t
-
-
-def _defects_table(
-    defects: tuple[dict, ...],
-    styles: dict[str, ParagraphStyle],
-    columns: tuple[str, ...] = (),
-) -> Table:
-    header = (
-        list(columns)
-        if columns
-        else ["#", "类别", "形状", "长 L(mm)", "宽 W(mm)", "面积(mm²)", "周长(mm)", "评级"]
-    )
-    rows = [header]
-    for i, d in enumerate(defects, 1):
-        rows.append(
-            [
-                str(i),
-                str(d.get("class_name") or "—"),
-                str(d.get("shape") or "—"),
-                _fmt(d.get("length_mm")),
-                _fmt(d.get("width_mm")),
-                _fmt(d.get("area_mm2")),
-                _fmt(d.get("perimeter_mm")),
-                str(d.get("joint_level") or "—"),
-            ]
-        )
-    data = [[Paragraph(str(c), styles["cell"]) for c in r] for r in rows]
-    t = Table(
-        data, colWidths=[8 * mm, 22 * mm, 14 * mm, 20 * mm, 20 * mm, 22 * mm, 22 * mm, 14 * mm]
-    )
-    t.setStyle(
-        TableStyle(
-            [
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a3a5c")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f5f7fa")]),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ]
-        )
-    )
-    return t
-
-
-def _fmt(v: float | None) -> str:
-    return f"{v:.2f}" if v is not None else "—"

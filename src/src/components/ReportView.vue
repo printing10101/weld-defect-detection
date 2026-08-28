@@ -152,7 +152,7 @@ async function onVerify(): Promise<void> {
       评片报告
     </h1>
     <div class="lede">
-      REPORT {{ result.report_id }} · IMAGE {{ result.image_id }} · 数据来自真实检测流水线
+      报告编号 {{ result.report_id }} · 影像编号 {{ result.image_id }}
     </div>
 
     <ResultBanner :result="result" />

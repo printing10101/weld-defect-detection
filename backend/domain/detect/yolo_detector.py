@@ -254,10 +254,11 @@ class YoloDetector:
         # 此时 shape[1]==4+nc 应转置；若为 [1, anchors, 4+nc] 则无需转置。
         # 旧逻辑 `if out.shape[1] > out.shape[2]` 在本布局下恒为 False（10>8400 不成立），
         # 张量被误读为 [10, 8400]，分类头被错误折叠、所有检出退化为气孔 —— 已修正。
-        nc = len(DefectClass)
-        if (
-            out.shape[1] == 4 + nc
-        ):  # 通道优先 (batch, 4+nc, anchors) → 转置为 (batch, anchors, 4+nc)
+        # 布局自适应：通道维(4+nc)远小于锚框维 → 通道优先需转置。
+        # 不能用 len(DefectClass) 判断——类别扩容（如新增内凹，7 类）后旧 6 类模型
+        # 仍需正确解析（2026-08-28 实测：7 类枚举 + 6 类模型曾致张量误读、分数爆表）。
+        if out.ndim == 3 and out.shape[1] < out.shape[2]:
+            # 通道优先 (batch, 4+nc, anchors) → 转置为 (batch, anchors, 4+nc)
             out = out.transpose(0, 2, 1)
         preds = out[0]  # [anchors, 4+nc]
         boxes_xywh = preds[:, :4]

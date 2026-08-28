@@ -96,9 +96,7 @@ def test_to_yolo_label_normalized_and_clipped() -> None:
 def test_export_training_labels_writes_pool(tmp_path: Path) -> None:
     pool = tmp_path / "training_pool"
     detections = [_det(DefectClass.POROSITY), _det(DefectClass.SLAG, x=50)]
-    out = export_training_labels(
-        "PG101-1-1", detections, 1000, 800, store=FilePoolStore(pool)
-    )
+    out = export_training_labels("PG101-1-1", detections, 1000, 800, store=FilePoolStore(pool))
     assert out.exists()
     lines = out.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 2

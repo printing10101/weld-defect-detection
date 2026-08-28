@@ -34,7 +34,7 @@ function onSubmit(fd: FormData): void {
         开始一次检测
       </h1>
       <div class="lede">
-        UPLOAD · 三步完成 · 全程本地处理
+        选择影像 → 本地流水线处理 → 生成评定报告（数据全程本地处理）
       </div>
       <UploadPanel
         @file-changed="onFileChanged"
@@ -51,7 +51,7 @@ function onSubmit(fd: FormData): void {
         正在处理
       </h1>
       <div class="lede">
-        PROCESSING · 影像已提交至本地流水线
+        影像已提交至本地流水线，正在推理评定
       </div>
       <PipelineTrack
         status="running"
@@ -69,7 +69,7 @@ function onSubmit(fd: FormData): void {
         处理失败
       </h1>
       <div class="lede">
-        RESULT · 后端返回了真实错误信息
+        本次检测失败，可重试或更换影像
       </div>
       <PipelineTrack
         status="error"

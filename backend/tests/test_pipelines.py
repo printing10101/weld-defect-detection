@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -23,7 +22,7 @@ from backend.app.pipelines import (
     _resolve_spacing,
     _shape_of,
 )
-from backend.domain.dto import BBox, DefectClass, DefectShape, Detection
+from backend.domain.dto import BBox, DefectClass, DefectShape, Detection, ImageMeta, Modality
 from backend.domain.errors import IQIFailError
 from backend.domain.quantify import BBoxQuantifier
 
@@ -116,7 +115,7 @@ def test_shape_of_prefers_detection_shape() -> None:
     det = Detection(
         id="x",
         bbox=BBox(0, 0, 40, 40),
-        class_id=list(DefectClass)[0],
+        class_id=next(iter(DefectClass)),
         score=0.9,
         uncertainty=0.1,
         shape=DefectShape.LINEAR,
@@ -130,7 +129,7 @@ def test_shape_of_prefers_detection_shape() -> None:
     det_no_shape = Detection(
         id="y",
         bbox=BBox(0, 0, 40, 40),
-        class_id=list(DefectClass)[0],
+        class_id=next(iter(DefectClass)),
         score=0.9,
         uncertainty=0.1,
         shape=None,
@@ -145,11 +144,12 @@ def test_shape_of_prefers_detection_shape() -> None:
 def test_derive_deep_hole(monkeypatch: pytest.MonkeyPatch) -> None:
     # 固定 density 估计语义，使比较确定
     monkeypatch.setattr(
-        "backend.app.pipelines.estimate_density", lambda arr, bit_depth: float(np.asarray(arr).mean())
+        "backend.app.pipelines.estimate_density",
+        lambda arr, bit_depth: float(np.asarray(arr).mean()),
     )
     da = np.zeros((60, 60), dtype=float)
     da[10:30, 10:30] = 3.0  # 内部黑度远高于母材
-    cls = list(DefectClass)[0]
+    cls = next(iter(DefectClass))
     d_in = Detection(
         id="d1",
         bbox=BBox(10, 10, 20, 20),
@@ -160,7 +160,9 @@ def test_derive_deep_hole(monkeypatch: pytest.MonkeyPatch) -> None:
         mask_ref=None,
         deep_hole=False,
     )
-    out = _derive_deep_hole([d_in], SimpleNamespace(density_array=da), base_density=1.0, bit_depth=8)
+    out = _derive_deep_hole(
+        [d_in], ImageMeta(modality=Modality.CR, density_array=da), base_density=1.0, bit_depth=8
+    )
     assert out[0].deep_hole is True
 
     # 低密度区不应标 deep_hole
@@ -174,12 +176,14 @@ def test_derive_deep_hole(monkeypatch: pytest.MonkeyPatch) -> None:
         mask_ref=None,
         deep_hole=False,
     )
-    out2 = _derive_deep_hole([d_low], SimpleNamespace(density_array=da), base_density=1.0, bit_depth=8)
+    out2 = _derive_deep_hole(
+        [d_low], ImageMeta(modality=Modality.CR, density_array=da), base_density=1.0, bit_depth=8
+    )
     assert out2[0].deep_hole is False
 
 
 def test_derive_deep_hole_no_density_array_passthrough() -> None:
-    cls = list(DefectClass)[0]
+    cls = next(iter(DefectClass))
     d_in = Detection(
         id="d1",
         bbox=BBox(0, 0, 5, 5),
@@ -191,4 +195,9 @@ def test_derive_deep_hole_no_density_array_passthrough() -> None:
         deep_hole=False,
     )
     # 无 density_array → 原样返回，不臆造
-    assert _derive_deep_hole([d_in], SimpleNamespace(density_array=None), 1.0, 8)[0].deep_hole is False
+    assert (
+        _derive_deep_hole([d_in], ImageMeta(modality=Modality.CR, density_array=None), 1.0, 8)[
+            0
+        ].deep_hole
+        is False
+    )

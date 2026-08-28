@@ -16,7 +16,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from backend.app.dependencies import Registry, get_operator_name, get_registry, _resolve_path
+from backend.app.dependencies import Registry, _resolve_path, get_operator_name, get_registry
 from backend.app.pipelines import InspectionPipeline
 from backend.app.routers._common import parse_roi, staged_upload
 from backend.infra.fs import safe_resolve
@@ -52,7 +52,9 @@ class ReportDetectionsOut(BaseModel):
     image_stem: str
     image_w: int
     image_h: int
-    defects: list[dict[str, Any]]  # 每项：id,class_id,bbox,confidence,uncertainty,reviewed,need_review
+    defects: list[
+        dict[str, Any]
+    ]  # 每项：id,class_id,bbox,confidence,uncertainty,reviewed,need_review
 
 
 @router.post("/report", response_model=ReportOut)

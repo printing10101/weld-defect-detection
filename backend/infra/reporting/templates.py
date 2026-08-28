@@ -126,14 +126,16 @@ def _read_template(name: str, templates_dir: Path) -> dict:
         raise ValueError(f"报告模板不存在: {name}")
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except Exception as exc:  # noqa: BLE001 - YAML 损坏 → 回退
+    except Exception as exc:
         raise ValueError(f"报告模板解析失败: {name}: {exc}") from exc
     if not isinstance(raw, dict):
-        raise ValueError(f"报告模板结构非法: {name}")
+        raise TypeError(f"报告模板结构非法（应为映射）: {name}")
     return raw
 
 
-def load_report_template(name: str = _DEFAULT_NAME, templates_dir: Path | None = None) -> ReportTemplate:
+def load_report_template(
+    name: str = _DEFAULT_NAME, templates_dir: Path | None = None
+) -> ReportTemplate:
     """按名加载报告模板（深合并 standard；未知/损坏回退 standard，不阻断出片）。
 
     ``name`` 允许带 ``.yaml`` 后缀；路径消毒：仅 ``[A-Za-z0-9_-]`` 字符，

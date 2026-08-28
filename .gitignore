@@ -39,10 +39,6 @@ backend/data/
 data/eval/.gate_work/
 data/experiments/
 runs/
-图片/
-train_status.json
-measure_signals.json
-x.txt
 backend/models/weights/*.onnx
 backend/models/weights/*.pt
 
@@ -69,18 +65,23 @@ nul
 .DS_Store
 Thumbs.db
 
-# Temp extraction from 射线竞赛.rar (analysis only, not project source)
-射线竞赛/
-_read_docx.py
-data/m6_demo_report.pdf
+# Vite 构建崩溃临时产物
 src/vite.build.config.ts.timestamp-*.mjs
 src/vite.config.ts.timestamp-*.mjs
-
-# 根目录一次性验证/错误产物（可重跑脚本再生，不入库）
-_verify_model_result*.json
-git_commit_err.txt
 
 # 运行时密钥/吊销状态/内存（绝不入库）
 .dsh-memory/
 data/.auth_secret
 data/.revoked_tokens.json
+
+# 私有资料（绝不入库）：用户自有底片/照片、竞赛文档、标准原文（受版权保护，
+# 不得转载分发）、本地运行时产物
+图片/
+射线竞赛/
+承压设备射线检测缺陷自动识别系统评价方法.pdf
+measure_signals.json
+train_status.json
+data/m6_demo_report.pdf
+data/eval/std_eval.json
+data/eval/std_record.json
+data/eval/std_personnel.json

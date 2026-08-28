@@ -29,6 +29,7 @@ _HIGH_VALUE_CLASSES = {
     DefectClass.LACK_OF_FUSION,
     DefectClass.INCOMPLETE_PENETRATION,
     DefectClass.UNDERCUT,
+    DefectClass.CONCAVITY,
 }
 
 

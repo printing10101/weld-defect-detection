@@ -31,7 +31,7 @@ async function loadPool(): Promise<void> {
   poolLoading.value = true;
   try {
     pool.value = await activePool();
-  } catch (e) {
+  } catch {
     pool.value = null; // 训练池不可用不影响档案主流程
   } finally {
     poolLoading.value = false;
@@ -100,7 +100,7 @@ const levelOptions = ["", "I", "II", "III", "IV"] as const;
       档案检索
     </h1>
     <div class="lede">
-      RECORDS · 处理结果自动归档，可随时回来查看（真实后端数据）
+      检索已归档的检测记录（数据来自本地数据库）
     </div>
 
     <!-- 主动学习训练池（M7） -->

@@ -8,6 +8,7 @@ P1-F 审计增强（可空列，向后兼容）：
 - images.batch_no   : 批量追溯（batch 导入/复评批次）
 - defects.disposition: 处置建议快照（accept | conditional | rework | recheck）
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa

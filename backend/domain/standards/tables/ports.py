@@ -7,13 +7,16 @@
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:  # 仅类型检查用，避免与 loader 运行时循环导入
+    from backend.domain.standards.tables.loader import StandardTables
 
 
 @runtime_checkable
 class TableSource(Protocol):
     """标准数值表数据源（模型无关，ADR-002 同构）。"""
 
-    def load(self, standard_id: str, filename: str | None = None) -> "StandardTables":
+    def load(self, standard_id: str, filename: str | None = None) -> StandardTables:
         """加载并校验标准数值表；文件缺失/结构不符抛错（启动即失败）。"""
         ...

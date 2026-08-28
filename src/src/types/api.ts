@@ -1,7 +1,9 @@
 /**
- * 前端类型（镜像 backend/domain/dto.py，§T6）。
- * TODO(T6 收尾)：由后端 openapi.json 经 openapi-typescript 生成，
- * 本文件随后替换为生成产物，禁止手工维护分叉。
+ * 前端类型（§T6）：镜像后端 Pydantic 响应模型（backend/app/routers/*.py）
+ * 与领域枚举/结构（backend/domain/dto.py 的 BBox、Detection、DefectClass 等）。
+ * 本文件是仓库唯一的前端契约真相；后端同名 response_model 新增/改名时，
+ * 须同步本文件，由 backend/tests/test_frontend_contract.py 做字段对账防漂移。
+ * 不依赖 openapi 自动生成产物。
  */
 export const DefectClass = {
   POROSITY: 0,
@@ -48,7 +50,7 @@ export interface ApiError {
 
 /* ── 真实后端契约（镜像 backend/app/routers/report.py · records.py · review.py）── */
 
-/** 顶层视图（RailNav 导航目标） */
+/** 顶层视图（菜单栏/工具栏/标签页导航目标） */
 export type ViewId = "journey" | "archive" | "batch" | "device";
 
 /** POST /api/v1/report → ReportOut */
@@ -326,4 +328,14 @@ export interface ReportDetectionsOut {
   image_w: number;
   image_h: number;
   defects: ReportDetection[];
+}
+
+/** 底片查看器变换状态（FilmViewer 双片对比同步用，DB50/T 1807 §6.1.5） */
+export interface Transform {
+  scale: number;
+  tx: number;
+  ty: number;
+  rotation: number;
+  flipH: boolean;
+  flipV: boolean;
 }

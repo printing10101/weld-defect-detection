@@ -147,7 +147,23 @@ standard:
   tables_filename: nb47013.yaml
 review:
   kappa_threshold: 0.8  # Cohen's κ 高度一致阈值（§15.3）；低于则升级仲裁
+observability:
+  log_format: text             # text=人类可读（本地默认）；json=结构化单行日志（可观测接入）
+  enable_metrics: true         # 进程内指标采集（/api/v1/metrics 导出）
 batch:
   workers: 2            # 批量并行 worker 数（§12.1）
   max_per_batch: 100    # 单批最大图数（防一次性打爆资源）
   per_image_estimate_sec: 8.0  # 单图预估耗时（进度/预计时间展示用）
+std_eval:  # DB50/T 1807-2025 标准评价（§9~§11）
+  iou_standard: 0.1     # 标准口径（§9.2：IOU≥0.1 即位置匹配）
+  iou_strict: 0.3       # 严格口径（比标准严：双阈值并行，分级取较差者）
+  weld_form: single     # single=单面焊（重点关注含内凹/咬边，默认取严）
+  weld_method: manual   # manual/auto（FRR 分级线不同：10%/8%）
+  strict_frr: true      # FRR 判定线取收紧值（自动3%/手工4%，即标准 L2 线）
+  frr_l1_auto: 0.08
+  frr_l1_manual: 0.10
+  frr_strict_auto: 0.03
+  frr_strict_manual: 0.04
+  aspect_round_max: 3.0  # 夹渣形状分流：L/W<=3 归圆形缺陷
+  eval_dir: data/eval
+  personnel_path: data/eval/std_personnel.json  # 评价/标注人员资质（TSG Z8001）

@@ -59,16 +59,35 @@ class IQIVerifier(Protocol):
 
 @runtime_checkable
 class Quantifier(Protocol):
-    """缺陷量化（§5.4）。"""
+    """缺陷量化（§5.4）。
+
+    方法说明：
+    - `measure`: 仅用检测框几何近似量化（契约必需，供无图场景）；
+    - `quantify`: 可选图像感知量化（有图时调用，可复用 measure 回退）。
+      所有生产量化器均实现 quantify，供 pipeline 统一入口调用。
+    """
 
     def measure(self, detection: Detection, pixel_spacing_mm: float) -> Geometry: ...
+
+    def quantify(
+        self,
+        detection: Detection,
+        pixel_spacing_mm: float,
+        *,
+        image: np.ndarray | None = None,
+        cfg: Any = None,
+    ) -> Geometry: ...
 
 
 @runtime_checkable
 class Reporter(Protocol):
-    """报告生成（§7.2）。返回 PDF 路径。"""
+    """报告生成（§7.2）。返回 PDF 路径。
 
-    def build(self, image_id: str, template: str) -> str: ...
+    `gray` 为可选优化：pipeline 已解码的灰度底片，复用以避免报告渲染二次解码；
+    调用方可省略（实现需自行加载）。
+    """
+
+    def build(self, image_id: str, template: str, gray: np.ndarray | None = None) -> str: ...
 
 
 @runtime_checkable

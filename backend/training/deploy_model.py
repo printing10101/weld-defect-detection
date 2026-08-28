@@ -118,7 +118,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="训练后部署（导出+拷贝+回归）")
     ap.add_argument("--src", required=True, help="best.pt 路径")
     ap.add_argument("--limit", type=int, default=24, help="回归图数")
-    ap.add_argument("--skip-export", action="store_true", help="跳过导出（仅拷贝+回归，用现有 onnx）")
+    ap.add_argument(
+        "--skip-export", action="store_true", help="跳过导出（仅拷贝+回归，用现有 onnx）"
+    )
     args = ap.parse_args()
 
     src_pt = Path(args.src)

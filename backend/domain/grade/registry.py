@@ -33,6 +33,7 @@ class GraderSpec:
     cls: type[StandardGrader]
     meta: dict[str, Any]  # name/grades_defects/levels/table_required/table_filename/note
 
+
 # standard_id → 实现类（键与规格书 §6.1 / 表文件 standard_id 一致）
 _GRADERS: dict[str, type[StandardGrader]] = {
     "NB/T47013.2-2015": Nb47013Grader,

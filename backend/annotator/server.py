@@ -47,8 +47,8 @@ def _safe_image_path(name: str) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-# 6 类，与 class_map / planB / real_finetune 一致
-CLASS_NAMES = ["气孔", "夹渣", "未焊透", "未熔合", "裂纹", "咬边"]
+# 7 类，与 class_map / DefectClass 一致（2026-08 内凹拆分为独立类，索引 6）
+CLASS_NAMES = ["气孔", "夹渣", "未焊透", "未熔合", "裂纹", "咬边", "内凹"]
 
 HERE = Path(__file__).resolve().parent
 INDEX_HTML = HERE / "index.html"

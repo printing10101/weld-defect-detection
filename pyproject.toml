@@ -72,7 +72,6 @@ omit = [
     "backend/training/*",
     "backend/annotator/*",
     "backend/evaluation/*",
-    "backend/_measure_signals.py",
     "*/__init__.py",
     "*/test_*",
 ]

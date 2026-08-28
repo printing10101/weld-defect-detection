@@ -128,7 +128,7 @@ onMounted(() => {
       设备标定
     </h1>
     <div class="lede">
-      DEVICE · 标定档案 · 跨设备一致率 ≤ 5%
+      检测设备注册与像素标定管理，跨设备一致性判定（偏差 ≤ 5% 达标）
     </div>
 
     <div class="guide">

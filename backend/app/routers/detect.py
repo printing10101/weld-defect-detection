@@ -19,8 +19,8 @@ from pydantic import BaseModel
 
 from backend.app.dependencies import Registry, get_registry
 from backend.app.routers._common import staged_upload
-from backend.domain.quantify import get_quantifier, refine_detections
 from backend.domain.quantify import MaskRefineCfg as DomainMaskRefineCfg
+from backend.domain.quantify import get_quantifier, refine_detections
 from backend.domain.spacing import resolve_spacing  # 单一真源（§T8/§6）
 from backend.infra.image_loader import load_image
 

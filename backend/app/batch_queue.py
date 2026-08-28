@@ -233,9 +233,7 @@ class BatchManager:
         惰性重建，使单例 BatchManager 在进程内可继续接收提交（生产真实退出后
         不再有新提交，不受影响）。"""
         if self._closed:
-            self._pool = ThreadPoolExecutor(
-                max_workers=self._workers, thread_name_prefix="batch"
-            )
+            self._pool = ThreadPoolExecutor(max_workers=self._workers, thread_name_prefix="batch")
             self._closed = False
 
     # ------------------------------------------------------------------

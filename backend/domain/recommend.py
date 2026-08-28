@@ -62,7 +62,9 @@ class Recommendation:
     disclaimer: str | None = None
 
 
-def _rework(standard_id: str, zero_tolerance: bool = False, disclaimer: str | None = None) -> Recommendation:
+def _rework(
+    standard_id: str, zero_tolerance: bool = False, disclaimer: str | None = None
+) -> Recommendation:
     basis = (
         "存在零容忍类缺陷（裂纹/未熔合/未焊透），NB/T47013.2-2015 规定 I-III 级均不允许"
         if zero_tolerance

@@ -69,7 +69,9 @@ def _patch_torchvision_nms() -> None:
         import torchvision
 
         torchvision.ops.nms = _nms
-        print("[train_gpu] torchvision.ops.nms 已替换为纯 torch 实现（CPU torchvision 缺 CUDA 内核）")
+        print(
+            "[train_gpu] torchvision.ops.nms 已替换为纯 torch 实现（CPU torchvision 缺 CUDA 内核）"
+        )
     except Exception as exc:  # noqa: BLE001 - 非目标环境无需补丁
         print(f"[train_gpu] nms patch skipped: {exc}")
 

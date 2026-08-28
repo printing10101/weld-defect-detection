@@ -14,7 +14,7 @@ from backend.infra.migrate import ensure_migrations
 
 # schema 演进：0001 基线 + 0002（devices/calibrations + reports 数字签名字段）+ 0003（P1-F 审计增强）
 #   + 0004（删除 users 表：移除用户/认证系统，改操作员姓名机制）
-_HEAD = "0004_drop_users"
+_HEAD = "0005_defect_review_source"
 
 
 def test_migrate_fresh_db_creates_tables(tmp_path) -> None:
@@ -66,7 +66,7 @@ def test_migrate_empty_version_legacy_db_applies_only_new_migrations(tmp_path) -
         cols_defects = {r[1] for r in c.exec_driver_sql("PRAGMA table_info(defects)").fetchall()}
         ver = c.exec_driver_sql("SELECT version_num FROM alembic_version").fetchone()
     eng.dispose()
-    assert ver[0] == _HEAD
+    assert ver is not None and ver[0] == _HEAD
     assert "batch_no" in cols_images  # P1-F：images.batch_no
     assert "disposition" in cols_defects  # P0-E/P1-F：defects.disposition
 

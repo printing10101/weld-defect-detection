@@ -98,6 +98,12 @@ class DefectRecord(Base):
     disposition: Mapped[str | None] = mapped_column(
         String(16), default=None
     )  # 处置建议（P0-E/P1-F）：accept | conditional | rework | recheck（机器可读）
+    source: Mapped[str | None] = mapped_column(
+        String(16), default=None
+    )  # 来源（0005/DB50/T 1807 §6.1.4）：auto=检测器 | manual=人工复核添加
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=None
+    )  # 软删除时间（复核删除不物理清除，供审计追溯）
 
 
 class ReportRecord(Base):

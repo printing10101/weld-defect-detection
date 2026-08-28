@@ -8,19 +8,34 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
-import backend.app.plugins as plugins
+from backend.app import plugins
 from backend.app.plugins import bootstrap_plugins
-from backend.domain.detect.registry import DetectorSpec, get_detector, supported_detector_kinds
-from backend.domain.detect.registry import _DETECTOR_SPECS
+from backend.domain.detect.registry import (
+    _DETECTOR_SPECS,
+    DetectorSpec,
+    get_detector,
+    supported_detector_kinds,
+)
 from backend.domain.errors import ModelUnavailableError
-from backend.domain.grade.registry import GraderSpec, get_grader, standard_capabilities
-from backend.domain.grade.registry import supported_standard_ids
-from backend.domain.grade.registry import _GRADERS, _STANDARD_META
-from backend.domain.quantify import QuantifierSpec, get_quantifier, supported_quantifier_kinds
-from backend.domain.quantify import _QUANTIFIER_SPECS
-
+from backend.domain.grade.registry import (
+    _GRADERS,
+    _STANDARD_META,
+    GraderSpec,
+    get_grader,
+    standard_capabilities,
+    supported_standard_ids,
+)
+from backend.domain.interfaces import DefectDetector, Quantifier
+from backend.domain.quantify import (
+    _QUANTIFIER_SPECS,
+    QuantifierSpec,
+    get_quantifier,
+    supported_quantifier_kinds,
+)
 
 # ---------------------------------------------------------------------------
 # 测试夹具
@@ -66,7 +81,10 @@ _FAKE_GRADER_SPEC = GraderSpec(
     },
 )
 _FAKE_QUANT_SPEC = QuantifierSpec(
-    kind="plugin_q", display_name="插件量化器 (P2)", cls=type("PluginQ", (), {}), needs_image=False
+    kind="plugin_q",
+    display_name="插件量化器 (P2)",
+    cls=cast(type[Quantifier], type("PluginQ", (), {})),
+    needs_image=False,
 )
 
 
@@ -105,7 +123,10 @@ def test_register_detector_kind_conflict_raises() -> None:
             # 同 kind 不同实现类 → 拒绝覆盖（防插件静默顶替内置）
             register_detector_kind(
                 DetectorSpec(
-                    kind="plugin_det", display_name="x", cls=_FakeDetector2, needs_model=False
+                    kind="plugin_det",
+                    display_name="x",
+                    cls=cast(type[DefectDetector], _FakeDetector2),
+                    needs_model=False,
                 )
             )
     finally:
@@ -155,7 +176,12 @@ def test_register_quantifier_kind_and_resolve() -> None:
         assert type(q).__name__ == "PluginQ"  # 经 spec.cls() 通用构造
         with pytest.raises(ModelUnavailableError):
             register_quantifier_kind(
-                QuantifierSpec(kind="plugin_q", display_name="x", cls=object, needs_image=False)
+                QuantifierSpec(
+                    kind="plugin_q",
+                    display_name="x",
+                    cls=cast(type[Quantifier], object),
+                    needs_image=False,
+                )
             )
     finally:
         _cleanup()

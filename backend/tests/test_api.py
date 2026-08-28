@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
@@ -9,9 +11,19 @@ from backend.app.main import app
 
 def test_health_ok() -> None:
     with TestClient(app) as client:
-        resp = client.get("/api/v1/health")
-    assert resp.status_code == 200
-    body = resp.json()
+        # registry 已改为后台线程装配（启动提速）：health 先返回 starting，
+        # 轮询至装配完成后必须为 ok。
+        deadline = time.monotonic() + 30.0
+        body: dict = {}
+        while time.monotonic() < deadline:
+            resp = client.get("/api/v1/health")
+            assert resp.status_code == 200
+            body = resp.json()
+            if body.get("status") == "ok":
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError(f"registry 未在超时内就绪: {body}")
     assert body["status"] == "ok"
     assert "active_version" in body
     # §7.6 端边云 v1：健康检查暴露本地同步适配器状态（M6）

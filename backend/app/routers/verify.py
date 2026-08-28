@@ -23,7 +23,6 @@ from backend.domain.density import check_density, estimate_density
 from backend.domain.iqi import IqiConfig, enrich_grade, verify_iqi
 from backend.domain.pseudo_defect import PseudoDefectCfg, screen_pseudo_defects
 from backend.infra.image_loader import load_image
-from backend.infra.reporting.pdf_reporter import report_fingerprint
 
 router = APIRouter(tags=["verify"])
 
@@ -173,6 +172,9 @@ def verify_report(
             status_code=404,
             detail={"code": "NOT_FOUND", "message": f"image not found: {rep['image_id']}"},
         )
+    # reportlab 导入较慢，延迟到实际校验时（不占进程导入→端口绑定关键路径）。
+    from backend.infra.reporting.pdf_reporter import report_fingerprint
+
     recomputed = report_fingerprint(image, image.get("defects") or [], rep)
     valid = recomputed == stored
     return VerifyOut(

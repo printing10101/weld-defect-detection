@@ -470,6 +470,127 @@ class InspectionPipeline:
             dest.write_bytes(cipher.encrypt(plaintext))
         return dest
 
+    # ---- 人工复核缺陷增删改（DB50/T 1807-2025 §6.1.4）----
+    # 增/改/删后自动重评级并重生成报告（不重跑检测器）；每次变更由仓储层写审计哈希链。
+
+    def add_defect(
+        self, *, image_id: str, class_id: int, bbox_px: list[float], operator: str, reason: str
+    ) -> dict:
+        """人工添加缺陷框 → 重评级 → 重出报告。"""
+        if not 0 <= int(class_id) < len(DefectClass):
+            raise ValueError(f"class_id out of range: {class_id}")
+        if len(bbox_px) != 4 or any(v < 0 for v in bbox_px):
+            raise ValueError("bbox_px must be [x,y,w,h] with non-negative values")
+        row = self._reg.repository.add_manual_defect(
+            image_id=image_id, class_id=int(class_id), bbox_px=bbox_px,
+            operator=operator, reason=reason,
+        )
+        result = self._regrade_and_report(image_id)
+        return {"defect": row, **result}
+
+    def edit_defect(
+        self,
+        *,
+        defect_id: str,
+        operator: str,
+        reason: str,
+        class_id: int | None = None,
+        bbox_px: list[float] | None = None,
+    ) -> dict:
+        """人工修改缺陷类型/位置 → 重评级 → 重出报告。"""
+        if class_id is not None and not 0 <= int(class_id) < len(DefectClass):
+            raise ValueError(f"class_id out of range: {class_id}")
+        if bbox_px is not None and (len(bbox_px) != 4 or any(v < 0 for v in bbox_px)):
+            raise ValueError("bbox_px must be [x,y,w,h] with non-negative values")
+        row = self._reg.repository.edit_defect(
+            defect_id=defect_id, operator=operator, reason=reason,
+            class_id=class_id, bbox_px=bbox_px,
+        )
+        result = self._regrade_and_report(row["image_id"])
+        return {"defect": row, **result}
+
+    def delete_defect(self, *, defect_id: str, operator: str, reason: str) -> dict:
+        """人工删除缺陷（软删除）→ 重评级 → 重出报告。"""
+        row = self._reg.repository.delete_defect(
+            defect_id=defect_id, operator=operator, reason=reason
+        )
+        result = self._regrade_and_report(row["image_id"])
+        return {"defect": row, **result}
+
+    def _regrade_and_report(self, image_id: str) -> dict:
+        """按库内现存缺陷重评级（不重跑检测器）→ 重生成报告 PDF。
+
+        熔断语义与 run_inspection 一致：缺标定/厚度/表格未授权 → joint_level=None
+        + need_review=True（不输出级别，人工兜底）。
+        """
+        repo = self._reg.repository
+        image = repo.get_image(image_id)
+        if image is None:
+            raise KeyError(f"image not found: {image_id}")
+        defects = []
+        for d in image.get("defects") or []:
+            bbox = d.get("bbox_px") or [0.0, 0.0, 1.0, 1.0]
+            defects.append(
+                Detection(
+                    id=str(d.get("id", "")),
+                    bbox=BBox(*(float(v) for v in bbox[:4])),
+                    class_id=DefectClass(int(d["class_id"])),
+                    score=float(d.get("confidence", 0.0)),
+                    uncertainty=float(d.get("uncertainty", 1.0)),
+                )
+            )
+        try:
+            modality = Modality(image.get("modality") or "GENERIC")
+        except ValueError:
+            modality = Modality.GENERIC
+        spacing = image.get("pixel_spacing_mm")
+        context = ImageMeta(
+            modality=modality,
+            pixel_spacing_mm=spacing if spacing and spacing > 0 else None,
+            base_metal_thickness_mm=image.get("base_metal_thickness_mm"),
+        )
+        quantifier = get_quantifier("bbox")
+        spacing_eff = spacing if spacing and spacing > 0 else 1.0
+        try:
+            grade = self._reg.grader.grade(defects, context)
+            joint_level = grade.joint_level.value
+            per = {
+                str(d.id): g.value for d, g in zip(defects, grade.per_defect_grade)
+            }
+            need_review = bool(grade.need_review)
+        except GradingAmbiguousError as exc:
+            joint_level = None
+            per = {}
+            need_review = True
+            _LOG.info("regrade fused image_id=%s reason=%s", image_id, exc)
+        geometry = {
+            str(d.id): {
+                "shape": _shape_of(d, g, self._reg.config.detect.round_aspect_max).value,
+                "length_mm": g.length_mm,
+                "width_mm": g.width_mm,
+                "area_mm2": g.area_mm2,
+                "perimeter_mm": g.perimeter_mm,
+                "position_x": g.position_x_mm,
+                "position_y": g.position_y_mm,
+            }
+            for d, g in ((d, quantifier.quantify(d, spacing_eff)) for d in defects)
+        }
+        repo.store_regrade(
+            image_id,
+            joint_level=joint_level,
+            per_defect_levels=per,
+            need_review=need_review,
+            geometry=geometry,
+        )
+        # 报告级联失效：重出 PDF（内容指纹随缺陷/级别变化而更新）
+        self.regenerate_report(image_id)
+        return {
+            "image_id": image_id,
+            "joint_level": joint_level,
+            "need_review": need_review,
+            "defect_count": len(defects),
+        }
+
     def apply_review(
         self,
         *,

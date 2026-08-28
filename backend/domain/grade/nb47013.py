@@ -31,8 +31,6 @@ _ZERO_TOLERANCE = {
     DefectClass.INCOMPLETE_PENETRATION,
 }
 _ORDER = {JointLevel.I: 1, JointLevel.II: 2, JointLevel.III: 3, JointLevel.IV: 4}
-
-
 class Nb47013Grader:
     """NB/T47013.2-2015 评级实现。"""
 
@@ -74,8 +72,12 @@ class Nb47013Grader:
                 need_review=True,
             )
 
-        round_defs = [d for d in defects if self._is_round(d, spacing)]
-        linear_defs = [d for d in defects if not self._is_round(d, spacing)]
+        # 内凹（DB50/T 1807 重点关注缺陷）：按深度评定，深度未测无法自动定级 →
+        # 暂按Ⅲ级保守处理并强制人工复核，不参与圆形/条形点数聚合（防污染其口径）。
+        concav_defs = [d for d in defects if d.class_id is DefectClass.CONCAVITY]
+        graded_defs = [d for d in defects if d.class_id is not DefectClass.CONCAVITY]
+        round_defs = [d for d in graded_defs if self._is_round(d, spacing)]
+        linear_defs = [d for d in graded_defs if not self._is_round(d, spacing)]
         round_level = self._grade_round(round_defs, t, spacing)
         linear_level = self._grade_linear(linear_defs, t, spacing)
 
@@ -93,10 +95,19 @@ class Nb47013Grader:
             joint = round_level if _ORDER[round_level] >= _ORDER[linear_level] else linear_level
             basis = ("单一类型缺陷取最差级别",)
 
+        if concav_defs:
+            # 保守暂定Ⅲ级：宁可偏严进入人工复核，也不因深度缺失而放行
+            joint = max((joint, JointLevel.III), key=lambda L: _ORDER[L])
+            basis = basis + (
+                "内凹为重点关注缺陷，按深度评定需深度数据，暂按Ⅲ级保守处理并强制人工复核",
+            )
+
         # 逐缺陷级别（供报告缺陷清单与 κ 一致性计算，杜绝统一复制）
         per: list[JointLevel] = []
         for d in defects:
-            if d.class_id in _ZERO_TOLERANCE or d.deep_hole:
+            if d.class_id is DefectClass.CONCAVITY:
+                per.append(JointLevel.III)  # 保守暂定，强制人工复核后覆盖
+            elif d.class_id in _ZERO_TOLERANCE or d.deep_hole:
                 per.append(JointLevel.IV)
             elif self._is_round(d, spacing):
                 per.append(self._grade_round([d], t, spacing))
@@ -106,7 +117,7 @@ class Nb47013Grader:
         # §6.4 尺寸临界（长径≈T/2、点数压线、条形长度压线）→ 需人工复核
         near_critical = self._near_critical(defects, round_defs, t, spacing)
         return self._result(
-            joint, tuple(per), basis, need_review=bool(needs_human or near_critical)
+            joint, tuple(per), basis, need_review=bool(needs_human or near_critical or concav_defs)
         )
 
     def _grade_round(self, round_defs: list[Detection], t: float, spacing: float) -> JointLevel:
@@ -205,8 +216,8 @@ class Nb47013Grader:
         """
         half_t = t / 2
         for d in defects:
-            if d.class_id in _ZERO_TOLERANCE:
-                continue  # 零容忍已强制 need_review
+            if d.class_id in _ZERO_TOLERANCE or d.class_id is DefectClass.CONCAVITY:
+                continue  # 零容忍已强制 need_review；内凹深度未测亦已强制 need_review
             dia = self._diameter_mm(d, spacing)
             if self._is_round(d, spacing):
                 if 0.9 * half_t <= dia <= half_t:  # 长径接近 T/2 直判线

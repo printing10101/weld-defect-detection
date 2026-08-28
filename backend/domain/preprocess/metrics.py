@@ -18,9 +18,9 @@ from typing import cast
 
 import cv2
 import numpy as np
-from scipy.optimize import brentq
-from scipy.signal import convolve2d
-from scipy.special import gamma as _gamma
+
+# scipy 导入耗时 ~1s（冷启动更久），仅在相关函数首次调用时加载，
+# 使后端进程导入期（决定端口绑定速度）不被 scipy 拖慢。
 
 
 def _data_range(a: np.ndarray) -> float:
@@ -91,6 +91,8 @@ def _mscn_coefficients(gray: np.ndarray) -> np.ndarray:
     img = gray.astype(np.float64)
     if img.size and img.max() > 1.0:
         img = img / 255.0
+    from scipy.signal import convolve2d
+
     ker = _gaussian_kernel(7, 7.0 / 6.0)
     mu = convolve2d(img, ker, mode="same", boundary="symm")
     mu_sq = convolve2d(img * img, ker, mode="same", boundary="symm")
@@ -113,6 +115,9 @@ def _ggd_params(x: np.ndarray) -> tuple[float, float]:
     α 由矩比 R = E[|x|]² / E[x²] = Γ(2/α)² / (Γ(1/α)Γ(3/α)) 反解（R 随 α 单调递增），
     单变量 brentq 求根；σ = √E[x²]。数学已用理论矩一致性验证。
     """
+    from scipy.optimize import brentq
+    from scipy.special import gamma as _gamma
+
     x = x.astype(np.float64).ravel()
     if x.size == 0:
         return 1.0, 1.0
@@ -140,6 +145,9 @@ def _aggd_params(x: np.ndarray) -> tuple[float, float, float, float]:
     u=(S+√(S²−μ²))/G2、v=μ/G2，且 α 满足 (u²+3v²)/4·G3 = σ²。
     单变量 brentq 对 α 求根后回代 β_l=(u+v)/2、β_r=(u−v)/2。
     """
+    from scipy.optimize import brentq
+    from scipy.special import gamma as _gamma
+
     x = x.astype(np.float64).ravel()
     if x.size == 0:
         return 1.0, 0.0, 1.0, 1.0

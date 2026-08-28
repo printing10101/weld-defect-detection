@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
 import pytest
 
@@ -33,19 +35,28 @@ class ScaleAwareDetector(YoloDetector):
         if abs(w - 512) < 4:  # 0.8 * 640：两条低置信，还原后完全落在 1.0x 框内
             return [
                 Detection(
-                    id="a", bbox=BBox(cx - 15, cy - 4, 30, 8),
-                    class_id=DefectClass.POROSITY, score=0.6, uncertainty=0.3,
+                    id="a",
+                    bbox=BBox(cx - 15, cy - 4, 30, 8),
+                    class_id=DefectClass.POROSITY,
+                    score=0.6,
+                    uncertainty=0.3,
                 ),
                 Detection(
-                    id="b", bbox=BBox(cx - 5, cy - 4, 30, 8),
-                    class_id=DefectClass.POROSITY, score=0.7, uncertainty=0.3,
+                    id="b",
+                    bbox=BBox(cx - 5, cy - 4, 30, 8),
+                    class_id=DefectClass.POROSITY,
+                    score=0.7,
+                    uncertainty=0.3,
                 ),
             ]
         # 1.0x 与 1.25x：单条高置信
         return [
             Detection(
-                id="c", bbox=BBox(cx - 20, cy - 5, 60, 10),
-                class_id=DefectClass.POROSITY, score=0.9, uncertainty=0.2,
+                id="c",
+                bbox=BBox(cx - 20, cy - 5, 60, 10),
+                class_id=DefectClass.POROSITY,
+                score=0.9,
+                uncertainty=0.2,
             )
         ]
 
@@ -87,7 +98,7 @@ class TestInferTta:
     def test_empty_image_safe(self):
         det = self._detector()
         assert det.infer_tta(np.zeros((0, 0), dtype=np.uint8), 0.3, 0.5) == []
-        assert det.infer_tta(None, 0.3, 0.5) == []
+        assert det.infer_tta(cast(np.ndarray, None), 0.3, 0.5) == []
 
     def test_sorted_by_score_desc(self):
         det = self._detector()

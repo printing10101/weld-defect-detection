@@ -113,7 +113,10 @@ class InspectionRepository:
             out["defects"] = [
                 self._defect_to_dict(d)
                 for d in session.scalars(
-                    select(DefectRecord).where(DefectRecord.image_id == image_id)
+                    select(DefectRecord).where(
+                        DefectRecord.image_id == image_id,
+                        DefectRecord.deleted_at.is_(None),
+                    )
                 )
             ]
             rep = session.scalars(
@@ -258,7 +261,12 @@ class InspectionRepository:
 
             # 缺陷级别 + 复核人 + 复核标记（仅定案时覆盖级别）
             defects = list(
-                session.scalars(select(DefectRecord).where(DefectRecord.image_id == image_id))
+                session.scalars(
+                    select(DefectRecord).where(
+                        DefectRecord.image_id == image_id,
+                        DefectRecord.deleted_at.is_(None),
+                    )
+                )
             )
             finalizing = consensus or role == "arbitrator"
             known_ids = {d.id for d in defects}
@@ -342,6 +350,148 @@ class InspectionRepository:
                 )
             )
             return [self._review_to_dict(r) for r in rows]
+
+    # ---- 人工复核缺陷增删改（DB50/T 1807-2025 §6.1.4，比标准严：全程审计留痕） ----
+
+    def add_manual_defect(
+        self,
+        *,
+        image_id: str,
+        class_id: int,
+        bbox_px: list[float],
+        operator: str,
+        reason: str,
+        confidence: float = 1.0,
+    ) -> dict[str, Any]:
+        """人工复核添加缺陷框（来源标记 manual，审计 before=None/after=新行）。"""
+        if not reason.strip():
+            raise ValueError("reason is required for defect add")
+        with Session(self._engine) as session, session.begin():
+            if session.get(ImageRecord, image_id) is None:
+                raise KeyError(f"image not found: {image_id}")
+            rec = DefectRecord(
+                id=uuid.uuid4().hex,
+                image_id=image_id,
+                class_id=int(class_id),
+                bbox_px=[float(v) for v in bbox_px],
+                confidence=float(confidence),
+                uncertainty=0.0,
+                need_review=True,
+                source="manual",
+            )
+            session.add(rec)
+            session.flush()
+            row = self._defect_to_dict(rec)
+            defect_id = rec.id  # commit 后对象脱管，主键先取出
+        self.append_audit(
+            actor=operator,
+            action="defect.add",
+            object_type="defect",
+            object_id=defect_id,
+            before=None,
+            after=row,
+            note=reason,
+        )
+        return row
+
+    def edit_defect(
+        self,
+        *,
+        defect_id: str,
+        operator: str,
+        reason: str,
+        class_id: int | None = None,
+        bbox_px: list[float] | None = None,
+    ) -> dict[str, Any]:
+        """人工复核修改缺陷类型/位置（软字段级覆盖，审计记录 before/after 快照）。"""
+        if not reason.strip():
+            raise ValueError("reason is required for defect edit")
+        with Session(self._engine) as session, session.begin():
+            rec = session.get(DefectRecord, defect_id)
+            if rec is None or rec.deleted_at is not None:
+                raise KeyError(f"defect not found: {defect_id}")
+            before = self._defect_to_dict(rec)
+            if class_id is not None:
+                rec.class_id = int(class_id)
+            if bbox_px is not None:
+                rec.bbox_px = [float(v) for v in bbox_px]
+            # 人工改动后机器几何/评级失效：标记待复核，重评级由管线层触发
+            rec.need_review = True
+            session.flush()
+            after = self._defect_to_dict(rec)
+        self.append_audit(
+            actor=operator,
+            action="defect.edit",
+            object_type="defect",
+            object_id=defect_id,
+            before=before,
+            after=after,
+            note=reason,
+        )
+        return after
+
+    def delete_defect(self, *, defect_id: str, operator: str, reason: str) -> dict[str, Any]:
+        """人工复核删除缺陷（软删除，不物理清除，审计留痕）。"""
+        if not reason.strip():
+            raise ValueError("reason is required for defect delete")
+        with Session(self._engine) as session, session.begin():
+            rec = session.get(DefectRecord, defect_id)
+            if rec is None or rec.deleted_at is not None:
+                raise KeyError(f"defect not found: {defect_id}")
+            before = self._defect_to_dict(rec)
+            rec.deleted_at = datetime.now(UTC).replace(tzinfo=None)
+            deleted_str = _fmt_dt(rec.deleted_at)  # 会话关闭前捕获，避免脱管刷新
+            session.flush()
+        self.append_audit(
+            actor=operator,
+            action="defect.delete",
+            object_type="defect",
+            object_id=defect_id,
+            before=before,
+            after={**before, "deleted_at": deleted_str},
+            note=reason,
+        )
+        return {**before, "deleted": True}
+
+    def store_regrade(
+        self,
+        image_id: str,
+        *,
+        joint_level: str | None,
+        per_defect_levels: dict[str, str],
+        need_review: bool,
+        geometry: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
+        """缺陷增删改后回写机器重评级结果（几何可选更新，评级列全量覆盖）。
+
+        geometry: {defect_id: {shape,length_mm,width_mm,area_mm2,perimeter_mm,position_x,position_y}}
+        """
+        with Session(self._engine) as session, session.begin():
+            image = session.get(ImageRecord, image_id)
+            if image is None:
+                raise KeyError(f"image not found: {image_id}")
+            image.joint_level = joint_level
+            image.need_review = bool(need_review)
+            defects = list(
+                session.scalars(
+                    select(DefectRecord).where(
+                        DefectRecord.image_id == image_id,
+                        DefectRecord.deleted_at.is_(None),
+                    )
+                )
+            )
+            known = set(per_defect_levels) | set(geometry or {})
+            unknown = {d.id for d in defects} - known
+            if unknown:
+                raise KeyError(f"defect ids not belonging to image {image_id}: {sorted(unknown)}")
+            for d in defects:
+                if d.id in per_defect_levels:
+                    d.joint_level = per_defect_levels[d.id]
+                g = (geometry or {}).get(d.id)
+                if g:
+                    for k in ("shape", "length_mm", "width_mm", "area_mm2", "perimeter_mm", "position_x", "position_y"):
+                        if k in g:
+                            setattr(d, k, g[k])
 
     def append_audit(
         self,
@@ -535,6 +685,8 @@ class InspectionRepository:
             "reviewed_by": d.reviewed_by,
             "standard_id": d.standard_id,
             "standard_version": d.standard_version,
+            "source": d.source,
+            "deleted_at": _fmt_dt(d.deleted_at),
         }
 
     @staticmethod

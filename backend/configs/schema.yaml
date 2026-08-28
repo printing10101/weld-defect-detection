@@ -126,7 +126,23 @@ standard:
   tables_filename: str            # 对应数值表文件（tables/ 下）
 review:
   kappa_threshold: float          # Cohen's κ 高度一致阈值（§15.3）；低于则升级仲裁
+observability:
+  log_format: str                 # text=人类可读 | json=结构化单行日志（可观测）
+  enable_metrics: bool            # 是否启用进程内指标采集（/api/v1/metrics 导出）
 batch:
   workers: int                    # 批量并行 worker 数（§12.1）
   max_per_batch: int              # 单批最大图数
   per_image_estimate_sec: float   # 单图预估耗时（预计时间展示用）
+std_eval:                       # DB50/T 1807-2025 标准评价（§9~§11）
+  iou_standard: float           # 标准口径 IOU 阈值（§9.2）
+  iou_strict: float             # 严格口径 IOU 阈值（双阈值并行，取严分级）
+  weld_form: str                # single=单面焊 | double=双面焊（重点关注集不同）
+  weld_method: str              # manual=手工焊 | auto=自动焊（FRR 分级线）
+  strict_frr: bool              # FRR 判定线取收紧值（严于标准 L1 线）
+  frr_l1_auto: float            # 自动焊 FRR L1 线（标准值 0.08）
+  frr_l1_manual: float          # 手工焊 FRR L1 线（标准值 0.10）
+  frr_strict_auto: float        # 自动焊 FRR 收紧线（0.03，标准 L2 线）
+  frr_strict_manual: float      # 手工焊 FRR 收紧线（0.04）
+  aspect_round_max: float       # 夹渣形状分流：L/W<=3 归圆形缺陷
+  eval_dir: str                 # 标准评价结果落盘目录
+  personnel_path: str           # 评价/标注人员资质记录（TSG Z8001）

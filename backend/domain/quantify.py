@@ -78,7 +78,6 @@ class BBoxQuantifier:
             position_y_mm=round(detection.bbox.y * pixel_spacing_mm, 3),
         )
 
-
     def quantify(
         self,
         detection: Detection,

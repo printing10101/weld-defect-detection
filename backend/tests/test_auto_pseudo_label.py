@@ -76,8 +76,11 @@ class TestPromoteHighConf:
             def infer(self, image, conf=0.3, iou=0.5, class_conf=None):
                 return [
                     Detection(
-                        id="x", bbox=BBox(0, 0, 10, 10),
-                        class_id=DefectClass.POROSITY, score=0.2, uncertainty=0.6,
+                        id="x",
+                        bbox=BBox(0, 0, 10, 10),
+                        class_id=DefectClass.POROSITY,
+                        score=0.2,
+                        uncertainty=0.6,
                     )
                 ]
 

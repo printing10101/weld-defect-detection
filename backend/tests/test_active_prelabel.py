@@ -106,7 +106,14 @@ class TestActivePrelabel:
         # 裂纹（安全关键）价值 ≥ 0.5（safety_base），气孔低置信近边界也 > 0
         assert all(e["max_value"] >= 0.5 for e in entries)
         for e in entries:
-            assert {"stem", "family", "n_detections", "max_uncertainty", "max_value", "classes"} <= set(e)
+            assert {
+                "stem",
+                "family",
+                "n_detections",
+                "max_uncertainty",
+                "max_value",
+                "classes",
+            } <= set(e)
             assert e["n_detections"] == 2
         # active_queue.json 落盘
         assert (real / "active_queue.json").exists()

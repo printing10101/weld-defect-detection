@@ -21,15 +21,18 @@ from __future__ import annotations
 import importlib.metadata
 import logging
 from collections.abc import Callable
+from typing import Any
 
-from backend.domain.detect.registry import DetectorSpec, register_detector_kind
-from backend.domain.grade.registry import GraderSpec, register_standard
-from backend.domain.quantify import QuantifierSpec, register_quantifier_kind
+from backend.domain.detect.registry import register_detector_kind
+from backend.domain.grade.registry import register_standard
+from backend.domain.quantify import register_quantifier_kind
 
 _LOG = logging.getLogger("scandetection.plugins")
 
 # entry-point 组 → 注册函数（新扩展面在此登记，与 §19.4 扩展菜谱对齐）
-_GROUPS: list[tuple[str, Callable[[object], None]]] = [
+# 各注册函数接受各自的 Spec 类型；统一以 Any 标注以便复合为同构清单，
+# 实际调用点 _register 按每个 spec 的具体类型在运行期约束。
+_GROUPS: list[tuple[str, Callable[[Any], None]]] = [
     ("scandetection.detectors", register_detector_kind),
     ("scandetection.graders", register_standard),
     ("scandetection.quantifiers", register_quantifier_kind),
@@ -39,15 +42,16 @@ _GROUPS: list[tuple[str, Callable[[object], None]]] = [
 _PLUGINS_DISCOVERED = False
 
 
-def _entry_points(group: str):
+def _entry_points(group: str) -> list[importlib.metadata.EntryPoint]:
     """按组取 entry points（py3.10+ 关键字 API；兜底旧式 dict 接口）。"""
     try:
-        return importlib.metadata.entry_points(group=group)
+        return list(importlib.metadata.entry_points(group=group))
     except TypeError:  # pragma: no cover - 旧 Python 兜底
-        return importlib.metadata.entry_points().get(group, ())
+        all_eps: Any = importlib.metadata.entry_points()
+        return list(all_eps.get(group, ()))
 
 
-def _register(group: str, register: Callable[[object], None]) -> int:
+def _register(group: str, register: Callable[[Any], None]) -> int:
     """加载并注册单组 entry points；失败仅告警（单插件坏不拖垮启动）。"""
     registered = 0
     for ep in _entry_points(group):

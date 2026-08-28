@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import random
 import shutil
+from collections.abc import Sequence
 from pathlib import Path
 
 from backend.domain.dto import DefectClass
@@ -66,6 +67,7 @@ def _rmtree_native(path: Path) -> None:
     if path.exists():
         raise RuntimeError(f"清理 split 目录失败（shim 拦截）：{path} rc={r.returncode}")
 
+
 # DefectClass 枚举名 → 中文名（YOLO names，供训练日志/可视化）
 _CLASS_ZH = {
     "POROSITY": "气孔",
@@ -74,6 +76,7 @@ _CLASS_ZH = {
     "LACK_OF_FUSION": "未熔合",
     "CRACK": "裂纹",
     "UNDERCUT": "咬边",
+    "CONCAVITY": "内凹",
 }
 
 
@@ -110,7 +113,7 @@ def _classes_in_label(lbl: Path | None) -> frozenset[int]:
 DEFAULT_RARE_CLASSES = frozenset({1, 2, 3, 4, 5})  # 夹渣/未焊透/未熔合/裂纹/咬边（气孔占 94.6%）
 
 
-def rare_class_stats(pairs: list[tuple[Path, Path | None]]) -> dict[int, int]:
+def rare_class_stats(pairs: Sequence[tuple[Path, Path | None]]) -> dict[int, int]:
     """统计各类别样本图像数（缺陷感知采样的依据）。"""
     stats: dict[int, int] = {}
     for _, lbl in pairs:
@@ -120,7 +123,7 @@ def rare_class_stats(pairs: list[tuple[Path, Path | None]]) -> dict[int, int]:
 
 
 def oversample_rare(
-    pairs: list[tuple[Path, Path | None]],
+    pairs: Sequence[tuple[Path, Path | None]],
     rare_classes: set[int] | None = None,
     factor: int = 2,
     seed: int = 42,
@@ -298,6 +301,16 @@ def build_dataset(
             shutil.copy(img, d_img / name)
             if lbl is not None and lbl.exists():
                 shutil.copy(lbl, d_lbl / (Path(name).stem + ".txt"))
+
+    # 测试集/训练集互斥校验（DB50/T 1807-2025 §8.3.1）：字节 md5 + 感知哈希
+    # 双重判定，重叠即抛异常阻断（比标准严：疑似感知重复也默认拦截）。
+    from backend.domain.labeling.dataset_guard import enforce_split_disjoint
+
+    enforce_split_disjoint(
+        out_root / "train" / "images",
+        out_root / "val" / "images",
+        out_root / "test" / "images",
+    )
 
     nc = len(YOLO_CLASSES)
     assert nc == len(DefectClass), "YOLO_CLASSES 与 DefectClass 数量不一致"

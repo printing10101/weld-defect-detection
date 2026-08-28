@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import { sharedVue } from "./vite.shared";
 
@@ -12,5 +13,12 @@ export default defineConfig({
         changeOrigin: false,
       },
     },
+  },
+  // T4-4 Vitest 测试基建：与 Vite/Rollup 共用同一解析链，组件/store 可被直接单测。
+  test: {
+    environment: "jsdom",
+    setupFiles: ["./src/test/setup.ts"],
+    include: ["src/**/*.spec.ts"],
+    css: false,
   },
 });

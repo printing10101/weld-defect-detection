@@ -36,13 +36,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: yarn
-          cache-dependency-path: src/yarn.lock
-      - run: npm install -g yarn@1.22.22
-      - run: cd src && yarn install --frozen-lockfile
-      - run: cd src && yarn typecheck
-      - run: cd src && yarn lint
-      - run: cd src && yarn build
+          cache: pnpm
+          cache-dependency-path: src/pnpm-lock.yaml
+      - run: corepack enable
+      - run: cd src && pnpm install --frozen-lockfile
+      - run: cd src && pnpm typecheck
+      - run: cd src && pnpm lint
+      - run: cd src && pnpm build
 
   # 真实检测器冒烟（必过）：仅装 onnxruntime（轻量，避开 torch/ultralytics），
   # 运行接口契约/导入冒烟（无需权重），恢复对 YoloDetector 代码路径的真实门禁覆盖。

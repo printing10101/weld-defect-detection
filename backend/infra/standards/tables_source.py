@@ -10,12 +10,10 @@ from __future__ import annotations
 
 import importlib
 from pathlib import Path
-from typing import Any
 
 import yaml
 
 from backend.domain.standards.tables.loader import StandardTables, _validate
-from backend.domain.standards.tables.ports import TableSource
 
 # 标准表随 domain 包分发（backend/domain/standards/tables/*.yaml）；
 # 经 domain 包定位目录，避免相对 infra 路径的脆弱拼接。

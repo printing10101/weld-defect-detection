@@ -96,7 +96,9 @@ def main() -> None:
     ap.add_argument("--out", default="data/training/raw/pseudo")
     ap.add_argument("--score", type=float, default=0.6, help="采纳置信度下限")
     ap.add_argument("--unc", type=float, default=0.5, help="采纳不确定性上限（超此不自动采纳）")
-    ap.add_argument("--rebuild", action="store_true", help="晋升后重建训练集（pseudo 为 train-only 源）")
+    ap.add_argument(
+        "--rebuild", action="store_true", help="晋升后重建训练集（pseudo 为 train-only 源）"
+    )
     args = ap.parse_args()
 
     real_root = resolve_config_path(args.real)

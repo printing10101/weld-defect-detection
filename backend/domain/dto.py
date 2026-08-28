@@ -15,14 +15,16 @@ import numpy as np
 
 
 class DefectClass(Enum):
-    """焊缝缺陷类别（§1.3，ADR-010 扩展为 6 类）。
+    """焊缝缺陷类别（§1.3，ADR-010 扩展为 6 类；DB50/T 1807 对标扩展为 7 类）。
 
     0 POROSITY 气孔
     1 SLAG 夹渣/夹杂
     2 INCOMPLETE_PENETRATION 未焊透
     3 LACK_OF_FUSION 未熔合
     4 CRACK 裂纹
-    5 UNDERCUT 咬边/内凹（ADR-010 新增：竞赛评分项 + SWRD 第 6 类）
+    5 UNDERCUT 咬边（ADR-010 新增：竞赛评分项 + SWRD 第 6 类）
+    6 CONCAVITY 内凹（DB50/T 1807 单面焊重点关注缺陷；追加在末尾，
+      不改动 0-5 现有索引，已训练模型/历史检测结果不受影响）
     """
 
     POROSITY = 0
@@ -31,6 +33,7 @@ class DefectClass(Enum):
     LACK_OF_FUSION = 3
     CRACK = 4
     UNDERCUT = 5
+    CONCAVITY = 6
 
 
 class DefectShape(Enum):

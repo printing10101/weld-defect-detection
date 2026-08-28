@@ -44,9 +44,11 @@ SWRD_TO_DEFECTCLASS: dict[str, DefectClass] = {
     "lack_of_penetration": DefectClass.INCOMPLETE_PENETRATION,
     "lack_of_fusion": DefectClass.LACK_OF_FUSION,
     "crack": DefectClass.CRACK,
-    # 咬边/内凹：ADR-010 起为独立第 6 类 DefectClass.UNDERCUT（竞赛评分项 + SWRD 第 6 类）。
+    # 咬边：ADR-010 起为独立第 6 类 DefectClass.UNDERCUT（竞赛评分项 + SWRD 第 6 类）。
+    # 内凹：DB50/T 1807 单面焊重点关注缺陷，2026-08 起拆分为独立第 7 类 CONCAVITY
+    #（追加索引 6，历史 0-5 索引不变）。
     "undercut": DefectClass.UNDERCUT,
-    "concavity": DefectClass.UNDERCUT,
+    "concavity": DefectClass.CONCAVITY,
 }
 
 # Label Studio / 用户标注常用中文名 → DefectClass
@@ -58,12 +60,12 @@ ZH_TO_DEFECTCLASS: dict[str, DefectClass] = {
     "未熔合": DefectClass.LACK_OF_FUSION,
     "裂纹": DefectClass.CRACK,
     "咬边": DefectClass.UNDERCUT,
-    "内凹": DefectClass.UNDERCUT,
+    "内凹": DefectClass.CONCAVITY,
 }
 
 # YOLO 训练用的有序类别列表（index = class_id），必须与 DefectClass 枚举值一致
 YOLO_CLASSES: list[str] = [c.name for c in DefectClass]
-# DefectClass: POROSITY=0, SLAG=1, INCOMPLETE_PENETRATION=2, LACK_OF_FUSION=3, CRACK=4, UNDERCUT=5
+# DefectClass: POROSITY=0, SLAG=1, INCOMPLETE_PENETRATION=2, LACK_OF_FUSION=3, CRACK=4, UNDERCUT=5, CONCAVITY=6
 assert YOLO_CLASSES == [
     "POROSITY",
     "SLAG",
@@ -71,7 +73,8 @@ assert YOLO_CLASSES == [
     "LACK_OF_FUSION",
     "CRACK",
     "UNDERCUT",
-], "YOLO_CLASSES 必须与 DefectClass 枚举（含 UNDERCUT=5）严格一致"
+    "CONCAVITY",
+], "YOLO_CLASSES 必须与 DefectClass 枚举（含 UNDERCUT=5, CONCAVITY=6）严格一致"
 
 
 def defectclass_to_yolo_idx(cls: DefectClass) -> int:
@@ -97,4 +100,6 @@ def map_source_label(label: str) -> DefectClass | None:
         return DefectClass.LACK_OF_FUSION
     if "crack" in key or "裂纹" in key:
         return DefectClass.CRACK
+    if "concav" in key or "内凹" in key:
+        return DefectClass.CONCAVITY
     return None

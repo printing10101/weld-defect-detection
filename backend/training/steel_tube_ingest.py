@@ -38,8 +38,14 @@ _STEEL_TO_DEFECTCLASS: dict[int, DefectClass | None] = {
 }
 
 _NAMES = [
-    "air-hole", "bite-edge", "broken-arc", "crack",
-    "hollow-bead", "overlap", "slag-inclusion", "unfused",
+    "air-hole",
+    "bite-edge",
+    "broken-arc",
+    "crack",
+    "hollow-bead",
+    "overlap",
+    "slag-inclusion",
+    "unfused",
 ]
 
 
@@ -115,7 +121,9 @@ def ingest(src: Path | None = None, dst: Path | None = None) -> int:
         f"[steel] 图像 {total_imgs} 张 / 有效框 {total_boxes} 个 / 跳过框 {skipped_boxes} / "
         f"整图跳过 {skipped_imgs}"
     )
-    print(f"[steel] 映射后类别分布: {dict(sorted(by_cls.items()))} (0气孔 1夹渣 2未焊透 3未熔合 4裂纹 5咬边)")
+    print(
+        f"[steel] 映射后类别分布: {dict(sorted(by_cls.items()))} (0气孔 1夹渣 2未焊透 3未熔合 4裂纹 5咬边)"
+    )
     return total_imgs
 
 

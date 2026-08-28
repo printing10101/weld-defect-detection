@@ -106,7 +106,9 @@ def _crack_mask(
         x += dx
         y += rng.uniform(-3, 3)  # 锯齿偏摆
     for i in range(len(pts) - 1):
-        cv2.line(mask, (int(pts[i][0]), int(pts[i][1])), (int(pts[i + 1][0]), int(pts[i + 1][1])), 255, 1)
+        cv2.line(
+            mask, (int(pts[i][0]), int(pts[i][1])), (int(pts[i + 1][0]), int(pts[i + 1][1])), 255, 1
+        )
     return (cv2.GaussianBlur(mask, (3, 3), 0.6) / 255.0).astype(np.float32)
 
 
@@ -154,7 +156,9 @@ def _synthesize_one(
             mask = _polygon_mask(rng, h, w, cx, cy, rng.uniform(5.0, 12.0), int(rng.integers(5, 9)))
         elif class_id == 2:  # 未焊透：焊缝根部细长暗线
             length = rng.uniform(40.0, 160.0)
-            mask = _line_mask(rng, h, w, cx - length / 2, cy, cx + length / 2, cy, int(rng.choice([1, 2])))
+            mask = _line_mask(
+                rng, h, w, cx - length / 2, cy, cx + length / 2, cy, int(rng.choice([1, 2]))
+            )
         elif class_id == 3:  # 未熔合：拉长条带（沿焊缝方向，微旋转）
             length = rng.uniform(50.0, 150.0)
             ry = rng.uniform(3.0, 8.0)
@@ -260,7 +264,9 @@ def generate_synthetic_set(
         lines = [f"{c} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}" for c, cx, cy, bw, bh in labels]
         (lbl_dir / f"{stem}.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
         made += 1
-    print(f"[defect_synth] 合成 {made} 张 → {out_dir}（类别权重 {class_weights or _DEFAULT_CLASS_WEIGHTS}）")
+    print(
+        f"[defect_synth] 合成 {made} 张 → {out_dir}（类别权重 {class_weights or _DEFAULT_CLASS_WEIGHTS}）"
+    )
     return made
 
 

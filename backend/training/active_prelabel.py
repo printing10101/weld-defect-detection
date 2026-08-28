@@ -122,7 +122,9 @@ def active_prelabel(
                 "no_detection": len(dets) == 0,
             }
         )
-    queue.sort(key=lambda e: (e["max_value"], e["max_uncertainty"], e["n_detections"]), reverse=True)
+    queue.sort(
+        key=lambda e: (e["max_value"], e["max_uncertainty"], e["n_detections"]), reverse=True
+    )
     result = {
         "generated_at": _now(),
         "total": len(queue),
@@ -187,9 +189,7 @@ def export_top(
         dets = detector.infer(gray, conf=conf, iou=iou, class_conf=class_conf)
         if not dets:
             continue
-        export_training_labels(
-            stem, dets, float(w), float(h), store=FilePoolStore(pool_dir)
-        )
+        export_training_labels(stem, dets, float(w), float(h), store=FilePoolStore(pool_dir))
         exported += 1
     return exported
 
@@ -244,13 +244,21 @@ def main() -> None:
         iou=dcfg.infer_iou,
         class_conf=dcfg.class_conf,
     )
-    print(f"[active_prelabel] 未标注 {queue['total']} 张，队列已写 {real_root / 'active_queue.json'}")
+    print(
+        f"[active_prelabel] 未标注 {queue['total']} 张，队列已写 {real_root / 'active_queue.json'}"
+    )
     n_high = sum(1 for e in queue["queue"] if e["max_value"] >= dcfg.review_conf)
     print(f"[active_prelabel] 高价值（>=review_conf={dcfg.review_conf}）{n_high} 张，优先人工核对")
     if args.export_top > 0:
         n = export_top(
-            real_root, queue, args.export_top, pool_dir, detector=det,
-            conf=dcfg.infer_conf, iou=dcfg.infer_iou, class_conf=dcfg.class_conf,
+            real_root,
+            queue,
+            args.export_top,
+            pool_dir,
+            detector=det,
+            conf=dcfg.infer_conf,
+            iou=dcfg.infer_iou,
+            class_conf=dcfg.class_conf,
         )
         print(f"[active_prelabel] 已导出 {n} 张到训练池 {pool_dir}")
 

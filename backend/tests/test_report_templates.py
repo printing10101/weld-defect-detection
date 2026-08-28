@@ -17,11 +17,10 @@ from fastapi.testclient import TestClient
 
 from backend.app.main import app
 from backend.infra.reporting.templates import (
-    ReportTemplate,
     _TEMPLATES_DIR,
+    ReportTemplate,
     load_report_template,
 )
-
 
 # ---------------------------------------------------------------------------
 # 加载器（单元）
@@ -49,9 +48,7 @@ def test_load_standard_template_matches_v1_content() -> None:
 def test_custom_partial_template_merges_over_standard(tmp_path: Path) -> None:
     """自定义模板只覆盖部分键 → 深合并继承 standard 其余。"""
     (tmp_path / "brand.yaml").write_text(
-        "cover_title: 某某检测中心射线评片报告\n"
-        "section_conclusion: 八、结论与签署\n"
-        "name: brand\n",
+        "cover_title: 某某检测中心射线评片报告\nsection_conclusion: 八、结论与签署\nname: brand\n",
         encoding="utf-8",
     )
     tpl = load_report_template("brand", templates_dir=tmp_path)
