@@ -489,7 +489,15 @@ class InspectionRepository:
                     d.joint_level = per_defect_levels[d.id]
                 g = (geometry or {}).get(d.id)
                 if g:
-                    for k in ("shape", "length_mm", "width_mm", "area_mm2", "perimeter_mm", "position_x", "position_y"):
+                    for k in (
+                        "shape",
+                        "length_mm",
+                        "width_mm",
+                        "area_mm2",
+                        "perimeter_mm",
+                        "position_x",
+                        "position_y",
+                    ):
                         if k in g:
                             setattr(d, k, g[k])
 

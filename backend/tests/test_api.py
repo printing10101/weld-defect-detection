@@ -32,7 +32,7 @@ def test_health_ok() -> None:
 
 
 def test_batch_requires_images() -> None:
-    """ 批量队列已实现（ 去 501 桩）：空提交须显式 422，而非 501。"""
+    """批量队列已实现（ 去 501 桩）：空提交须显式 422，而非 501。"""
     with TestClient(app) as client:
         resp = client.post("/api/v1/batch")
     assert resp.status_code == 422

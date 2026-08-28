@@ -482,8 +482,11 @@ class InspectionPipeline:
         if len(bbox_px) != 4 or any(v < 0 for v in bbox_px):
             raise ValueError("bbox_px must be [x,y,w,h] with non-negative values")
         row = self._reg.repository.add_manual_defect(
-            image_id=image_id, class_id=int(class_id), bbox_px=bbox_px,
-            operator=operator, reason=reason,
+            image_id=image_id,
+            class_id=int(class_id),
+            bbox_px=bbox_px,
+            operator=operator,
+            reason=reason,
         )
         result = self._regrade_and_report(image_id)
         return {"defect": row, **result}
@@ -503,8 +506,11 @@ class InspectionPipeline:
         if bbox_px is not None and (len(bbox_px) != 4 or any(v < 0 for v in bbox_px)):
             raise ValueError("bbox_px must be [x,y,w,h] with non-negative values")
         row = self._reg.repository.edit_defect(
-            defect_id=defect_id, operator=operator, reason=reason,
-            class_id=class_id, bbox_px=bbox_px,
+            defect_id=defect_id,
+            operator=operator,
+            reason=reason,
+            class_id=class_id,
+            bbox_px=bbox_px,
         )
         result = self._regrade_and_report(row["image_id"])
         return {"defect": row, **result}
@@ -554,9 +560,7 @@ class InspectionPipeline:
         try:
             grade = self._reg.grader.grade(defects, context)
             joint_level = grade.joint_level.value
-            per = {
-                str(d.id): g.value for d, g in zip(defects, grade.per_defect_grade)
-            }
+            per = {str(d.id): g.value for d, g in zip(defects, grade.per_defect_grade)}
             need_review = bool(grade.need_review)
         except GradingAmbiguousError as exc:
             joint_level = None

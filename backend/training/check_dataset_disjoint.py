@@ -28,8 +28,10 @@ def main() -> int:
     if args.json:
         with open(args.json, "w", encoding="utf-8") as fh:
             json.dump(report.to_dict(), fh, ensure_ascii=False, indent=2)
-    print(f"train={report.n_train} test={report.n_test} "
-          f"字节重叠={len(report.exact)} 疑似重复={len(report.perceptual)}")
+    print(
+        f"train={report.n_train} test={report.n_test} "
+        f"字节重叠={len(report.exact)} 疑似重复={len(report.perceptual)}"
+    )
     for e in report.exact[:10]:
         print("  [exact]", e)
     for p in report.perceptual[:10]:

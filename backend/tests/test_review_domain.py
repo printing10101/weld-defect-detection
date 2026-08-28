@@ -1,4 +1,4 @@
-""" 单元测试：复核一致性计算（Cohen's κ）与共识/仲裁判定。"""
+"""单元测试：复核一致性计算（Cohen's κ）与共识/仲裁判定。"""
 
 from __future__ import annotations
 

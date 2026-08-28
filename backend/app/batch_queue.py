@@ -332,9 +332,9 @@ class BatchManager:
     def _load_existing(self) -> None:
         """启动时恢复历史批次快照（断点续跑的可查部分）。
 
-：进程崩溃/重启时处于 running/pending 的任务实际已中断，若原样恢复会
-        永久显示「运行中」且永不重跑。这里把它们标记为 failed（interrupted），
-        用户可经 retry 重新入队（retry 兼容 failed/cancelled）。
+        ：进程崩溃/重启时处于 running/pending 的任务实际已中断，若原样恢复会
+                永久显示「运行中」且永不重跑。这里把它们标记为 failed（interrupted），
+                用户可经 retry 重新入队（retry 兼容 failed/cancelled）。
         """
         for path in self._batch_dir.glob("*.json"):
             try:

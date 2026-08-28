@@ -8,8 +8,13 @@
 内容: 真实底片 → YOLOv8n(ONNX) 检测 → 掩膜精修量化 → 注意力热力图
       → NB/T47013.2-2015 评级 → 自包含演示页。
 """
+
 from __future__ import annotations
-import base64, io, sys, time
+
+import base64
+import io
+import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -19,19 +24,19 @@ sys.path.insert(0, str(ROOT / "backend"))
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from backend.domain.dto import DefectClass, ImageMeta, Modality
 from backend.domain.detect.yolo_detector import YoloDetector
+from backend.domain.dto import ImageMeta, Modality
 from backend.domain.explain import attention_heatmap
-from backend.domain.quantify import MaskQuantifier, MaskRefineCfg
 from backend.domain.grade.nb47013 import Nb47013Grader
+from backend.domain.quantify import MaskQuantifier, MaskRefineCfg
 from backend.domain.standards.tables.loader import load_standard_tables
-from backend.infra.repository import InspectionRepository
 from backend.infra.reporting.pdf_reporter import PdfReporter
+from backend.infra.repository import InspectionRepository
 
 ONNX = ROOT / "_pkg" / "ScanDetection" / "models" / "weights" / "best.onnx"
 IMG_DIR = ROOT / "data" / "real_label" / "images"
 OUT = ROOT / "demo" / "成果演示.html"
-PDF_DB = ROOT / "demo" / "_report_demo.db"   # 报告生成用临时库（可重建）
+PDF_DB = ROOT / "demo" / "_report_demo.db"  # 报告生成用临时库（可重建）
 PDF_OUT = ROOT / "demo" / "reports"
 
 # 方案 A 逐类置信度阈值（验收报告，eval_rare_metrics.json 依据）
@@ -39,7 +44,12 @@ CLASS_CONF = {0: 0.30, 1: 0.01, 2: 0.01, 3: 0.008, 4: 0.005, 5: 0.01}
 NAMES = {0: "气孔", 1: "夹渣", 2: "未焊透", 3: "未熔合", 4: "裂纹", 5: "咬边"}
 EN_NAMES = {0: "POROSITY", 1: "SLAG", 2: "IP", 3: "LOF", 4: "CRACK", 5: "UNDERCUT"}
 COLORS = {
-    0: "#3b82f6", 1: "#f59e0b", 2: "#10b981", 3: "#8b5cf6", 4: "#ef4444", 5: "#14b8a6",
+    0: "#3b82f6",
+    1: "#f59e0b",
+    2: "#10b981",
+    3: "#8b5cf6",
+    4: "#ef4444",
+    5: "#14b8a6",
 }
 
 # 演示假设参数（真实底片无标定；页面醒目标注）
@@ -48,18 +58,18 @@ THICKNESS_MM = 12.0
 
 # 选片：覆盖全部 6 类（含唯一真实裂纹 PG101-2-6）
 STEMS = [
-    "PG101-2-6",   # 裂纹（唯一真实裂纹底片）
-    "PG102-5-4",   # 未熔合 + 夹渣
-    "PG103-1-1",   # 夹渣
-    "PG103-2-4",   # 夹渣
-    "PG120-1-1",   # 未焊透 + 未熔合
-    "PG121-4-1",   # 未熔合 + 未焊透
-    "PL117-2-1",   # 未焊透
-    "PG12-2-1",    # 未焊透
+    "PG101-2-6",  # 裂纹（唯一真实裂纹底片）
+    "PG102-5-4",  # 未熔合 + 夹渣
+    "PG103-1-1",  # 夹渣
+    "PG103-2-4",  # 夹渣
+    "PG120-1-1",  # 未焊透 + 未熔合
+    "PG121-4-1",  # 未熔合 + 未焊透
+    "PL117-2-1",  # 未焊透
+    "PG12-2-1",  # 未焊透
 ]
 
-MAX_W = 920       # 展示图最大宽度
-HEAT_TOPN = 4     # 每片最多热力图数量
+MAX_W = 920  # 展示图最大宽度
+HEAT_TOPN = 4  # 每片最多热力图数量
 
 
 def load_gray(path: Path) -> np.ndarray:
@@ -89,9 +99,8 @@ def draw_overlay(gray: np.ndarray, dets: list, refined: dict[str, object]) -> Im
     dr = ImageDraw.Draw(img)
     try:
         font = ImageFont.truetype("msyh.ttc", 20)
-        font_sm = ImageFont.truetype("msyh.ttc", 16)
-    except Exception:
-        font = font_sm = ImageFont.load_default()
+    except OSError:
+        font = ImageFont.load_default()
     for d in dets:
         cls = d.class_id.value
         x, y, w, h = d.bbox.x * scale, d.bbox.y * scale, d.bbox.w * scale, d.bbox.h * scale
@@ -131,7 +140,7 @@ def grade_film(grader: Nb47013Grader, dets: list) -> dict:
             "basis": list(res.basis),
             "disclaimer": res.disclaimer or "",
         }
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — CLI 兜底，错误转结构化返回
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
@@ -173,32 +182,42 @@ def build_pdf_report(
         defect_rows = []
         for i, d in enumerate(sorted(dets, key=lambda x: x.score, reverse=True)):
             geo = refined.get(d.id)
-            rd_shape = d.shape.value if d.shape else ("round" if (geo and geo.aspect_ratio <= 3) else "linear")
-            defect_rows.append({
-                "id": f"{img_id}-d{i}",
-                "image_id": img_id,
-                "class_id": d.class_id.value,
-                "bbox_px": [d.bbox.x, d.bbox.y, d.bbox.w, d.bbox.h],
-                "shape": rd_shape,
-                "length_mm": geo.length_mm if geo else None,
-                "width_mm": geo.width_mm if geo else None,
-                "area_mm2": geo.area_mm2 if geo else None,
-                "perimeter_mm": geo.perimeter_mm if geo else None,
-                "position_x": geo.position_x_mm if geo else None,
-                "position_y": geo.position_y_mm if geo else None,
-                "confidence": d.score,
-                "uncertainty": d.uncertainty,
-                "joint_level": res.per_defect_grade[i].value if i < len(res.per_defect_grade) else None,
-                "need_review": res.need_review,
-                "standard_id": "NB/T47013.2-2015",
-                "standard_version": "2015",
-            })
+            rd_shape = (
+                d.shape.value
+                if d.shape
+                else ("round" if (geo and geo.aspect_ratio <= 3) else "linear")
+            )
+            defect_rows.append(
+                {
+                    "id": f"{img_id}-d{i}",
+                    "image_id": img_id,
+                    "class_id": d.class_id.value,
+                    "bbox_px": [d.bbox.x, d.bbox.y, d.bbox.w, d.bbox.h],
+                    "shape": rd_shape,
+                    "length_mm": geo.length_mm if geo else None,
+                    "width_mm": geo.width_mm if geo else None,
+                    "area_mm2": geo.area_mm2 if geo else None,
+                    "perimeter_mm": geo.perimeter_mm if geo else None,
+                    "position_x": geo.position_x_mm if geo else None,
+                    "position_y": geo.position_y_mm if geo else None,
+                    "confidence": d.score,
+                    "uncertainty": d.uncertainty,
+                    "joint_level": res.per_defect_grade[i].value
+                    if i < len(res.per_defect_grade)
+                    else None,
+                    "need_review": res.need_review,
+                    "standard_id": "NB/T47013.2-2015",
+                    "standard_version": "2015",
+                }
+            )
         report_id = f"RPT-DEMO-{stem}"
         report_row = {
             "id": report_id,
             "image_id": img_id,
             "joint_level": res.joint_level.value,
-            "generated_at": __import__("datetime").datetime.now(__import__("datetime").UTC).replace(tzinfo=None),
+            "generated_at": __import__("datetime")
+            .datetime.now(__import__("datetime").UTC)
+            .replace(tzinfo=None),
             "pdf_path": "",
             "standard_ref": "NB/T47013.2-2015",
             "signer": "AI 演示（待责任工程师签核）",
@@ -248,7 +267,7 @@ def main() -> None:
             continue
         try:
             gray = load_gray(path)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — 单图失败跳过不中断
             print(f"[跳过] {stem}: {exc}")
             continue
         dets = det.infer(gray, conf=0.30, iou=0.5, class_conf=CLASS_CONF)
@@ -271,7 +290,7 @@ def main() -> None:
             heats.append(
                 f'<figure class="heat"><img src="data:image/jpeg;base64,{heatmap_b64(gray, d)}" '
                 f'alt="heatmap"/><figcaption>{NAMES.get(d.class_id.value, d.class_id)} '
-                f'<b>{d.score:.3f}</b></figcaption></figure>'
+                f"<b>{d.score:.3f}</b></figcaption></figure>"
             )
 
         # 缺陷表
@@ -288,13 +307,15 @@ def main() -> None:
         grade = grade_film(grader, dets)
         if grade["ok"]:
             lv = grade["level"]
-            lv_color = {"I": "#10b981", "II": "#3b82f6", "III": "#f59e0b", "IV": "#ef4444"}.get(lv, "#fff")
+            lv_color = {"I": "#10b981", "II": "#3b82f6", "III": "#f59e0b", "IV": "#ef4444"}.get(
+                lv, "#fff"
+            )
             basis = "；".join(grade["basis"])
             grade_html = (
                 f"<div class='grade'><span class='level' style='color:{lv_color};border-color:{lv_color}'>"
                 f"{lv} 级</span>"
-                f"<span class='tag {"warn" if grade["need_review"] else "ok"}'>"
-                f'{"⚠ 需人工复核" if grade["need_review"] else "自动判定"}</span>'
+                f"<span class='tag {'warn' if grade['need_review'] else 'ok'}'>"
+                f"{'⚠ 需人工复核' if grade['need_review'] else '自动判定'}</span>"
                 f"<p class='basis'>{basis}</p></div>"
             )
         else:
@@ -303,7 +324,10 @@ def main() -> None:
         cnt = {}
         for d in dets:
             cnt[d.class_id.value] = cnt.get(d.class_id.value, 0) + 1
-        summary = " ".join(f"<b style='color:{COLORS.get(k)}'>{v}×{NAMES.get(k)}</b>" for k, v in sorted(cnt.items()))
+        summary = " ".join(
+            f"<b style='color:{COLORS.get(k)}'>{v}×{NAMES.get(k)}</b>"
+            for k, v in sorted(cnt.items())
+        )
 
         cards.append(f"""
 <section class="card">
@@ -316,10 +340,10 @@ def main() -> None:
     <figure><img src="data:image/jpeg;base64,{over_b64}" alt="检测"/><figcaption>AI 检测 + 掩膜精修量化（{len(dets)} 处缺陷）</figcaption></figure>
   </div>
   <div class="row">
-    <div class="heats">{''.join(heats)}</div>
+    <div class="heats">{"".join(heats)}</div>
     <div class="meta">
       <table><thead><tr><th>缺陷</th><th>置信度</th><th>形态</th><th>尺寸</th></tr></thead>
-      <tbody>{''.join(rows)}</tbody></table>
+      <tbody>{"".join(rows)}</tbody></table>
       {grade_html}
     </div>
   </div>
@@ -354,7 +378,8 @@ def main() -> None:
     ]
     metric_html = "".join(
         f"<div class='metric'><div class='num'>{v}</div><div class='k'>{k}</div>"
-        f"<div class='d'>{d}</div></div>" for v, k, d in metrics
+        f"<div class='d'>{d}</div></div>"
+        for v, k, d in metrics
     )
 
     # 方案 A 验收对比表（验收报告数据）
@@ -446,18 +471,18 @@ def main() -> None:
 （96.3%→100%）；低分稀有框经 uncertainty 机制自动进入人工复核，遵循"安全关键缺陷优先召回"原则。</div>
 
 <h3 class="sec">真实底片逐张演示（推理链路：检测 → 掩膜精修 → 量化 → 评级）</h3>
-{''.join(cards)}
+{"".join(cards)}
 
 <div class="note"> <b>参数假设</b>：真实底片无标定信息，演示按像素间距 0.10 mm/px、母材厚度 12.0 mm 假设计算物理尺寸与评级；
 接入设备标定档案后自动套用真实标定。<b>标准声明</b>：NB/T47013 数值表转录自公开解读、未持有授权正本
 （authorized_copy=false），本评级仅用于 AI 辅助预筛演示，不构成法定判定依据，须责任工程师复核签核。</div>
 
-<footer>ScanDetection · 生成于 {time.strftime('%Y-%m-%d %H:%M')} · 单文件自包含，可离线打开</footer>
+<footer>ScanDetection · 生成于 {time.strftime("%Y-%m-%d %H:%M")} · 单文件自包含，可离线打开</footer>
 </div></body></html>"""
 
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(html, encoding="utf-8")
-    print(f"\n[输出] {OUT}  ({OUT.stat().st_size/1024:.0f} KB, 耗时 {time.time()-t0:.0f}s)")
+    print(f"\n[输出] {OUT}  ({OUT.stat().st_size / 1024:.0f} KB, 耗时 {time.time() - t0:.0f}s)")
 
 
 if __name__ == "__main__":

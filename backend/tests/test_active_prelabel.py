@@ -1,4 +1,4 @@
-""" 主动预标注 + 不确定性采样测试（backend/training/active_prelabel）。
+"""主动预标注 + 不确定性采样测试（backend/training/active_prelabel）。
 
 用测试桩 detector（不依赖 ONNX/训练权重）验证：
 - 未标注图被推理并写入预标注；

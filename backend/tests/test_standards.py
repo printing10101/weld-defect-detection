@@ -1,4 +1,4 @@
-""" 多标准注册表与能力目录（registry + GET /api/v1/standards）。
+"""多标准注册表与能力目录（registry + GET /api/v1/standards）。
 
 覆盖：4 标准注册齐全；能力目录状态（NB=enabled / GB=tables_missing /
 ASME=method_standard / ISO=method_standard）；未知标准熔断；语义化 grade

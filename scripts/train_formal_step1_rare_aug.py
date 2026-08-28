@@ -1,9 +1,9 @@
-# -*- coding: utf-8 -*-
 """正式训练 Step1：稀有类 Copy-Paste 均衡增强。
 
 对 train 集中最稀有的 4 类（夹渣1/未焊透2/裂纹4/咬边5）做 Copy-Paste，
 输出到 data/training/raw/rare_aug/，随后合并回 train 集。
 """
+
 from __future__ import annotations
 
 import shutil
@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from backend.training.augment import generate_rare_copy_paste  # noqa: E402
+from backend.training.augment import generate_rare_copy_paste
 
 
 def main() -> None:

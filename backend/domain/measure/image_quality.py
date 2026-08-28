@@ -16,7 +16,7 @@ DB50/T 1807-2025  要求系统具备"归一化信噪比、空间分辨率"测量
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
@@ -121,7 +121,7 @@ def measure_snr(
     if not candidates:
         raise ValueError("图像过小，无法分块测量")
     stats: list[dict[str, float]] = []
-    for (x, y, bw, bh) in candidates:
+    for x, y, bw, bh in candidates:
         sig, sd = _roi_snr(gray, x, y, bw, bh)
         if sd <= 0:
             continue
@@ -159,7 +159,7 @@ class DuplexResult:
     """双丝测量结果。"""
 
     spatial_resolution_mm: float | None  # 第一对不可分辨丝的丝径
-    resolved: list[dict[str, float]]  # 逐对 {diameter, modulation, verdict}
+    resolved: list[dict[str, float | str]]  # 逐对 {diameter, modulation, verdict}
     marginal: bool  # 存在 0.2≤M<0.3 的临界对
     wire_axis_deg: float  # 检测所用丝方向（度，相对图像 x 轴）
     period_px: float  # 实测丝对内周期（像素）
@@ -217,13 +217,12 @@ def measure_duplex_wire(
     period_px = _estimate_period(profile)
     if period_px <= 1.0:
         raise ValueError("未能从剖面中识别双丝周期（请确认 ROI 覆盖双丝像质计且方向正确）")
-    d_mm = period_px * pixel_spacing_mm / 2.0  # 周期 = 2×丝径
 
     # 逐对：丝从粗到细沿丝轴排布，把剖面按对数分段（每段 ≈ 一对双丝），段内求 M
     n = len(profile)
     n_pairs = len(wire_diameters_mm)
     seg_len = n // n_pairs if n > n_pairs else n
-    resolved: list[dict[str, float]] = []
+    resolved: list[dict[str, float | str]] = []
     for idx, d in enumerate(wire_diameters_mm):
         seg = profile[idx * seg_len : (idx + 1) * seg_len]
         if seg.size < 3:
@@ -233,21 +232,21 @@ def measure_duplex_wire(
         if imax + imin <= 0:
             continue
         mod = (imax - imin) / (imax + imin)
-        verdict = "resolved" if mod >= _RESOLVED_M else ("marginal" if mod >= 0.0 else "unresolved")
-        # M<0.2 即不可分辨（verdict 仅标记临界带）
-        resolved.append(
-            {
-                "diameter_mm": d,
-                "modulation": round(mod, 4),
-                "verdict": verdict if mod >= _RESOLVED_M else ("critical" if mod >= _RESOLVED_M - 0.05 else "unresolved"),
-            }
+        verdict_final = (
+            "resolved"
+            if mod >= _RESOLVED_M
+            else ("critical" if mod >= _RESOLVED_M - 0.05 else "unresolved")
         )
-    first_unresolved = next(
-        (r for r in resolved if r["modulation"] < _RESOLVED_M), None
-    )
-    marginal = any(_RESOLVED_M <= r["modulation"] < _MARGINAL_M for r in resolved)
+        resolved.append(
+            {"diameter_mm": float(d), "modulation": round(float(mod), 4), "verdict": verdict_final}
+        )
+    mods = [float(r["modulation"]) for r in resolved]
+    first_unresolved = next((r for r, m in zip(resolved, mods) if m < _RESOLVED_M), None)
+    marginal = any(_RESOLVED_M <= m < _MARGINAL_M for m in mods)
     return DuplexResult(
-        spatial_resolution_mm=first_unresolved["diameter_mm"] if first_unresolved else wire_diameters_mm[-1],
+        spatial_resolution_mm=(
+            float(first_unresolved["diameter_mm"]) if first_unresolved else wire_diameters_mm[-1]
+        ),
         resolved=resolved,
         marginal=marginal,
         wire_axis_deg=angle,

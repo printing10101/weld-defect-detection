@@ -1,4 +1,4 @@
-""" 检测与量化测试：基线检测器 + 几何换算 + API。"""
+"""检测与量化测试：基线检测器 + 几何换算 + API。"""
 
 from __future__ import annotations
 

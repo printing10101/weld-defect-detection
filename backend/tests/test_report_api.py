@@ -1,4 +1,4 @@
-""" 集成测试：report 全链路（评片→落库→PDF）与 records 检索统计。"""
+"""集成测试：report 全链路（评片→落库→PDF）与 records 检索统计。"""
 
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ def _post_report(client: TestClient, image_path, **form) -> dict:
 
 
 def test_report_blocks_unevaluable_film(tmp_path) -> None:
-    """ 129 行：黑度/IQI 不通过是硬前置，必须阻断评片（409 IQI_FAIL）。"""
+    """129 行：黑度/IQI 不通过是硬前置，必须阻断评片（409 IQI_FAIL）。"""
     img = tmp_path / "syn_block.png"
     _synthetic(img)
     with TestClient(app) as client, open(img, "rb") as f:

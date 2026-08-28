@@ -1,4 +1,4 @@
-""" 测试：主动学习闭环。"""
+"""测试：主动学习闭环。"""
 
 from __future__ import annotations
 

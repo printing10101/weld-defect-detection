@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """现场数据微调：steel_balanced 预训练基底 → 现场标注（data/real_label）。
 
 - 基底：runs/train_steel_v1/steel_balanced/weights/best.pt（已见 2699 张 X 光缺陷）
@@ -6,6 +5,7 @@
 - 低 lr 微调：lr0=1e-4，epochs=80，patience=25，batch=8
 - 目的：适配现场成像风格（域偏移），保留 steel 学到的缺陷形状先验
 """
+
 from __future__ import annotations
 
 from pathlib import Path

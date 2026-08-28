@@ -1,4 +1,4 @@
-""" 集成测试：人工复核闭环+ 审计日志+ PDF/A。
+"""集成测试：人工复核闭环+ 审计日志+ PDF/A。
 
 依赖 auth_table fixture（与生产表不同：authorized=true 才能正常评级），
 覆盖：初评达成共识并落地级别/清空 need_review/重生成 PDF/A、分歧升级仲裁、

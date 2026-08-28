@@ -1,9 +1,9 @@
-# -*- coding: utf-8 -*-
 """第二轮微调数据：给 ft_train 补气孔 Copy-Paste 增强（val 90 框里 86 是气孔）。
 
 用 generate_copy_paste（通用，主要粘贴气孔）对 ft_train 生成 per_image=3 张增强，
 合并回 ft_train，随后第二轮微调（freeze=0, lr=5e-4）。
 """
+
 from __future__ import annotations
 
 import shutil
@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from backend.training.augment import generate_copy_paste  # noqa: E402
+from backend.training.augment import generate_copy_paste
 
 
 def main() -> None:

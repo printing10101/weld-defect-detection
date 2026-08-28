@@ -132,7 +132,7 @@ def test_jsonl_queue_io_extracted_to_infra(tmp_path) -> None:
 
 
 def test_http_timeout_and_cors_origins_centralized() -> None:
-    """ 配置中心化（P2）：HTTP 同步超时与 CORS 源均为配置单一权威。"""
+    """配置中心化（P2）：HTTP 同步超时与 CORS 源均为配置单一权威。"""
     from backend.infra.config import load_config
 
     cfg = load_config()

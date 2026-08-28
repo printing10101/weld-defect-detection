@@ -1,9 +1,9 @@
-# -*- coding: utf-8 -*-
 """Smoke 训练评估：重点验证裂纹（class 4）检出效果。
 
 用 best.pt 在 test 集上 val，输出 per-class P/R/mAP50；
 并做 conf 阈值扫描看裂纹召回随阈值的变化（低阈值放行更多裂纹候选）。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -26,10 +26,11 @@ def main() -> None:
         verbose=False,
     )
     print("\n=== overall (test set) ===")
-    print(f"mAP50={res.box.map50:.4f} mAP50-95={res.box.map:.4f} P={res.box.mp:.4f} R={res.box.mr:.4f}")
+    print(
+        f"mAP50={res.box.map50:.4f} mAP50-95={res.box.map:.4f} P={res.box.mp:.4f} R={res.box.mr:.4f}"
+    )
 
     # 2) 裂纹（class 4）conf 阈值扫描：统计 test 集 GT 裂纹 vs 检出
-    from pathlib import Path as P
     import cv2
 
     test_img = ROOT / "data" / "training" / "test" / "images"
@@ -73,7 +74,7 @@ def main() -> None:
                     if c == 4:
                         det_crack.append(b)
             total += len(gt_lines)
-            for (cx, cy, w, h) in gt_lines:
+            for cx, cy, w, h in gt_lines:
                 x1, y1 = (cx - w / 2) * img.shape[1], (cy - h / 2) * img.shape[0]
                 x2, y2 = (cx + w / 2) * img.shape[1], (cy + h / 2) * img.shape[0]
                 for b in det_crack:
@@ -83,7 +84,7 @@ def main() -> None:
                     if iw * ih > 0.3 * w * img.shape[1] * h * img.shape[0]:
                         hits += 1
                         break
-        print(f"  conf={conf:<4} 裂纹召回 {hits}/{total} = {hits/total if total else 0:.1%}")
+        print(f"  conf={conf:<4} 裂纹召回 {hits}/{total} = {hits / total if total else 0:.1%}")
 
     print("EVAL_DONE")
 

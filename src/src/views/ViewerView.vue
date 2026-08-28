@@ -6,6 +6,7 @@
  */
 import { ref } from "vue";
 import FilmViewer from "../components/FilmViewer.vue";
+import { imagePreviewUrl } from "../services/api";
 import type { Transform } from "../types/api";
 
 const urlA = ref<string | null>(null);
@@ -15,6 +16,21 @@ const nameB = ref("");
 const dualMode = ref(false);
 const synced = ref(true);
 const lastTransform = ref<Transform | null>(null);
+const archiveId = ref("");
+const archiveErr = ref<string | null>(null);
+
+/** 从检测档案加载：输入影像编号，走后端 PNG 预览接口（支持 TIFF/DICOM 密文副本）。 */
+function loadFromArchive(): void {
+  const id = archiveId.value.trim();
+  archiveErr.value = null;
+  if (!id) {
+    archiveErr.value = "请输入影像编号（可在档案检索中复制）。";
+    return;
+  }
+  if (urlA.value) URL.revokeObjectURL(urlA.value);
+  urlA.value = imagePreviewUrl(id);
+  nameA.value = `档案影像 ${id}`;
+}
 
 function pick(which: "A" | "B"): void {
   const input = document.createElement("input");
@@ -66,6 +82,17 @@ function clear(which: "A" | "B"): void {
     <div class="viewer-controls">
       <button @click="pick('A')">{{ urlA ? "更换" : "选择" }}主片…</button>
       <span v-if="nameA" class="fname">{{ nameA }} <a @click.prevent="clear('A')" href="#">移除</a></span>
+      <input
+        v-model="archiveId"
+        class="aid"
+        placeholder="档案影像编号…"
+        @keyup.enter="loadFromArchive"
+      >
+      <button @click="loadFromArchive">从档案加载</button>
+      <span
+        v-if="archiveErr"
+        class="aerr"
+      >{{ archiveErr }}</span>
       <button :class="{ on: dualMode }" @click="dualMode = !dualMode">双片对比</button>
       <template v-if="dualMode">
         <button @click="pick('B')">{{ urlB ? "更换" : "选择" }}对比片…</button>
@@ -128,5 +155,17 @@ function clear(which: "A" | "B"): void {
 }
 .dual {
   grid-template-columns: 1fr 1fr;
+}
+</style>
+
+<style scoped>
+.aid {
+  font-size: 13px;
+  padding: 4px 8px;
+  width: 220px;
+}
+.aerr {
+  color: #b03030;
+  font-size: 12px;
 }
 </style>

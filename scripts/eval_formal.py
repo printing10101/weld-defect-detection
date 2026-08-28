@@ -1,9 +1,9 @@
-# -*- coding: utf-8 -*-
 """正式训练评估：test 集整体 + 全部稀有类召回（对比 smoke 基线）。
 
 用 best.pt 在 test 集上 val，输出整体指标；再对 5 个稀有类
 （夹渣1/未焊透2/未熔合3/裂纹4/咬边5）做 conf 阈值扫描召回。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,7 +25,9 @@ def main() -> None:
 
     # 1) test 集整体指标
     res = m.val(data=data, split="test", imgsz=640, device=0, verbose=False)
-    print(f"\n=== test 集整体 ===  mAP50={res.box.map50:.4f} mAP50-95={res.box.map:.4f} P={res.box.mp:.4f} R={res.box.mr:.4f}")
+    print(
+        f"\n=== test 集整体 ===  mAP50={res.box.map50:.4f} mAP50-95={res.box.map:.4f} P={res.box.mp:.4f} R={res.box.mr:.4f}"
+    )
 
     # 2) 读 test GT（按类）
     gts: dict[int, dict[str, list[tuple[float, float, float, float]]]] = {c: {} for c in RARE}
@@ -72,7 +74,7 @@ def main() -> None:
                         if cc == c:
                             det_c.append(b)
                 total += len(boxes)
-                for (cx, cy, w, h) in boxes:
+                for cx, cy, w, h in boxes:
                     x1, y1 = (cx - w / 2) * img.shape[1], (cy - h / 2) * img.shape[0]
                     x2, y2 = (cx + w / 2) * img.shape[1], (cy + h / 2) * img.shape[0]
                     gw, gh = w * img.shape[1], h * img.shape[0]
@@ -83,7 +85,7 @@ def main() -> None:
                         if iw * ih > 0.3 * gw * gh:
                             hits += 1
                             break
-            line += f" {NAMES[c]}={hits}/{total}({hits/total if total else 0:.0%})"
+            line += f" {NAMES[c]}={hits}/{total}({hits / total if total else 0:.0%})"
         print(line)
     print("EVAL_DONE")
 

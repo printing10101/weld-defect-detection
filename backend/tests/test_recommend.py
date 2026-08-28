@@ -1,4 +1,4 @@
-""" 合规处置建议引擎测试（domain/recommend + POST /recommend）。"""
+"""合规处置建议引擎测试（domain/recommend + POST /recommend）。"""
 
 from __future__ import annotations
 

@@ -51,7 +51,7 @@ export interface ApiError {
 /* ── 真实后端契约（镜像 backend/app/routers/report.py · records.py · review.py）── */
 
 /** 顶层视图（菜单栏/工具栏/标签页导航目标） */
-export type ViewId = "journey" | "archive" | "batch" | "device";
+export type ViewId = "journey" | "archive" | "batch" | "device" | "viewer" | "std-eval";
 
 /** POST /api/v1/report → ReportOut */
 export interface ReportOut {
@@ -318,6 +318,7 @@ export interface ReportDetection {
   uncertainty: number;
   reviewed: boolean;
   need_review: boolean;
+  source?: string | null;
 }
 
 /** GET /api/v1/report/{id}/detections → ReportDetectionsOut */
@@ -338,4 +339,105 @@ export interface Transform {
   rotation: number;
   flipH: boolean;
   flipV: boolean;
+}
+
+/** POST /api/v1/review/{image_id}/defects、PATCH/DELETE /api/v1/review/defects/{id} → 缺陷行 */
+export interface ReviewDefectOut {
+  id: string;
+  image_id: string;
+  class_id: number;
+  bbox_px: number[];
+  confidence: number;
+  uncertainty: number;
+  joint_level: string | null;
+  need_review: boolean;
+  reviewed_by: string | null;
+  source: string | null;
+  deleted_at: string | null;
+}
+
+/** 缺陷增删改的响应（含重评级结果） */
+export interface ReviewDefectMutateOut {
+  defect: ReviewDefectOut;
+  image_id: string;
+  joint_level: string | null;
+  need_review: boolean;
+  defect_count: number;
+}
+
+/** 人员资质（GET/PUT /api/v1/std-eval/personnel） */
+export interface StdPersonnel {
+  name: string;
+  cert_type: string;
+  role: "evaluator" | "labeler";
+  cert_no?: string;
+  valid_until?: string;
+  level?: number | null;
+}
+export interface StdPersonnelOut {
+  qualified: boolean;
+  issues: string[];
+  evaluators: StdPersonnel[];
+  labelers: StdPersonnel[];
+}
+
+/** POST /api/v1/std-eval/record 入参 */
+export interface StdRecordIn {
+  eval_result_path?: string;
+  system_name: string;
+  system_version: string;
+  developer: string;
+  contact?: string;
+  address?: string;
+  film_kind?: string;
+  exposure_layout?: string;
+  weld_form: "single" | "double";
+  weld_method: "manual" | "auto";
+  n_defect_images?: number;
+  n_no_defect_images?: number;
+  record_name?: string;
+}
+
+/** 附录A 记录表（POST /api/v1/std-eval/record 响应，字段较宽，展示按需取用） */
+export interface StdRecordOut {
+  meta: {
+    system_name: string;
+    system_version: string;
+    developer: string;
+    eval_date: string;
+    operator: string;
+  };
+  film: {
+    weld_form: string;
+    weld_method: string;
+    n_defect_images: number;
+    n_defects: number;
+    class_distribution: string;
+    n_no_defect_images: number;
+  };
+  personnel: { qualified: boolean; issues: string[] };
+  metrics: {
+    tdr_row: string;
+    fdr_row: string;
+    mdr_row: string;
+    frr_row: string;
+    kdr: number;
+    wdr: number;
+    tdr: number;
+    frr: number;
+    iou_standard: number;
+    iou_strict: number;
+    kdr_strict: number;
+    wdr_strict: number;
+    tdr_strict: number;
+    frr_strict: number;
+  };
+  grading: {
+    level: string | null;
+    level_standard: string | null;
+    level_strict: string | null;
+    official: boolean;
+    note?: string;
+  };
+  risks: { miss: string; false_detect: string; false_report: string };
 }

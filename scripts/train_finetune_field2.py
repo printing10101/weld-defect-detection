@@ -1,13 +1,12 @@
-# -*- coding: utf-8 -*-
 """第二轮现场微调：数据 1272 张（现场+稀有增强+气孔增强），freeze=0 全量适配，lr=5e-4。
 
 从 steel_balanced 干净基底重新微调（第二轮数据更丰富，避免累积过拟合）。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 
-import torch
 from ultralytics import YOLO
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,8 +29,8 @@ def main() -> None:
         exist_ok=True,
         verbose=False,
         cache=False,
-        freeze=0,          # 全量微调（现场风格差异大）
-        lr0=5e-4,          # 略高学习率
+        freeze=0,  # 全量微调（现场风格差异大）
+        lr0=5e-4,  # 略高学习率
         lrf=1e-2,
         mosaic=0.5,
         mixup=0.1,

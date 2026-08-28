@@ -22,8 +22,13 @@ import type {
   RecordsResponse,
   ReportOut,
   ReportDetectionsOut,
+  ReviewDefectMutateOut,
   ReviewIn,
   ReviewOut,
+  StdPersonnel,
+  StdPersonnelOut,
+  StdRecordIn,
+  StdRecordOut,
   VerifyOut,
 } from "../types/api";
 import { getOperatorName } from "./operator";
@@ -261,4 +266,69 @@ export function verifyReport(reportId: string): Promise<VerifyOut> {
 /** 主动学习：取报告对应影像的缺陷明细（像素 bbox + 置信度/不确定性），供人工复核后回流训练池。 */
 export function getReportDetections(reportId: string): Promise<ReportDetectionsOut> {
   return request<ReportDetectionsOut>(`/report/${reportId}/detections`);
+}
+
+/** 复核添加缺陷框（operator 取请求头操作员，reason 审计必填）。 */
+export function addReviewDefect(
+  imageId: string,
+  body: { class_id: number; bbox_px: number[]; reason: string },
+): Promise<ReviewDefectMutateOut> {
+  return request<ReviewDefectMutateOut>(`/review/${imageId}/defects`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }, UPLOAD_TIMEOUT_MS);
+}
+
+/** 复核修改缺陷类型/位置（至少一项）。 */
+export function editReviewDefect(
+  defectId: string,
+  body: { class_id?: number; bbox_px?: number[]; reason: string },
+): Promise<ReviewDefectMutateOut> {
+  return request<ReviewDefectMutateOut>(`/review/defects/${defectId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }, UPLOAD_TIMEOUT_MS);
+}
+
+/** 复核删除缺陷（软删除，后端重评级）。 */
+export function deleteReviewDefect(defectId: string, reason: string): Promise<ReviewDefectMutateOut> {
+  const qs = new URLSearchParams({ reason });
+  return request<ReviewDefectMutateOut>(`/review/defects/${defectId}?${qs}`, {
+    method: "DELETE",
+  }, UPLOAD_TIMEOUT_MS);
+}
+
+/** 标准评价：读取人员资质。 */
+export function getStdPersonnel(): Promise<StdPersonnelOut> {
+  return request<StdPersonnelOut>("/std-eval/personnel");
+}
+
+/** 标准评价：保存人员资质。 */
+export function putStdPersonnel(people: StdPersonnel[]): Promise<StdPersonnelOut> {
+  return request<StdPersonnelOut>("/std-eval/personnel", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ people }),
+  });
+}
+
+/** 标准评价：装配附录A 记录表（JSON）。 */
+export function createStdRecord(body: StdRecordIn): Promise<StdRecordOut> {
+  return request<StdRecordOut>("/std-eval/record", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** 标准评价：附录A 记录表 PDF 下载地址。 */
+export function stdRecordPdfUrl(recordName: string): string {
+  return `${BASE}/std-eval/record/pdf?record_name=${encodeURIComponent(recordName)}`;
+}
+
+/** 库内影像 PNG 预览地址（浏览器不解码 TIFF/DICOM，由后端统一转换）。 */
+export function imagePreviewUrl(imageId: string): string {
+  return `${BASE}/images/${encodeURIComponent(imageId)}/preview.png`;
 }

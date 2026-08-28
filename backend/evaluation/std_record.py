@@ -36,8 +36,19 @@ def build_record(
     strict = eval_result["strict"]
 
     n_gt = sum(c["td"] + c["fd"] + c["md"] for c in std["per_class"].values())
-    pct = lambda n: round(100 * (std["per_class"][n]["td"] + std["per_class"][n]["fd"] + std["per_class"][n]["md"]) / n_gt, 1) if n_gt else 0.0  # noqa: E731
-    dist = "；".join(f"{STD_CLASS_NAMES[int(n)]}: {pct(n)}%" for n in sorted(std["per_class"], key=int))
+    pct = lambda n: (
+        round(
+            100
+            * (std["per_class"][n]["td"] + std["per_class"][n]["fd"] + std["per_class"][n]["md"])
+            / n_gt,
+            1,
+        )
+        if n_gt
+        else 0.0
+    )
+    dist = "；".join(
+        f"{STD_CLASS_NAMES[int(n)]}: {pct(n)}%" for n in sorted(std["per_class"], key=int)
+    )
 
     def _per_class_row(key: str) -> str:
         return "；".join(
@@ -53,7 +64,7 @@ def build_record(
             "developer": developer,
             "contact": contact,
             "address": address,
-            "eval_date": date.today().isoformat(),
+            "eval_date": date.today().isoformat(),  # noqa: DTZ011 — 记录表用本地日期
             "operator": operator,
         },
         "film": {
@@ -100,7 +111,8 @@ def build_record(
     # FRRn（式4）：无缺陷底片误报按预测类别的占比
     fr_total = sum(std["fr_by_class"].values())
     record["metrics"]["frr_row"] = "；".join(
-        f"{STD_CLASS_NAMES[int(n)]}: {std['fr_by_class'][n] / fr_total * 100:.1f}%" if fr_total
+        f"{STD_CLASS_NAMES[int(n)]}: {std['fr_by_class'][n] / fr_total * 100:.1f}%"
+        if fr_total
         else f"{STD_CLASS_NAMES[int(n)]}: —"
         for n in sorted(std["fr_by_class"], key=int)
     )

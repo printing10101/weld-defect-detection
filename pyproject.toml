@@ -40,6 +40,9 @@ dev = [
     "pyright>=1.1.370",
     "import-linter>=2.0",
     "opencv-python-headless>=4.9",  # transform 契约测试依赖
+    "python-multipart>=0.0.9",      # FastAPI 表单/文件上传（report/measure 等 API 测试）
+    "reportlab>=4.0",               # PDF 报告测试（与 report extra 一致）
+    "pypdf>=4.0",
 ]
 
 [build-system]

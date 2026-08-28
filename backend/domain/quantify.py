@@ -61,7 +61,7 @@ def _to_uint8(image: np.ndarray) -> np.ndarray:
 # 包围盒量化（冻结接口实现）
 # ---------------------------------------------------------------------------
 class BBoxQuantifier:
-    """ 量化：检测框 → 几何属性（矩形近似，供全链路验证与契约测试）。"""
+    """量化：检测框 → 几何属性（矩形近似，供全链路验证与契约测试）。"""
 
     def measure(self, detection: Detection, pixel_spacing_mm: float) -> Geometry:
         w_px = float(detection.bbox.w)
@@ -97,7 +97,7 @@ class BBoxQuantifier:
 # 掩膜精修量化（图像感知）
 # ---------------------------------------------------------------------------
 class MaskQuantifier:
-    """ 掩膜精修量化：轮廓法得准确 L/W/面积/周长。
+    """掩膜精修量化：轮廓法得准确 L/W/面积/周长。
 
     实现冻结 Quantifier 契约（``measure`` 为包围盒近似，供无图/测试场景），
     并额外提供图像感知的 ``quantify_from_image`` 与 ``refine``。

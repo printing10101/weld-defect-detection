@@ -19,7 +19,6 @@ from backend.domain.measure.image_quality import (
     measure_snr,
 )
 
-
 # ---------------------------------------------------------------------------
 # SNRn
 # ---------------------------------------------------------------------------
@@ -84,17 +83,17 @@ def _duplex_pattern(diameters, pixel_mm=0.02, wires_visible=(True,) * 8) -> np.n
     对内两丝中心距 = 2×丝径；背景亮（128），丝为暗线（40），丝宽≈丝径。
     带宽 = 6×丝径，保证对内两丝及背景都在本段内。
     """
-    band_px = int(6 * max(diameters) / pixel_mm)
+    band_px = round(6 * max(diameters) / pixel_mm)
     h = band_px * len(diameters)
     w = 200
     img = np.full((h, w), 128.0, np.float32)
     for i, d in enumerate(diameters):
         y0 = i * band_px + band_px // 2
         half_spacing = d / pixel_mm  # 对内半间距（中心距 2d）
-        wire_half = max(1, int(round(d / pixel_mm / 2)))  # 丝半宽 ≈ 丝径一半
+        wire_half = max(1, round(d / pixel_mm / 2))  # 丝半宽 ≈ 丝径一半
         if wires_visible[i]:
             for dy in (-half_spacing, half_spacing):
-                yy = int(round(y0 + dy))
+                yy = round(y0 + dy)
                 img[yy - wire_half : yy + wire_half + 1, :] = 40.0
     img += np.random.default_rng(11).normal(0, 1.5, img.shape)
     return np.clip(img, 0, 255).astype(np.uint8)
@@ -104,7 +103,7 @@ def test_duplex_resolves_all_wires():
     ds = (0.50, 0.40, 0.32, 0.25, 0.20, 0.16, 0.13, 0.10)
     img = _duplex_pattern(ds)  # 全部丝可分辨
     res = measure_duplex_wire(img, pixel_spacing_mm=0.02)
-    assert res.resolved[0]["modulation"] > 0.5
+    assert float(res.resolved[0]["modulation"]) > 0.5
     # 全部可分辨 → 最细丝径为读数
     assert res.spatial_resolution_mm == 0.10
     assert res.marginal is False
@@ -116,7 +115,7 @@ def test_duplex_finds_first_unresolved():
     img = _duplex_pattern(ds, wires_visible=(True, True, True, True, True, False, False, False))
     res = measure_duplex_wire(img, pixel_spacing_mm=0.02)
     assert res.spatial_resolution_mm == 0.16
-    mods = [r["modulation"] for r in res.resolved]
+    mods = [float(r["modulation"]) for r in res.resolved]
     assert mods[5] < 0.2 and mods[0] >= 0.2
 
 

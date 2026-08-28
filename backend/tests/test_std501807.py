@@ -5,10 +5,10 @@ from __future__ import annotations
 from backend.evaluation.std501807 import (
     STD_CLASS_NAMES,
     StdEvalConfig,
+    _to_std_class,
     evaluate,
     grade_level,
     match_image,
-    _to_std_class,
 )
 
 
@@ -29,20 +29,24 @@ CRACK, LOF, IP, POR, SLAG, UNDERCUT, CONCAV = 4, 3, 2, 0, 1, 5, 6
 
 
 def test_td_same_type():
-    verdicts, fp = match_image([_gt(CRACK, [10, 10, 20, 20])], [_pred(CRACK, [10, 10, 20, 20])], 0.1)
+    verdicts, fp = match_image(
+        [_gt(CRACK, [10, 10, 20, 20])], [_pred(CRACK, [10, 10, 20, 20])], 0.1
+    )
     assert verdicts == [("td", None)]
     assert fp == []
 
 
 def test_fd_type_mismatch():
     # 位置对（IOU=1）但类型错：裂纹 GT 被检成未熔合 → 误检
-    verdicts, fp = match_image([_gt(CRACK, [10, 10, 20, 20])], [_pred(LOF, [10, 10, 20, 20])], 0.1)
+    verdicts, _fp = match_image([_gt(CRACK, [10, 10, 20, 20])], [_pred(LOF, [10, 10, 20, 20])], 0.1)
     assert verdicts == [("fd", 4)]  # 预测被映射为标准类 4（未熔合）
 
 
 def test_md_iou_below_threshold():
     # IOU=0 → 漏检
-    verdicts, fp = match_image([_gt(CRACK, [0, 0, 10, 10])], [_pred(CRACK, [100, 100, 10, 10])], 0.1)
+    verdicts, fp = match_image(
+        [_gt(CRACK, [0, 0, 10, 10])], [_pred(CRACK, [100, 100, 10, 10])], 0.1
+    )
     assert verdicts == [("md", None)]
     assert fp == [3]
 
@@ -134,7 +138,13 @@ def test_composite_metrics():
 def test_kdr_double_form_excludes_undercut():
     # 双面焊重点关注只有 3/4/5：咬边全漏检不影响 KDR（仍影响漏检风险）
     cfg = StdEvalConfig(weld_form="double")
-    defect_set = [("i", [_gt(UNDERCUT, [0, 0, 10, 4]), _gt(CRACK, [20, 0, 10, 10])], [_pred(CRACK, [20, 0, 10, 10])])]
+    defect_set = [
+        (
+            "i",
+            [_gt(UNDERCUT, [0, 0, 10, 4]), _gt(CRACK, [20, 0, 10, 10])],
+            [_pred(CRACK, [20, 0, 10, 10])],
+        )
+    ]
     res = evaluate(defect_set, [], cfg)
     std = res["standard"]
     assert std["kdr"] == 1.0  # 重点关注全正检

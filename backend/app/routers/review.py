@@ -109,7 +109,7 @@ class DefectEditIn(BaseModel):
     reason: str = Field(min_length=1, description="修改理由（审计必填）")
 
 
-def _handle_review_errors(exc: Exception) -> "HTTPException":
+def _handle_review_errors(exc: Exception) -> HTTPException:
     if isinstance(exc, KeyError):
         return HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": str(exc)})
     return HTTPException(status_code=422, detail={"code": "BAD_REVIEW", "message": str(exc)})
@@ -143,7 +143,9 @@ def edit_defect(
     operator: Annotated[str, Depends(get_operator_name)],
 ) -> dict:
     if body.class_id is None and body.bbox_px is None:
-        raise HTTPException(422, detail={"code": "BAD_REVIEW", "message": "class_id 与 bbox_px 至少提供一项"})
+        raise HTTPException(
+            422, detail={"code": "BAD_REVIEW", "message": "class_id 与 bbox_px 至少提供一项"}
+        )
     pipeline = InspectionPipeline(reg)
     try:
         return pipeline.edit_defect(

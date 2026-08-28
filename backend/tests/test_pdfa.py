@@ -1,4 +1,4 @@
-""" 单元测试：PDF/A-1b 后处理。
+"""单元测试：PDF/A-1b 后处理。
 
 直接对 reportlab 生成的 PDF 注入 XMP 标识 + sRGB OutputIntent + 文档 ID +
 文件头 %PDF-1.4，并校验 is_pdfa_compliant 通过。字体嵌入由 reportlab（TTF）
