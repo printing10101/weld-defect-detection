@@ -12,8 +12,38 @@ model:
   backend: onnx
   weights_dir: models/weights   # 模型注册表扫描目录（§7.4，M4）
   registry_state_file: data/model_registry.json  # 活跃模型指针持久化
+  # S-04 推理后端可插拔：ONNX Runtime 执行提供者（默认 CPU 不变）。
+  # CUDA（需 onnxruntime-gpu）: ["CUDAExecutionProvider", "CPUExecutionProvider"]
+  # 昇腾 CANN（预留写法，需 CANN 版 onnxruntime，未真机验证）:
+  #   ["CANNExecutionProvider", "CPUExecutionProvider"]
+  # 寒武纪 MLU / DCU（预留写法，需对应厂商 onnxruntime 分发版，未真机验证）:
+  #   ["MLUExecutionProvider", "CPUExecutionProvider"] / ["DCUExecutionProvider", ...]
+  # 各 provider 依赖的运行时库须随部署包分发，可用性以厂商文档为准（未真机验证）。
+  providers: [CPUExecutionProvider]
+  # S-17 运行期模型回退：连续推理异常达到阈值 → 自动回退上一稳定版本 + 告警/审计
+  infer_failure_threshold: 3
+  auto_rollback: true
 security:
   encrypt: true
+auth:  # 三员身份认证（C-06/C-07/C-09）
+  challenge_ttl_sec: 60   # 登录挑战有效期（一次一用，防重放）
+  idle_timeout_min: 15    # 会话空闲超时（分钟，滑动过期）
+  session_ttl_min: 720    # 会话绝对有效期（分钟）
+  max_sessions: 1         # 单账号并发会话上限（超限吊销最旧会话）
+  max_failed_attempts: 5  # 连续挑战失败锁定阈值
+  lockout_min: 30         # 锁定时长（分钟），触发时落安全告警
+alerts:  # 安全告警规则（C-22 异常行为告警，各 kind 开关/阈值集中配置）
+  batch_export:           # 批量导出：窗口期内同一操作者导出下载≥threshold 次 → high 告警
+    enabled: true
+    window_min: 10        # 计数窗口（分钟）
+    threshold: 5          # 触发阈值（仅在跨越阈值那一刻告警一次，防刷屏）
+  unauthorized_access:    # 越权访问（require_role 403）→ warn 告警
+    enabled: true
+  account_lockout:        # 登录失败锁定 → critical 告警
+    enabled: true
+export:  # 导出管控（C-14）
+  require_approval: true  # 报告 PDF/清单导出需保密员预授权（一次性导出令牌）
+  token_ttl_sec: 600      # 一次性导出令牌有效期（秒）
 eval:
   golden_dir: data/eval/golden          # 固定版本化评估集（禁止用于训练）；缺失则 evaluate 返回 409
   drift_baseline_path: data/eval/drift_baseline.json  # 漂移监控参考基线
@@ -24,6 +54,15 @@ sync:
   http_endpoint: null                    # kind=http 时的推送 URL
   http_token: null                       # 可选 Bearer Token（建议环境变量注入，勿入库）
   http_timeout: 10.0                     # HTTP 同步推送超时（秒）
+egress:  # 进程级外联防护（C-16）
+  enabled: true            # 启动时装配外联拦截（socket/urllib 层）
+  allow_cidrs: []          # 额外放行的目的网段（CIDR）；回环 127.0.0.0/8、::1/128 代码恒放行。
+                           # 默认空 = 除回环外全拦截（纯离线从严默认）；
+                           # 启用 http 同步时须显式加入端点网段，如 192.168.1.0/24
+ipc:  # IPC 一次性启动令牌（C-17）
+  enforce: true            # 业务请求须带 X-IPC-Token（或 Bearer 会话）；
+                           # 令牌随启动生成写入 data/ipc_token，Tauri 注入 WebView。
+                           # 单机调试可 SCAN_IPC__ENFORCE=false（生产保持 true）
 annotator:
   enabled: false                         # 随主应用同进程启动标注器（默认关）
   host: 127.0.0.1
@@ -32,11 +71,23 @@ paths:
   data_dir: data
   tmp_dir: data/tmp
   db_path: data/scan.db
+  # S-03 数据库方言：非空时优先于 db_path 作为完整 SQLAlchemy URL
+  # （达梦/人大金仓示例见 backend/infra/db.py docstring；未真机验证）。
+  db_url: ""
   images_dir: data/images
   reports_dir: data/reports
 density:
   low: 2.0
   high: 4.5
+  # 翻拍影像（相机拍灯箱）黑度绝对值不可测（8bit 上限 2.41）：
+  # warn=黑度/IQI/质量门禁降级为告警+强制人工复核；block=与扫描件同等严格
+  photo_policy: warn
+film_region:
+  enabled: true                # 评片前先分割胶片有效区（翻拍影像可评的前置）
+  min_area_frac: 0.08          # 胶片区最小占画面比例（低于视为分割失败）
+  max_photo_area_frac: 0.88    # 胶片占比低于此值才可能判翻拍（满幅=扫描件）
+  surround_bright_gray: 200.0  # 环绕背景"亮"的灰度下限（灯箱过曝特征）
+  surround_min_frac: 0.05      # 亮背景占整幅最小占比（低阈偏安全：误判翻拍仅多人工复核）
 iqi:
   type: wire  # wire | hole（线型/孔型像质计，§4.2）
   # 线型像质计丝号直径（公开参考，正式使用前须按 IQI 标准复核）
@@ -141,12 +192,21 @@ mask_refine:
   round_aspect_max: 3.0       # 圆形/条形分界（NB/T47013：L/W<=3 为圆形）
 upload:
   max_bytes: 209715200  # 200 MiB 单文件上限（超限返回 413）
-  allowed_suffixes: [".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".dcm", ".dicom", ".ima"]
+  allowed_suffixes: [".png", ".jpg", ".jpeg", ".jfif", ".bmp", ".gif", ".webp",
+                     ".tif", ".tiff", ".avif", ".heic", ".heif",
+                     ".pgm", ".ppm", ".pnm", ".ico",
+                     ".dcm", ".dicom", ".ima"]
 standard:
   default_id: NB/T47013.2-2015
   tables_filename: nb47013.yaml
 review:
   kappa_threshold: 0.8  # Cohen's κ 高度一致阈值（§15.3）；低于则升级仲裁
+gate:  # 底片合格性门禁补充（DB50/T 1807-2025 §5 扫描参数，评片硬前置）
+  min_dpi: 600        # 扫描分辨率下限；DICOM 按 PixelSpacing 推算
+  require_dpi: false  # dpi 无法确定时：true=从严拦截；false=放行并告警留档
+  min_bit_depth: 16   # 位深硬门禁下限（8bit 底片灰度精度不足）
+  allow_8bit: false   # true=8bit 降级放行（告警留档）；false=硬拦截
+  rejects_dir: data/rejects  # 不合格底片留档目录（密文归档）
 observability:
   log_format: text             # text=人类可读（本地默认）；json=结构化单行日志（可观测接入）
   enable_metrics: true         # 进程内指标采集（/api/v1/metrics 导出）
@@ -154,6 +214,19 @@ batch:
   workers: 2            # 批量并行 worker 数（§12.1）
   max_per_batch: 100    # 单批最大图数（防一次性打爆资源）
   per_image_estimate_sec: 8.0  # 单图预估耗时（进度/预计时间展示用）
+backup:  # S-12 备份增强
+  interval_hours: 0.0   # 自动备份间隔（小时）；0=关闭定期调度（默认不影响测试）
+  include_images: false # 备份是否纳入影像目录（true 时逐文件 SM3 校验，归档变大）
+watchdog:  # S-09 内存监控与自愈（默认关闭）
+  enabled: false          # 后台线程周期采样 RSS，超阈值告警
+  interval_sec: 30.0      # 采样周期（秒）
+  rss_warn_mb: 2048.0     # RSS 告警阈值（MB）→ security alert + 审计
+  rss_restart_mb: 4096.0  # RSS 重启标记阈值（MB）；graceful_restart=true 时写标记文件
+  graceful_restart: false # true=写 data/restart_required 由 Tauri 壳检测重启（壳侧待集成）
+modelgate:  # E-14 更新即重评投产门禁（默认 false=旧行为：activate 即切换）
+  enabled: false        # true=activate 先跑 Golden 评估，达标进 candidate，需 sysadmin 审批投产
+  min_map: 0.0          # Golden mAP@0.5 下限（0=宽松，仅要求评估可完成）
+  min_recall: 0.0       # Golden 召回下限（0=宽松）
 std_eval:  # DB50/T 1807-2025 标准评价（§9~§11）
   iou_standard: 0.1     # 标准口径（§9.2：IOU≥0.1 即位置匹配）
   iou_strict: 0.3       # 严格口径（比标准严：双阈值并行，分级取较差者）

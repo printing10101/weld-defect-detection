@@ -11,7 +11,10 @@ const emit = defineEmits<{
   submit: [form: FormData];
 }>();
 
-const FILE_EXTS = ["dcm", "png", "tif", "tiff"] as const;
+const FILE_EXTS = [
+  "dcm", "dicom", "ima", "png", "jpg", "jpeg", "jfif", "bmp", "gif", "webp",
+  "tif", "tiff", "avif", "heic", "heif", "pgm", "ppm", "pnm", "ico",
+] as const;
 const MAX_BYTES = 50 * 1024 * 1024;
 
 const file = ref<File | null>(null);
@@ -31,7 +34,7 @@ const isDicom = computed(() => {
 function onPick(picked: File): void {
   const ext = picked.name.split(".").pop()?.toLowerCase() ?? "";
   if (!(FILE_EXTS as readonly string[]).includes(ext)) {
-    fileErr.value = `不支持 .${ext}：请提供 DICOM(.dcm) / PNG / TIFF 影像。`;
+    fileErr.value = `不支持 .${ext}：请提供 DICOM(.dcm) 或常见图像格式（JPG/PNG/BMP/GIF/WebP/TIFF/HEIC 等）。`;
     return;
   }
   if (picked.size > MAX_BYTES) {
@@ -124,7 +127,7 @@ defineExpose({ reset });
           一 · 准备底片
         </div>
         <div class="t">
-          拖入或选择射线底片。支持 DICOM(.dcm) / PNG / TIFF，建议 ≥500×500 的 8/16bit 灰度影像。
+          拖入或选择射线底片。支持 DICOM(.dcm) 及常见图像格式（JPG/PNG/BMP/GIF/WebP/TIFF/HEIC 等）。
         </div>
       </div>
       <div class="g">
@@ -149,11 +152,12 @@ defineExpose({ reset });
       <div class="grow">
         <div class="chips">
           <span class="chip on">DICOM .dcm</span>
-          <span class="chip on">PNG</span>
-          <span class="chip on">TIFF</span>
+          <span class="chip on">JPG/PNG/BMP</span>
+          <span class="chip on">TIFF/GIF/WebP</span>
+          <span class="chip on">HEIC/AVIF</span>
         </div>
         <div class="hint">
-          仅接受 8/16bit 灰度；彩色影像请先转为灰度。文件 ≤ 50MB。
+          常见图像与 DICOM 均可导入，自动转为灰度处理。文件 ≤ 50MB。
         </div>
         <div
           class="drop"
@@ -171,7 +175,7 @@ defineExpose({ reset });
         <input
           ref="inputEl"
           type="file"
-          accept=".dcm,.png,.tif,.tiff"
+          accept=".dcm,.dicom,.ima,.png,.jpg,.jpeg,.jfif,.bmp,.gif,.webp,.tif,.tiff,.avif,.heic,.heif,.pgm,.ppm,.pnm,.ico"
           style="display: none"
           @change="onInput"
         >

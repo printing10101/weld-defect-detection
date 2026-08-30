@@ -55,6 +55,12 @@ class UrllibJsonPoster(HttpPushPort):
         try:
             import urllib.request
 
+            # C-16：推送前过外联防护——目的不在白名单即失败（同步留档本地队列），
+            # 告警/审计由 guard 内部落库，这里仅按既有"尽力而为"语义记失败指标。
+            from backend.infra.egress_guard import check_url
+
+            check_url(endpoint)
+
             payload = json.dumps(record, ensure_ascii=False, default=str).encode("utf-8")
             req = urllib.request.Request(
                 endpoint,

@@ -11,14 +11,24 @@ from __future__ import annotations
 import numpy as np
 
 
-def estimate_density(gray: np.ndarray, bit_depth: int | None = None) -> float:
-    """估计整图平均黑度。支持 uint8/uint16/float32(0-1 归一化)。
+def estimate_density(
+    gray: np.ndarray, bit_depth: int | None = None, mask: np.ndarray | None = None
+) -> float:
+    """估计平均黑度（可限定胶片掩膜内）。支持 uint8/uint16/float32(0-1 归一化)。
 
     bit_depth 用于 uint16 容器（如 12bit 装于 uint16）中正确还原光学黑度；
     缺省按 16bit 处理。空数组返回 0.0。
+
+    mask（bool，形状须与 gray 一致）给定时常在胶片掩膜上计算：翻拍影像的
+    灯箱亮背景会把整图平均灰阶拉高、黑度被严重低估，只统计胶片区才有意义。
+    形状不匹配或掩膜为空时忽略掩膜（回退整图）——黑度是门禁输入，须稳健。
     """
     if gray is None or gray.size == 0:
         return 0.0
+    if mask is not None:
+        m = np.asarray(mask, dtype=bool)
+        if m.shape == gray.shape and m.any():
+            gray = gray[m]
     if gray.dtype == np.uint8:
         bits = 8
     elif gray.dtype == np.uint16:

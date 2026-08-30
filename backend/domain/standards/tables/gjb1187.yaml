@@ -1,0 +1,43 @@
+# GJB 1187A 射线检测缺陷评级数值表（S-21/E-16 占位骨架）
+#
+# ⚠️⚠️ 诚实声明（读我）：本表**数值全部为占位符**，不来自 GJB 1187A 军标原文。
+#   军标原文属受控文件，本系统尚未获得授权正本，也未做任何转录核对。
+#   因此 authorized 固定为 false——按既有熔断语义（GradingAmbiguousError → 422），
+#   Gjb1187Grader.grade 一律拒绝输出级别，禁止静默错判。
+#   启用前置条件（缺一不可）：
+#     1) 获得军标授权正本，逐条转录并经责任工程师签核；
+#     2) 以真实数值替换下方全部占位行（保持升序/结构校验通过）；
+#     3) authorized 翻转为 true 并在 authorized_copy 记录签核人/日期。
+#   结构（键名/分行语义）与 nb47013.yaml 对齐，仅为满足加载器结构校验的骨架。
+standard_id: GJB 1187A
+version: "0-draft-unauthorized"
+authorized: false
+authorized_copy: false
+source_note: >-
+  本表为 GJB 1187A 适配器占位骨架，数值全部为占位符（非军标原文），
+  表值待军标原文校核后启用；authorized=false 期间评级一律熔断，需人工复核。
+
+# 圆形缺陷评定区（占位：单一 10x10 区）
+round_rating_zone_mm:
+  - {max_t: 999999, width: 10}
+
+# 圆形缺陷点数换算（占位：等差序列，非军标值）
+round_points:
+  - {max_d_mm: 1.0, points: 1}
+  - {max_d_mm: 2.0, points: 2}
+  - {max_d_mm: 4.0, points: 4}
+  - {max_d_mm: 6.0, points: 8}
+  - {max_d_mm: 8.0, points: 12}
+
+# 不计点缺陷上限（占位）
+round_ignore_size_mm:
+  - {max_t: 999999, max_d: 0.5}
+
+# 评定区内允许点数上限（占位）
+round_grade_limits:
+  - {max_t: 999999, I: 2, II: 4, III: 8}
+
+# 条形缺陷限值（占位）
+linear_limits:
+  level2: {t_factor: 0.333, min_mm: 4, max_mm: 20}
+  level3: {t_factor: 0.667, min_mm: 6, max_mm: 30}

@@ -98,6 +98,51 @@ def test_run_inspection_nonforce_bad_film_blocks(tmp_path: Path) -> None:
         )
 
 
+def _synthetic_photo_film(path: Path) -> Path:
+    """合成翻拍照片：灯箱亮背景包围暗胶片，胶片内含焊缝带与圆形缺陷。"""
+    size = 640
+    arr = np.full((size, size), 245, dtype=np.uint8)  # 灯箱过曝背景
+    arr[size // 8 : size - size // 8, size // 5 : size - size // 5] = 130  # 胶片
+    arr[size // 2 - 20 : size // 2 + 20, size // 5 : size - size // 5] = 100  # 焊缝带
+    ys, xs = np.ogrid[:size, :size]
+    mask = (xs - size // 2) ** 2 + (ys - int(size * 0.65)) ** 2 <= (size // 32) ** 2
+    arr[mask] = 55  # 暗缺陷
+    imsave(str(path), arr)
+    return path
+
+
+def test_run_inspection_photo_film_advisory(tmp_path: Path) -> None:
+    """翻拍照片（灯箱亮背景）：门禁不阻断，降级告警+人工复核，链路照常出片。"""
+    reg = get_registry()
+    pipe = InspectionPipeline(reg)
+    img = _synthetic_photo_film(tmp_path / "photo_film.png")
+    out = pipe.run_inspection(
+        img,
+        pixel_spacing_mm=0.1,
+        base_metal_thickness_mm=20,
+        force=False,  # 翻拍影像即使 force=False 也不得阻断（photo_policy=warn）
+    )
+    assert out["photo_mode"] is True
+    assert out["warnings"], "翻拍影像必须给出告警（黑度不可测/门禁降级）"
+    assert out["need_review"] is True, "翻拍影像必须强制人工复核"
+    assert out["defect_count"] >= 1, "胶片区内的缺陷应被检出"
+    assert Path(out["pdf_path"]).exists(), "翻拍影像也应产出报告"
+    stored = reg.repository.get_image(out["image_id"])
+    assert stored is not None, "翻拍影像结果应落库"
+
+
+def test_run_inspection_photo_policy_block_restores_hard_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """photo_policy=block 时翻拍影像与扫描件同等严格（阻断评片）。"""
+    reg = get_registry()
+    monkeypatch.setattr(reg.config.density, "photo_policy", "block")
+    pipe = InspectionPipeline(reg)
+    img = _synthetic_photo_film(tmp_path / "photo_film.png")
+    with pytest.raises(IQIFailError):
+        pipe.run_inspection(img, pixel_spacing_mm=0.1, base_metal_thickness_mm=20)
+
+
 # ---------------------------------------------------------------------------
 # 纯编排辅助函数（确定性，无需 Registry）
 # ---------------------------------------------------------------------------

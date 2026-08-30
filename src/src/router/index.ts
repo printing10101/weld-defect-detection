@@ -7,16 +7,19 @@
  */
 import { createRouter, createWebHashHistory, type RouteRecordRaw } from "vue-router";
 import type { ViewId } from "../types/api";
+import { getToken } from "../services/authToken";
 import ArchiveView from "../views/ArchiveView.vue";
 import BatchView from "../views/BatchView.vue";
 import DeviceView from "../views/DeviceView.vue";
 import JourneyView from "../views/JourneyView.vue";
+import LoginView from "../views/LoginView.vue";
 import StdEvalView from "../views/StdEvalView.vue";
 import ViewerView from "../views/ViewerView.vue";
 
 /** 路由名与 ViewId 一一对应，AppShell 用 route.name 直接得到当前工作区。 */
 export const routes: RouteRecordRaw[] = [
   { path: "/", redirect: "/journey" },
+  { path: "/login", name: "login", component: LoginView },
   { path: "/journey", name: "journey", component: JourneyView },
   { path: "/batch", name: "batch", component: BatchView },
   { path: "/archive", name: "archive", component: ArchiveView },
@@ -26,7 +29,15 @@ export const routes: RouteRecordRaw[] = [
 ];
 
 export function createAppRouter(history = createWebHashHistory()) {
-  return createRouter({ history, routes });
+  const router = createRouter({ history, routes });
+  // 登录守卫（C-06/C-07）：未登录一律跳转登录页；已登录访问登录页回工作台。
+  router.beforeEach((to) => {
+    const authed = getToken() !== "";
+    if (!authed && to.name !== "login") return { name: "login" };
+    if (authed && to.name === "login") return { name: "journey" };
+    return true;
+  });
+  return router;
 }
 
 /** 应用级单例（生产/开发用）；测试请走 createAppRouter(createMemoryHistory)。 */

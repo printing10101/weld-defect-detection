@@ -11,7 +11,10 @@ import type { BatchStatusOut, BatchSummaryOut } from "../types/api";
 const props = defineProps<{ active: boolean }>();
 const emit = defineEmits<{ archive: [] }>();
 
-const EXTS = ["dcm", "png", "tif", "tiff"] as const;
+const EXTS = [
+  "dcm", "dicom", "ima", "png", "jpg", "jpeg", "jfif", "bmp", "gif", "webp",
+  "tif", "tiff", "avif", "heic", "heif", "pgm", "ppm", "pnm", "ico",
+] as const;
 const MAX_PER_BATCH = 100;
 
 type Phase = "upload" | "running" | "result";
@@ -79,7 +82,7 @@ function pickFiles(list: FileList | null): void {
     if ((EXTS as readonly string[]).includes(ext)) accepted.push(f);
   }
   if (accepted.length === 0) {
-    submitError.value = "所选文件/文件夹中没有支持的影像（.dcm / .png / .tif / .tiff）。";
+    submitError.value = "所选文件/文件夹中没有支持的影像（DICOM .dcm / JPG / PNG / BMP / GIF / WebP / TIFF / HEIC 等）。";
     return;
   }
   if (accepted.length > MAX_PER_BATCH) {
@@ -253,7 +256,7 @@ onUnmounted(() => {
             一 · 导入底片
           </div>
           <div class="t">
-            选择多个文件或整个文件夹（.dcm / .png / .tif / .tiff），单批 ≤ {{ MAX_PER_BATCH }} 张。
+            选择多个文件或整个文件夹（DICOM 及常见图像格式均可），单批 ≤ {{ MAX_PER_BATCH }} 张。
           </div>
         </div>
         <div class="g">
@@ -278,8 +281,9 @@ onUnmounted(() => {
         <div class="grow">
           <div class="chips">
             <span class="chip on">DICOM .dcm</span>
-            <span class="chip on">PNG</span>
-            <span class="chip on">TIFF</span>
+            <span class="chip on">JPG/PNG/BMP</span>
+            <span class="chip on">TIFF/GIF/WebP</span>
+            <span class="chip on">HEIC/AVIF</span>
           </div>
           <div class="hint">
             文件夹导入会递归收集子目录影像；非影像文件自动跳过。

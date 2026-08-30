@@ -18,9 +18,14 @@ pyyaml==6.0.3
 pydicom==3.0.2
 numpy==2.5.1
 scikit-image==0.26.0
-# §7.5 静态加密（AES-256-GCM，默认开启）运行时必需
+# §7.5 静态加密（AES-256-GCM 历史 + 国密 SM4 默认，默认开启）运行时必需
 cryptography==50.0.0
-opencv-python-headless==4.9.0.80
+# 军工级国密化（C-01~C-03）：SM4/SM3/SM2 纯软实现（infra/crypto.py 默认 provider）
+gmssl==3.2.2
+# gmssl sm2 的 ASN.1 签名模式依赖 Cryptodome；随国密栈一并锁定
+pycryptodomex==3.23.0
+# 5.0.0.93：适配 numpy 2.x 的 wheel（4.9 系 wheel 基于 numpy 1.x，numpy 2.5 下 import 即崩）
+opencv-python-headless==5.0.0.93
 torch==2.13.0
 ultralytics==8.2.9
 onnxruntime==1.28.0
@@ -28,3 +33,5 @@ reportlab==5.0.0
 pypdf==6.15.0
 python-multipart==0.0.32
 alembic==1.19.1
+# iPhone/iPad HEIC/HEIF 影像解码（image_loader 回退链）
+pillow-heif==1.5.0

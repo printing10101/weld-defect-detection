@@ -1,13 +1,17 @@
-"""安全响应头 + 基础限流中间件。
+"""安全响应头 + 基础限流 + IPC 令牌校验中间件。
 
 - 安全头：CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy /
   Permissions-Policy（桌面本地 WebView 场景，收紧外部访问面）。
 - 限流：每客户端 IP 滑动窗口计数，防单来源打爆 API（本地桌面低风险，
   但设计文档  要求防护；阈值宽松，不干扰正常使用）。
+- IPC 令牌（C-17）：业务请求须携带启动期一次性令牌（X-IPC-Token 头）或
+  已带会话凭据——防其他本机进程误调/网页 CSRF 式调用。诚实边界：本机回环
+  明文传输，令牌不解决传输加密（需 TLS 后续挂本机证书）。
 """
 
 from __future__ import annotations
 
+import hmac
 import threading
 import time
 from collections import defaultdict
@@ -76,3 +80,61 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 )
             self._hits[client].append(now)
         return await call_next(request)
+
+
+class IpcTokenMiddleware(BaseHTTPMiddleware):
+    """IPC 一次性令牌校验（C-17）。
+
+    enforce=true 时：除豁免路径外，请求须满足其一——
+      1. ``X-IPC-Token`` 头 = 启动期一次性令牌（Tauri 注入 WebView 后前端统一携带）；
+      2. 已携带会话凭据（Authorization: Bearer ... 或 ?access_token=，登录引导
+         与直链下载场景）——凭据有效性由下游 get_principal 校验，本中间件
+         只判"有无"，不重复验会话。
+
+    豁免：/health、/metrics（存活/可观测探针）、/auth/*（登录引导需先于
+    令牌分发）、静态资源与非 /api 路径（SPA 托管）。
+
+    令牌经 ensure_token 懒签发（与 lifespan 共用同一进程内令牌槽），
+    保证中间件与落盘文件始终一致。
+    """
+
+    def __init__(self, app, *, enforce: bool = True, data_dir: str = "data") -> None:
+        super().__init__(app)
+        self._enforce = enforce
+        self._data_dir = data_dir
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        if not self._enforce:
+            return await call_next(request)
+        path = request.url.path
+        # 豁免：非 API（根/SPA 静态资源）+ 存活/指标/认证端点
+        if not path.startswith("/api/"):
+            return await call_next(request)
+        if path in ("/api/v1/health", "/api/v1/metrics") or path.startswith("/api/v1/auth"):
+            return await call_next(request)
+        from backend.infra.ipc_token import ensure_token
+
+        token = ensure_token(self._data_dir)
+        supplied = request.headers.get("X-IPC-Token", "")
+        try:
+            token_ok = hmac.compare_digest(supplied.encode(), token.encode())
+        except UnicodeEncodeError:  # 非法头值按不匹配处理
+            token_ok = False
+        if token_ok:
+            return await call_next(request)
+        # 会话凭据在场则放行给下游真实鉴权（只判有无，不重复验）
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.lower().startswith("bearer ") or request.query_params.get("access_token"):
+            return await call_next(request)
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            {
+                "error": {
+                    "code": "IPC_TOKEN_REQUIRED",
+                    "message": "缺少 IPC 一次性令牌（本机进程间调用须携带 X-IPC-Token 或有效会话）",
+                    "detail": None,
+                }
+            },
+            status_code=401,
+        )

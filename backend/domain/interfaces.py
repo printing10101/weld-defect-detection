@@ -84,10 +84,17 @@ class Reporter(Protocol):
     """报告生成。返回 PDF 路径。
 
     `gray` 为可选优化：pipeline 已解码的灰度底片，复用以避免报告渲染二次解码；
-    调用方可省略（实现需自行加载）。
+    调用方可省略（实现需自行加载）。`witness`（S-22）为可选军代表/见证人署名，
+    实现应支持关键字透传（缺省 None，版式不变）。
     """
 
-    def build(self, image_id: str, template: str, gray: np.ndarray | None = None) -> str: ...
+    def build(
+        self,
+        image_id: str,
+        template: str,
+        gray: np.ndarray | None = None,
+        witness: str | None = None,
+    ) -> str: ...
 
 
 @runtime_checkable

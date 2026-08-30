@@ -12,6 +12,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import threading
 from pathlib import Path
 
 from sqlalchemy import create_engine, inspect
@@ -20,6 +22,13 @@ _LOG = logging.getLogger("scandetection.migrate")
 
 _ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
+
+# 进程内 DDL 串行化锁（create_all 与 alembic 命令共用）：alembic 的 env.py 代理机制（util.langhelpers 的
+# _proxy 全局）不支持同进程并发 upgrade/stamp；同时 Base.metadata.create_all
+# 与迁移线程并发建表会撞 "table already exists"。主应用 lifespan 后台线程、
+# get_registry 装配、测试重建 Registry 都可能并发触发 DDL，统一在此串行化。
+# 加锁代价可忽略（DDL 本就是低频操作）。
+DDL_LOCK = threading.Lock()
 
 
 def _schema_has(db_path: str, table: str) -> bool:
@@ -39,10 +48,34 @@ def _schema_has(db_path: str, table: str) -> bool:
 def ensure_migrations(db_path: str) -> str:
     """确保 DB schema 处于 Alembic 头版本；返回最终所在版本号。
 
+    S-03：``db_path`` 可为 sqlite 文件路径或 paths.db_url 提供的完整 URL。
+    - sqlite（默认）：路径语义不变，alembic URL 为 ``sqlite:///<path>``；
+    - 非 sqlite URL（达梦/人大金仓等）：**未真机验证**，迁移链仅在 SQLite 上
+      联调过——此处诚实跳过 alembic（返回 "skipped-non-sqlite"），由仓储层
+      create_all 兜底建表，避免未验证方言上盲跑 DDL。
+    - 环境变量覆盖：``SCAN_DB_URL`` 优先于入参（容器/部署注入用），
+      alembic.ini 中 sqlalchemy.url 仅是占位。
+
     注意：探测与最终读版本使用独立短连接（context 退出即归还连接池），
     执行 alembic 命令前**必须**先释放探测连接——SQLite 连接池在 alembic
     命令持有 DDL 连接时复用会触发 ResourceClosedError。
+    进程级 DDL_LOCK 串行化（见其注释）。
     """
+    target = os.environ.get("SCAN_DB_URL", "").strip() or db_path
+    if "://" in target and not target.startswith("sqlite"):
+        _LOG.warning(
+            "非 SQLite 方言（%s…）的 alembic 迁移未真机验证，跳过迁移（create_all 兜底）",
+            target.split("://")[0],
+        )
+        return "skipped-non-sqlite"
+    from alembic import command
+    from alembic.config import Config
+
+    with DDL_LOCK:
+        return _ensure_migrations_locked(target)
+
+
+def _ensure_migrations_locked(db_path: str) -> str:
     from alembic import command
     from alembic.config import Config
 

@@ -115,6 +115,41 @@ def test_clean_set_ok_counts_frr(eval_tree: dict[str, Path], monkeypatch):
     assert payload["n_no_defect_images"] == 1
 
 
+def test_false_report_films_listed(eval_tree: dict[str, Path], monkeypatch):
+    # E-10：误报底片清单（id+路径+误报框数）随结果落盘，不再只有计数
+    (eval_tree["clean"] / "labels" / "c.txt").touch()  # 空标签 = 干净
+    (eval_tree["root"] / "preds" / "c.txt").write_text(
+        "0 0.5 0.5 0.1 0.1\n0 0.2 0.2 0.1 0.1\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        _argv(
+            eval_tree,
+            "--clean-img-dir",
+            str(eval_tree["clean"] / "images"),
+            "--clean-pred-dir",
+            str(eval_tree["root"] / "preds"),
+        ),
+    )
+    main()
+    payload = json.loads(eval_tree["out"].read_text(encoding="utf-8"))
+    std = payload["result"]["standard"]
+    assert std["no_defect"]["reported_a"] == 1  # FRR 计数口径不变
+    films = payload["false_report_films"]
+    assert len(films) == 1
+    assert films[0]["id"] == "c"
+    assert films[0]["n_false_reports"] == 2
+    assert Path(films[0]["path"]).name == "c.png"
+
+
+def test_false_report_films_empty_without_clean_set(eval_tree: dict[str, Path], monkeypatch):
+    monkeypatch.setattr(sys, "argv", _argv(eval_tree))
+    main()
+    payload = json.loads(eval_tree["out"].read_text(encoding="utf-8"))
+    assert payload["false_report_films"] == []
+
+
 def test_weld_form_override(eval_tree: dict[str, Path], monkeypatch):
     monkeypatch.setattr(
         sys, "argv", _argv(eval_tree, "--weld-form", "double", "--weld-method", "auto")

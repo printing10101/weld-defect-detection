@@ -13,6 +13,19 @@ from backend.evaluation.qualification import Personnel, check_personnel
 from backend.evaluation.std501807 import STD_CLASS_NAMES
 
 
+def _consensus_summary(consensus: dict[str, Any] | None) -> dict[str, Any] | None:
+    """把 resolve_consensus 结果压缩为附录A 引用的摘要（E-07）。"""
+    if not consensus:
+        return None
+    return {
+        "agreement_rate": consensus.get("agreement_rate", 0.0),
+        "accepted": len(consensus.get("accepted", [])),
+        "discarded": len(consensus.get("discarded", [])),
+        "threshold": consensus.get("threshold"),
+        "needs_arbitration": bool(consensus.get("discarded")),
+    }
+
+
 def build_record(
     eval_result: dict[str, Any],
     *,
@@ -29,8 +42,14 @@ def build_record(
     n_no_defect_images: int = 0,
     people: list[Personnel],
     operator: str = "",
+    consensus: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """装配表 A.1 记录（返回可 JSON 化 dict，PDF 生成直接消费）。"""
+    """装配表 A.1 记录（返回可 JSON 化 dict，PDF 生成直接消费）。
+
+    consensus: 三人标注一致性结果（domain.labeling.consensus.resolve_consensus
+    的 to_dict()），可选；提供时在记录中标注标注员间一致率（供附录A 引用，
+    E-07），作废清单非空时标记需仲裁。
+    """
     qual = check_personnel(people)
     std = eval_result["standard"]
     strict = eval_result["strict"]
@@ -108,6 +127,10 @@ def build_record(
         "risks": std["risks"],
         "std_result": eval_result,  # 全量结果（混淆矩阵等）随记录归档
     }
+    # 三人标注一致率（E-07）：resolve_consensus 结果摘要，供附录A 引用
+    consensus_summary = _consensus_summary(consensus)
+    if consensus_summary is not None:
+        record["labeling_consensus"] = consensus_summary
     # FRRn（式4）：无缺陷底片误报按预测类别的占比
     fr_total = sum(std["fr_by_class"].values())
     record["metrics"]["frr_row"] = "；".join(

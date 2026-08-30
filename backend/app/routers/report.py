@@ -11,14 +11,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from backend.app.auth import Principal, get_principal
 from backend.app.dependencies import Registry, _resolve_path, get_operator_name, get_registry
 from backend.app.pipelines import InspectionPipeline
 from backend.app.routers._common import parse_roi, staged_upload
+from backend.app.routers.export import ensure_export_allowed
 from backend.infra.fs import safe_resolve
 
 router = APIRouter(tags=["report"])
@@ -71,6 +73,8 @@ async def report(
     weld_no: Annotated[str | None, Form()] = None,
     signer: Annotated[str | None, Form()] = None,
     template: Annotated[str | None, Form()] = None,
+    # S-22 军标见证：可选军代表/见证人署名，透传到报告 PDF 签字栏（不传则不出该行）
+    witness: Annotated[str | None, Form()] = None,
     # 底片不合格时的强制出片开关：出片但不输出级别（默认阻断，返回 409 IQI_FAIL）
     force: Annotated[bool, Form()] = False,
 ) -> ReportOut:
@@ -117,6 +121,7 @@ async def report(
                     actor=actor,
                     template=tpl,
                     force=force,
+                    witness=witness,
                 )
             )
     else:
@@ -143,7 +148,9 @@ async def report(
 @router.get("/report/{report_id}/pdf")
 def report_pdf(
     report_id: str,
+    request: Request,
     reg: Annotated[Registry, Depends(get_registry)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> FileResponse:
     rep = reg.repository.get_report(report_id)
     if rep is None:
@@ -151,6 +158,8 @@ def report_pdf(
             status_code=404,
             detail={"code": "NOT_FOUND", "message": f"report not found: {report_id}"},
         )
+    # C-14 导出管控：默认需保密员预授权或一次性导出令牌（export.require_approval）
+    ensure_export_allowed(f"report:{report_id}", request, principal, reg)
     # 收敛到 reports_dir 之内，避免 DB 中若存了绝对路径导致的越界读取
     pdf = safe_resolve(
         Path(_resolve_path(reg.config.paths.reports_dir)),

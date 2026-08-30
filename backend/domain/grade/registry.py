@@ -19,6 +19,7 @@ from typing import Any
 from backend.domain.errors import GradingAmbiguousError
 from backend.domain.grade.asme_v import AsmeSecVGrader
 from backend.domain.grade.gb3323 import Gb3323Grader
+from backend.domain.grade.gjb1187 import Gjb1187Grader
 from backend.domain.grade.iso17636 import Iso17636Grader
 from backend.domain.grade.nb47013 import Nb47013Grader
 from backend.domain.interfaces import StandardGrader
@@ -40,6 +41,7 @@ _GRADERS: dict[str, type[StandardGrader]] = {
     "GB/T3323-2019": Gb3323Grader,
     "ASME-V": AsmeSecVGrader,
     "ISO17636": Iso17636Grader,
+    "GJB 1187A": Gjb1187Grader,
 }
 
 # 标准能力目录。
@@ -78,6 +80,15 @@ _STANDARD_META: dict[str, dict[str, Any]] = {
         "table_filename": None,
         "note": "定义成像质量等级 A/B（IQI 灵敏度）与工艺要求；缺陷验收等级"
         "依 ISO 10675-1 人工判定。",
+    },
+    "GJB 1187A": {
+        "name": "GJB 1187A 射线检测缺陷评级（军标）",
+        "grades_defects": True,
+        "levels": ["I", "II", "III", "IV"],
+        "table_required": True,
+        "table_filename": "gjb1187.yaml",
+        "note": "军标评级适配器（S-21/E-16）：评级表数值为占位骨架，"
+        "待军标原文校核后启用；authorized=false 期间评级一律熔断（422），需人工复核。",
     },
 }
 
@@ -157,6 +168,7 @@ def get_grader(
 __all__ = [
     "AsmeSecVGrader",
     "Gb3323Grader",
+    "Gjb1187Grader",
     "GraderSpec",
     "Iso17636Grader",
     "Nb47013Grader",

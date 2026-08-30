@@ -15,7 +15,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": ["nsis", "deb", "appimage"],
     "icon": ["icons/icon.ico", "icons/icon.png"],
     "shortDescription": "射线焊缝缺陷智能检测系统（AI 辅助评片）",
     "longDescription": "ScanDetection 是基于 YOLO/ONNX 深度学习模型的工业射线焊缝无损检测（NDT）桌面软件。AI 辅助定位气孔、夹渣、未焊透、未熔合、裂纹五类缺陷并给出 NB/T47013 评级建议，所有判定仅供辅助预筛、不具合规效力，最终须由持证人员人工复核。",

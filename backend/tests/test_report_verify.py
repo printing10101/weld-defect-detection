@@ -1,12 +1,16 @@
 """报告数字签名校验（POST /api/v1/report/{id}/verify）。
 
 覆盖：正常报告指纹一致（valid=true）；DB 内容被篡改后校验失败（valid=false）；
-无指纹的旧报告返回 legacy（valid=null）。
+无指纹的旧报告返回 legacy（valid=null）；SM2 签名（C-03）双结果：
+签名落 sidecar 且验签通过 / sidecar 篡改检出 / 无签名旧报告 signature=null。
 """
 
 from __future__ import annotations
 
+import base64
+import json
 from collections.abc import Iterator
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -14,6 +18,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
+from backend.infra.crypto import AesCrypto
+
+# SM2 签名/验签测试用主密钥（base64 32B）
+_SIG_KEY = AesCrypto.generate_key()
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -130,3 +138,97 @@ def test_report_verify_legacy_when_no_hash(tmp_path) -> None:
     body = resp.json()
     assert body["valid"] is None
     assert body["reason"] == "legacy"
+
+
+# ---------------------------------------------------------------------------
+# SM2 签名双结果（C-03）
+# ---------------------------------------------------------------------------
+
+
+def _signature_sidecar(report: dict) -> Path | None:
+    """定位报告签名 sidecar：<reports_dir>/<image_id>.pdf.sig。
+
+    API 响应不含磁盘路径（仅 pdf_url），故经配置的 reports 目录 + 影像 id 推导。
+    """
+    from backend.app import dependencies as deps
+
+    reports_dir = Path(deps.get_registry().config.paths.reports_dir)
+    matches = sorted(reports_dir.glob(f"{report['image_id']}*.sig"))
+    return matches[0] if matches else None
+
+
+def test_report_sm2_signature_valid(tmp_path, monkeypatch) -> None:
+    """配置密钥出报告 → sidecar 落盘，验签 signature.valid=true + 公钥 128 hex。"""
+    monkeypatch.setenv("SCAN_CRYPTO_KEY", _SIG_KEY)
+    path = _make_film(tmp_path)
+    with TestClient(app) as client:
+        report = _post_report(client, path)
+        resp = client.post(f"/api/v1/report/{report['report_id']}/verify")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["valid"] is True  # 指纹比对仍通过
+    sig = body["signature"]
+    assert sig is not None and sig["valid"] is True and sig["reason"] is None
+    assert sig["algo"] == "SM2"
+    assert sig["public_key"] and len(sig["public_key"]) == 128
+    sidecar = _signature_sidecar(report)
+    assert sidecar is not None and sidecar.exists()
+    meta = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert meta["signature"] and meta["fingerprint"] == body["hash"]
+
+
+def test_report_sm2_signature_tamper_detected(tmp_path, monkeypatch) -> None:
+    """sidecar 内签名值被替换 → 验签 signature.valid=false。"""
+    monkeypatch.setenv("SCAN_CRYPTO_KEY", _SIG_KEY)
+    path = _make_film(tmp_path)
+    with TestClient(app) as client:
+        report = _post_report(client, path)
+        sidecar = _signature_sidecar(report)
+        assert sidecar is not None and sidecar.exists()
+        meta = json.loads(sidecar.read_text(encoding="utf-8"))
+        meta["signature"] = "11" * 128  # 模拟攻击者改写签名值
+        sidecar.write_text(json.dumps(meta), encoding="utf-8")
+        resp = client.post(f"/api/v1/report/{report['report_id']}/verify")
+    body = resp.json()
+    assert body["valid"] is True  # 指纹不受 sidecar 篡改影响
+    assert body["signature"]["valid"] is False
+    assert body["signature"]["reason"] == "mismatch"
+
+
+def test_report_sm2_signature_swapped_fingerprint_detected(tmp_path, monkeypatch) -> None:
+    """重签换内容：sidecar 内部自洽（对另一份指纹合法签名）但与当前报告内容
+    不符 → fingerprint_mismatch（拼包/换内容检出）。"""
+    monkeypatch.setenv("SCAN_CRYPTO_KEY", _SIG_KEY)
+    path = _make_film(tmp_path)
+    with TestClient(app) as client:
+        report = _post_report(client, path)
+        sidecar = _signature_sidecar(report)
+        assert sidecar is not None
+        meta = json.loads(sidecar.read_text(encoding="utf-8"))
+        # 攻击者持同一密钥对另一指纹重签（模拟签发后调换报告内容）
+        from backend.infra.crypto import SoftSmProvider
+
+        provider = SoftSmProvider(base64.b64decode(_SIG_KEY))
+        meta["fingerprint"] = "ab" * 32
+        meta["signature"] = provider.sign(b"ab" * 32)
+        sidecar.write_text(json.dumps(meta), encoding="utf-8")
+        resp = client.post(f"/api/v1/report/{report['report_id']}/verify")
+    body = resp.json()
+    assert body["signature"]["valid"] is False
+    assert body["signature"]["reason"] == "fingerprint_mismatch"
+
+
+def test_report_sm2_signature_missing_is_legacy(tmp_path, monkeypatch) -> None:
+    """未配置密钥（无 sidecar）→ signature.valid=null，指纹校验不受影响。"""
+    monkeypatch.delenv("SCAN_CRYPTO_KEY", raising=False)
+    path = _make_film(tmp_path)
+    with TestClient(app) as client:
+        report = _post_report(client, path)
+        sidecar = _signature_sidecar(report)
+        assert sidecar is None or not sidecar.exists()
+        resp = client.post(f"/api/v1/report/{report['report_id']}/verify")
+    body = resp.json()
+    assert body["valid"] is True
+    assert body["signature"] is not None
+    assert body["signature"]["valid"] is None
+    assert body["signature"]["reason"] == "missing"

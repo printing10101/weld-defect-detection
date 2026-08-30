@@ -117,6 +117,9 @@ def _load_generic(p: Path, mode: Modality) -> tuple[np.ndarray, ImageMeta]:
     # 非 ASCII 路径会失败，故走 np.fromfile + imdecode 的 unicode 安全路径。
     img = _imread_unicode(p, cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH)
     if img is None:
+        # cv2 不支持的格式（GIF/HEIC/AVIF/PNM 等）经 imageio / Pillow 解码回退。
+        img = _imread_fallback(p)
+    if img is None:
         raise ImageUnreadableError(f"无法解码图像: {p.name}")
     is_16 = img.dtype == np.uint16
     gray = img if not is_16 else _to_uint8(img)
@@ -133,6 +136,64 @@ def _imread_unicode(p: Path, flags: int = cv2.IMREAD_GRAYSCALE) -> np.ndarray | 
     if buf.size == 0:
         return None
     return cv2.imdecode(buf, flags)
+
+
+def _imread_fallback(p: Path) -> np.ndarray | None:
+    """cv2 解码失败时的回退链：imageio（GIF/PNM/罕见 PNG/JPEG）→ Pillow+HEIF。
+
+    多帧影像（动图 GIF / 多页）选取对比度最强的一帧，与 DICOM 多帧策略一致。
+    返回 2D uint8/uint16 数组；全部解码器失败返回 None（由调用方抛可读错误）。
+    """
+    for decoder in (_decode_imageio, _decode_pillow):
+        try:
+            arr = decoder(p)
+        except Exception:  # noqa: BLE001 — 单个解码器失败继续尝试下一个
+            continue
+        if arr is None:
+            continue
+        arr = _pick_sharpest_frame(np.asarray(arr))
+        if arr.ndim == 3 and arr.shape[-1] in (3, 4):
+            arr = _rgb_to_gray(arr)
+        if arr.ndim == 2:
+            return arr
+    return None
+
+
+def _decode_imageio(p: Path) -> np.ndarray | None:
+    import imageio.v3 as iio
+
+    return iio.imread(str(p))
+
+
+def _decode_pillow(p: Path) -> np.ndarray | None:
+    from PIL import Image
+
+    try:
+        from pillow_heif import register_heif_opener
+
+        register_heif_opener()
+    except ImportError:
+        pillow_heif_available = False
+    else:
+        pillow_heif_available = True
+
+    with Image.open(p) as im:
+        if pillow_heif_available:
+            im.load()
+        return np.asarray(im)
+
+
+def _pick_sharpest_frame(arr: np.ndarray) -> np.ndarray:
+    """(F,...) 多帧输入选空间标准差最大的帧（对比最强），单帧原样返回。"""
+    if arr.ndim >= 3 and not (arr.ndim == 3 and arr.shape[-1] in (3, 4)):
+        return arr[int(np.argmax(arr.std(axis=tuple(range(1, arr.ndim)))))]
+    return arr
+
+
+def _rgb_to_gray(arr: np.ndarray) -> np.ndarray:
+    arr = arr.astype(np.float32)
+    r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
+    return (0.299 * r + 0.587 * g + 0.114 * b).astype(np.uint8)
 
 
 def _to_uint8(arr: np.ndarray) -> np.ndarray:

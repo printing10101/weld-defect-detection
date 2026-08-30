@@ -3,15 +3,17 @@
  * 系统评价工作区（DB50/T 1807-2025）：人员资质管理 + 附录A 记录表装配与 PDF 下载。
  * 指标来自 CLI（python -m backend.evaluation.run_std_eval）产出的
  * data/eval/std_eval.json；本页负责资质录入、记录表生成与结果展示。
+ * 另含评价历史档案与等级曲线（E-15：GET /std-eval/history，版本-指标随时间）。
  */
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import {
   createStdRecord,
+  getStdEvalHistory,
   getStdPersonnel,
   putStdPersonnel,
   stdRecordPdfUrl,
 } from "../services/api";
-import type { StdPersonnel, StdRecordOut } from "../types/api";
+import type { StdEvalHistoryItem, StdPersonnel, StdRecordOut } from "../types/api";
 
 const qualified = ref<boolean | null>(null);
 const issues = ref<string[]>([]);
@@ -50,8 +52,6 @@ async function reload(): Promise<void> {
     err.value = e instanceof Error ? e.message : String(e);
   }
 }
-
-onMounted(reload);
 
 function collectPeople(): StdPersonnel[] {
   return [...evaluators.value, ...labelers.value].map((p) => ({
@@ -131,6 +131,96 @@ async function buildRecord(): Promise<void> {
 }
 
 const pct = (v: number): string => `${(v * 100).toFixed(2)}%`;
+
+// ---------------------------------------------------------------------------
+// 评价历史与等级曲线（E-15）：GET /std-eval/history（降序）→ 曲线按时间升序。
+// 无依赖 SVG 折线：TDR/WDR/FRR 三条百分比线 + 系统分级（L1-L4）标注点。
+// ---------------------------------------------------------------------------
+
+const history = ref<StdEvalHistoryItem[]>([]);
+const historyErr = ref<string | null>(null);
+
+async function loadHistory(): Promise<void> {
+  try {
+    const out = await getStdEvalHistory();
+    history.value = [...out.items].reverse();
+  } catch (e) {
+    // 历史档案缺失/为空不阻断本页主功能，仅在曲线区提示
+    historyErr.value = e instanceof Error ? e.message : String(e);
+  }
+}
+onMounted(() => {
+  reload();
+  loadHistory();
+});
+
+/** 曲线点：携带在历史时间线中的原始下标（x 轴统一按全量历史等距展开）。 */
+const curvePoints = computed<{ item: StdEvalHistoryItem; idx: number }[]>(() =>
+  history.value
+    .map((item, idx) => ({ item, idx }))
+    .filter(({ item }) => item.tdr != null || item.wdr != null || item.frr != null),
+);
+
+const CHART_W = 720;
+const CHART_H = 240;
+const PAD_L = 44;
+const PAD_R = 16;
+const PAD_T = 28;
+const PAD_B = 46;
+
+function xAt(idx: number, n: number): number {
+  if (n <= 1) return PAD_L;
+  return PAD_L + (idx * (CHART_W - PAD_L - PAD_R)) / (n - 1);
+}
+
+function yAt(v: number): number {
+  return PAD_T + (1 - v) * (CHART_H - PAD_T - PAD_B);
+}
+
+/** 单指标折线 path（跳过 null 点：分段连续，避免断点被连线到 0）。 */
+function seriesPath(key: "tdr" | "wdr" | "frr"): string {
+  const n = history.value.length;
+  if (n === 0) return "";
+  let d = "";
+  let pen = false;
+  curvePoints.value.forEach(({ item, idx }) => {
+    const v = item[key];
+    if (v == null) {
+      pen = false;
+      return;
+    }
+    d += `${pen ? "L" : "M"}${xAt(idx, n).toFixed(1)},${yAt(v).toFixed(1)} `;
+    pen = true;
+  });
+  return d.trim();
+}
+
+const tdrPath = computed(() => seriesPath("tdr"));
+const wdrPath = computed(() => seriesPath("wdr"));
+const frrPath = computed(() => seriesPath("frr"));
+
+/** 网格线：0/25/50/75/100%。 */
+const gridLines = computed(() =>
+  [0, 0.25, 0.5, 0.75, 1].map((v) => ({ v, y: yAt(v) })),
+);
+
+/** X 轴刻度标签（时间，自动抽稀避免重叠）。 */
+const xLabels = computed(() => {
+  const n = history.value.length;
+  const step = Math.max(1, Math.ceil(n / 8));
+  return history.value
+    .map((p, i) => ({ i, text: (p.evaluated_at ?? "").replace("T", " ").slice(0, 16) }))
+    .filter((l) => l.i % step === 0 || l.i === n - 1);
+});
+
+/** 分级标注点（L1-L4）：有 level 的记录标在图顶。 */
+const levelMarks = computed(() => {
+  const n = history.value.length;
+  return history.value
+    .map((h, i) => ({ i, level: h.level ?? "" }))
+    .filter((m) => m.level)
+    .map((m) => ({ ...m, x: xAt(m.i, n) }));
+});
 </script>
 
 <template>
@@ -373,6 +463,96 @@ const pct = (v: number): string => `${(v * 100).toFixed(2)}%`;
       </div>
     </template>
 
+    <div class="section-h">
+      <span class="no">4</span>评价历史与等级曲线（E-15）
+    </div>
+    <div class="panel">
+      <div
+        v-if="historyErr"
+        class="err show"
+      >
+        历史档案读取失败：{{ historyErr }}
+      </div>
+      <div
+        v-else-if="history.length === 0"
+        class="hint"
+      >
+        暂无评价历史：先用 CLI 产出指标或生成记录表，历史会自动聚合到这里。
+      </div>
+      <template v-else>
+        <svg
+          class="curve"
+          :viewBox="`0 0 ${CHART_W} ${CHART_H}`"
+          role="img"
+          aria-label="评价等级曲线"
+        >
+          <!-- 网格与 Y 轴刻度 -->
+          <g
+            v-for="g in gridLines"
+            :key="`g${g.v}`"
+          >
+            <line
+              :x1="PAD_L"
+              :y1="g.y"
+              :x2="CHART_W - PAD_R"
+              :y2="g.y"
+              class="grid"
+            />
+            <text
+              :x="PAD_L - 6"
+              :y="g.y + 4"
+              class="axis"
+              text-anchor="end"
+            >{{ Math.round(g.v * 100) }}%</text>
+          </g>
+          <!-- 指标折线 -->
+          <path
+            v-if="tdrPath"
+            :d="tdrPath"
+            class="line line-tdr"
+          />
+          <path
+            v-if="wdrPath"
+            :d="wdrPath"
+            class="line line-wdr"
+          />
+          <path
+            v-if="frrPath"
+            :d="frrPath"
+            class="line line-frr"
+          />
+          <!-- 系统分级标注（L1-L4） -->
+          <g
+            v-for="m in levelMarks"
+            :key="`lv${m.i}`"
+          >
+            <text
+              :x="m.x"
+              :y="PAD_T - 8"
+              class="lvl"
+              text-anchor="middle"
+            >{{ m.level }}</text>
+          </g>
+          <!-- X 轴刻度 -->
+          <text
+            v-for="l in xLabels"
+            :key="`x${l.i}`"
+            :x="xAt(l.i, history.length)"
+            :y="CHART_H - 8"
+            class="axis"
+            text-anchor="middle"
+          >{{ l.text }}</text>
+        </svg>
+        <div class="legend">
+          <span class="key key-tdr">TDR</span>
+          <span class="key key-wdr">WDR</span>
+          <span class="key key-frr">FRR</span>
+          <span class="key key-lvl">L1-L4=系统分级</span>
+          <span class="key">共 {{ history.length }} 条评价记录</span>
+        </div>
+      </template>
+    </div>
+
     <div
       v-if="msg"
       class="ok show"
@@ -452,5 +632,66 @@ const pct = (v: number): string => `${(v * 100).toFixed(2)}%`;
 .dtable th {
   background: #f7f7f7;
   width: 12em;
+}
+.curve {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.curve .grid {
+  stroke: #e4e4e4;
+  stroke-width: 1;
+}
+.curve .axis {
+  font-size: 10px;
+  fill: #888;
+}
+.curve .line {
+  fill: none;
+  stroke-width: 2;
+}
+.line-tdr {
+  stroke: #2c7a3d;
+}
+.line-wdr {
+  stroke: #2c5aa0;
+}
+.line-frr {
+  stroke: #b03030;
+}
+.curve .lvl {
+  font-size: 11px;
+  font-weight: 600;
+  fill: #7a5a00;
+}
+.legend {
+  font-size: 12px;
+  color: #555;
+  margin-top: 6px;
+}
+.legend .key {
+  margin-right: 14px;
+}
+.legend .key::before {
+  content: "—";
+  margin-right: 4px;
+  font-weight: 700;
+}
+.key-tdr::before {
+  color: #2c7a3d;
+}
+.key-wdr::before {
+  color: #2c5aa0;
+}
+.key-frr::before {
+  color: #b03030;
+}
+.key-lvl::before {
+  content: "▲";
+  color: #7a5a00;
+}
+.hint {
+  font-size: 12px;
+  color: #777;
 }
 </style>

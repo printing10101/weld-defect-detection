@@ -90,6 +90,9 @@ export interface RecordItem {
   need_review: boolean;
   standard_id: string | null;
   standard_version: string | null;
+  /** C-10 密级：0=非密 1=内部 2=秘密 3=机密 */
+  secret_level: number;
+  classification_basis: string | null;
   created_at: string | null;
 }
 
@@ -299,6 +302,14 @@ export interface CalibrationIn {
   notes?: string | null;
 }
 
+/** SM2 验签结果（VerifyOut.signature；独立于指纹比对的双结果之一） */
+export interface SignatureCheckOut {
+  valid: boolean | null; // true=验签通过；false=不通过；null=无签名（legacy 旧报告）
+  algo: string | null; // 签名算法（SM2）
+  public_key: string | null; // 签名方 SM2 公钥（128 hex）
+  reason: string | null; // missing | invalid_sidecar | fingerprint_mismatch | mismatch
+}
+
 /** POST /api/v1/report/{id}/verify → VerifyOut */
 export interface VerifyOut {
   report_id: string;
@@ -307,6 +318,7 @@ export interface VerifyOut {
   signer: string | null;
   generated_at: string | null;
   reason: string | null;
+  signature: SignatureCheckOut | null; // SM2 验签结果（null=sidecar 不可用）
 }
 
 /** 主动学习回流用：单条缺陷明细（镜像后端 GET /report/{id}/detections） */
@@ -440,4 +452,144 @@ export interface StdRecordOut {
     note?: string;
   };
   risks: { miss: string; false_detect: string; false_report: string };
+}
+
+/** GET /std-eval/history 条目（E-15）：历次评价时间线，缺省字段为 null。 */
+export interface StdEvalHistoryItem {
+  evaluated_at: string | null;
+  model_version: string | null;
+  level: string | null;
+  tdr: number | null;
+  wdr: number | null;
+  frr: number | null;
+  map50: number | null;
+  recall: number | null;
+  source: string | null;
+}
+
+/** GET /std-eval/history 响应（E-15）：按 evaluated_at 降序的时间线。 */
+export interface StdEvalHistoryOut {
+  total: number;
+  items: StdEvalHistoryItem[];
+}
+
+/* ── 三员身份认证（C-06/C-07/C-09）与合规治理（C-10~C-14）新增契约 ── */
+
+/** GET /auth/challenge 响应：nonce 需以账号 SM2 私钥签名（或上传私钥由后端代签） */
+export interface ChallengeOut {
+  challenge_id: string;
+  nonce: string;
+}
+
+/** POST /auth/login 响应（token 明文仅此一次返回） */
+export interface LoginOut {
+  token: string;
+  account_id: string;
+  username: string;
+  role: "sysadmin" | "secadmin" | "auditor";
+  idle_timeout_min: number;
+}
+
+/** GET /auth/me 响应 */
+export interface MeOut {
+  account_id: string;
+  username: string;
+  role: "sysadmin" | "secadmin" | "auditor";
+}
+
+/** 三员账号（GET/POST /auth/accounts） */
+export interface AccountOut {
+  account_id: string;
+  username: string;
+  role: "sysadmin" | "secadmin" | "auditor";
+  sm2_public_key: string | null;
+  auth_mode: string;
+  status: string;
+  failed_attempts: number;
+  locked_until: string | null;
+  created_by: string | null;
+  created_at: string | null;
+}
+
+/** POST /auth/bootstrap 响应（引导窗口，私钥一次性下发） */
+export interface BootstrapOut extends AccountOut {
+  private_key: string | null;
+}
+
+/** POST /auth/accounts/{id}/keypair 响应（私钥一次性下发） */
+export interface KeyPairOut {
+  account_id: string;
+  public_key: string;
+  private_key: string;
+}
+
+/** 安全告警（GET /auth/alerts，C-19） */
+export interface AlertOut {
+  alert_id: string;
+  kind: string;
+  level: string;
+  message: string;
+  detail: unknown;
+  status: string;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  note: string | null;
+  created_at: string | null;
+}
+
+/** 密级（C-10）：0=非密 1=内部 2=秘密 3=机密 */
+export interface SecretLevelOut {
+  image_id: string;
+  secret_level: 0 | 1 | 2 | 3;
+  secret_level_name: string;
+  classification_basis: string | null;
+}
+
+/** 涉密载体（C-12） */
+export interface CarrierOut {
+  carrier_id: string;
+  kind: "film" | "report" | "backup";
+  object_id: string | null;
+  secret_level: number;
+  owner: string | null;
+  status: "in_stock" | "borrowed" | "returned" | "pending_destroy" | "destroyed";
+  borrow_history: Array<{ action: string; operator: string | null; at: string | null; note: string | null }>;
+  destroy_method: string | null;
+  destroy_note: string | null;
+  destroy_requested_by: string | null;
+  destroy_confirmed_by: string | null;
+  destroyed_at: string | null;
+  created_at: string | null;
+}
+
+/** 导出审批（C-14） */
+export interface ExportRequestOut {
+  request_id: string;
+  subject: string;
+  reason: string | null;
+  requested_by: string;
+  status: "pending" | "approved" | "rejected" | "consumed";
+  decided_by: string | null;
+  decided_at: string | null;
+  token_expires_at: string | null;
+  used_at: string | null;
+  created_at: string | null;
+}
+
+/** POST /export/requests/{id}/token 响应（明文令牌仅此一次返回） */
+export interface ExportTokenOut {
+  token: string;
+  expires_in_sec: number;
+}
+
+/** 脱敏残留审计（C-13，POST /privacy/audit 响应） */
+export interface PrivacyAuditOut {
+  generated_at: string;
+  directory: string;
+  scanned: number;
+  n_findings: number;
+  clean: boolean;
+  findings: Array<{ file: string; kind: string; residues: string[] }>;
+  errors: Array<{ file: string; error: string }>;
+  report_files: { json: string; pdf: string };
 }

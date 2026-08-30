@@ -67,6 +67,10 @@ class ImageRecord(Base):
     batch_no: Mapped[str | None] = mapped_column(
         String(64), default=None, index=True
     )  # 批量追溯（P1-F）：所属批次号（batch 导入/复评批次）
+    # 密级标识（C-10）：0=非密 1=内部 2=秘密 3=机密；由安全保密管理员设定/变更
+    secret_level: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # 定密依据（C-10）：变更密级时必须登记的依据（文件/条款号）
+    classification_basis: Mapped[str | None] = mapped_column(String(256), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
@@ -122,6 +126,9 @@ class ReportRecord(Base):
     # 数字签名：报告内容指纹（SHA-256）+ 签发时间；POST /report/{id}/verify 校验。
     report_hash: Mapped[str | None] = mapped_column(String(64), default=None)
     signed_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    # 密级标识（C-10）：生成报告时从影像快照带入，PDF 页眉/页脚嵌入
+    secret_level: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    classification_basis: Mapped[str | None] = mapped_column(String(256), default=None)
 
 
 class DeviceRecord(Base):
@@ -203,15 +210,160 @@ class AuditRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
-def create_db_engine(path: str) -> Engine:
-    """SQLite 引擎。
+class AccountRecord(Base):
+    """三员账号（C-06/C-07）：一人一岗，一个账号只绑定一个角色。
 
-    加固：父目录不存在时自动创建；开启外键校验、WAL 写模式与锁等待超时，
-    避免并发评片/复核/审计落库时出现 database is locked，并让外键约束真正生效。
+    role: sysadmin(系统管理员) | secadmin(安全保密管理员) | auditor(安全审计员)；
+    认证方式：SM2 挑战-响应（软件模式公钥由管理员登记；auth_mode=ukey 时走
+    Pkcs11Provider 硬件签名，未对接真机前配置即报错）。无口令——私钥不出载体。
+    """
+
+    __tablename__ = "accounts"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    role: Mapped[str] = mapped_column(String(16))  # sysadmin | secadmin | auditor
+    sm2_public_key: Mapped[str | None] = mapped_column(
+        String(256), default=None
+    )  # 128 hex（x||y），登录验签用
+    auth_mode: Mapped[str] = mapped_column(String(16), default="soft")  # soft | ukey
+    status: Mapped[str] = mapped_column(String(16), default="active")  # active | disabled
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    created_by: Mapped[str | None] = mapped_column(String(64), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class SessionRecord(Base):
+    """登录会话：库中只存 token 的 SM3 哈希（明文 token 仅在签发时返回一次）。"""
+
+    __tablename__ = "sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    revoked: Mapped[bool] = mapped_column(default=False)
+
+
+class AlertRecord(Base):
+    """安全告警（账号锁定、越权尝试等；C-19 波次3扩展）。"""
+
+    __tablename__ = "alerts"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), index=True)  # account_locked | ...
+    level: Mapped[str] = mapped_column(String(8), default="warn")  # info | warn | critical
+    message: Mapped[str] = mapped_column(Text)
+    detail: Mapped[dict | None] = mapped_column(JSON, default=None)
+    status: Mapped[str] = mapped_column(String(16), default="open", index=True)  # open | resolved
+    resolved_by: Mapped[str | None] = mapped_column(String(64), default=None)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class SecurityAuditRecord(Base):
+    """独立安全审计链（C-19 双链）：结构同 audit_log，独立 SM3 哈希链。
+
+    记录管理员/保密员关键操作（账号增删、密级变更、授权、导出审批）与审计员
+    自身操作；与主审计链相互独立，防单链被整体覆盖后无迹可查。
+    """
+
+    __tablename__ = "security_audit"
+
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    actor: Mapped[str] = mapped_column(String(64), index=True)
+    action: Mapped[str] = mapped_column(String(32), index=True)
+    object_type: Mapped[str] = mapped_column(String(32), index=True)
+    object_id: Mapped[str] = mapped_column(String(64), index=True)
+    before: Mapped[dict | None] = mapped_column(JSON, default=None)
+    after: Mapped[dict | None] = mapped_column(JSON, default=None)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    prev_hash: Mapped[str] = mapped_column(String(64), default="0" * 64)
+    hash: Mapped[str] = mapped_column(String(64), index=True, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class CarrierRecord(Base):
+    """涉密载体台账（C-12）：底片/报告/备份的登记、借还与销毁全生命周期。"""
+
+    __tablename__ = "carriers"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # 载体编号（登记时给定）
+    kind: Mapped[str] = mapped_column(String(16))  # film(底片) | report(报告) | backup(备份)
+    object_id: Mapped[str | None] = mapped_column(
+        String(64), default=None, index=True
+    )  # 关联对象（image_id/report_id/备份归档名）
+    secret_level: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    owner: Mapped[str | None] = mapped_column(String(64), default=None)  # 责任人
+    status: Mapped[str] = mapped_column(
+        String(16), default="in_stock", index=True
+    )  # in_stock | borrowed | returned | pending_destroy | destroyed
+    borrow_history: Mapped[list] = mapped_column(
+        JSON, default=list
+    )  # [{action, operator, at, note}]
+    destroy_method: Mapped[str | None] = mapped_column(String(64), default=None)
+    destroy_note: Mapped[str | None] = mapped_column(Text, default=None)
+    destroy_requested_by: Mapped[str | None] = mapped_column(String(64), default=None)  # 保密员
+    destroy_confirmed_by: Mapped[str | None] = mapped_column(String(64), default=None)  # 系统管理员
+    destroyed_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class ExportRequestRecord(Base):
+    """导出审批（C-14）：申请 → 保密员批准/拒绝 → 一次性令牌 → 凭令下载。"""
+
+    __tablename__ = "export_requests"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    subject: Mapped[str] = mapped_column(String(128), index=True)  # report:{id} | std_eval:false_reports ...
+    reason: Mapped[str | None] = mapped_column(Text, default=None)
+    requested_by: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(
+        String(16), default="pending", index=True
+    )  # pending | approved | rejected | consumed
+    decided_by: Mapped[str | None] = mapped_column(String(64), default=None)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    token_hash: Mapped[str | None] = mapped_column(String(64), default=None)  # 一次性令牌 SM3
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+def create_db_engine(path_or_url: str) -> Engine:
+    """数据库引擎（S-03 方言可插拔）。
+
+    入参二选一：
+    - 文件路径（默认，语义不变）→ ``sqlite:///<path>``，自动建父目录，
+      开启外键校验/WAL/锁等待超时；
+    - 完整 SQLAlchemy URL（含 ``://``，来自 paths.db_url）→ 按方言直接建引擎，
+      不施加 SQLite PRAGMA。
+
+    国产数据库方言示例（S-03，诚实声明：本仓库未做真机验证，仅给出接入写法，
+    连通性/迁移行为须在目标环境联调确认）：
+
+    - 达梦 DM8（需 ``pip install sqlalchemy_dm``，或厂商 dmPython + 方言包）::
+
+        paths:
+          db_url: dm+sqlalchemy_dm://SYSDBA:SYSDBA@127.0.0.1:5236?schema=SCANDetection
+
+    - 人大金仓 KingbaseES（兼容 PostgreSQL 协议，可用 pg8000/psycopg2 方言）::
+
+        paths:
+          db_url: postgresql+psycopg2://system:manager@127.0.0.1:54321/scandetection
+
+    切换方言后 schema 迁移（alembic）与 JSON 列类型兼容性须另行验证，
+    见 docs/国产化适配矩阵.md（DB 维度，未真机验证项）。
     """
     from sqlalchemy import event
 
-    p = Path(path)
+    if "://" in path_or_url:
+        # 方言 URL：直接透传 SQLAlchemy（连接参数由 URL/方言自行承载）。
+        return create_engine(path_or_url, future=True)
+
+    p = Path(path_or_url)
     if p.parent and str(p.parent) not in ("", "."):
         p.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(

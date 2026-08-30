@@ -74,13 +74,22 @@ def register_device(
     reg: Annotated[Registry, Depends(get_registry)],
     operator: Annotated[str, Depends(get_operator_name)],
 ) -> DeviceOut:
-    """注册检测设备。"""
+    """注册检测设备（入主审计链，C-21 审计完整性盘点补齐）。"""
     dev = reg.device_store.register(
         name=body.name,
         model=body.model,
         serial_no=body.serial_no,
         notes=body.notes,
         created_by=operator,
+    )
+    reg.repository.append_audit(
+        actor=operator,
+        action="device_register",
+        object_type="device",
+        object_id=str(dev["device_id"]),
+        before=None,
+        after={"name": dev["name"], "serial_no": dev["serial_no"]},
+        note=None,
     )
     return DeviceOut(**dev)
 
@@ -109,7 +118,10 @@ def add_calibration(
     body: CalibrationIn,
     reg: Annotated[Registry, Depends(get_registry)],
 ) -> CalibrationOut:
-    """记录一次标定：相对偏差 >5% → status=over（跨设备一致率超标）。"""
+    """记录一次标定：相对偏差 >5% → status=over（跨设备一致率超标）。
+
+    标定结果影响测量几何换算，属关键写操作（入主审计链，C-21 补齐）。
+    """
     try:
         calib = reg.device_store.calibrate(
             device_id=device_id,
@@ -124,4 +136,18 @@ def add_calibration(
             status_code=404,
             detail={"code": "NOT_FOUND", "message": f"device not found: {device_id}"},
         ) from exc
+    reg.repository.append_audit(
+        actor=body.calibrator or "local",
+        action="device_calibrate",
+        object_type="device",
+        object_id=str(device_id),
+        before=None,
+        after={
+            "calibration_id": calib["calibration_id"],
+            "pixel_spacing_mm": calib["pixel_spacing_mm"],
+            "deviation_pct": calib["deviation_pct"],
+            "status": calib["status"],
+        },
+        note=body.notes,
+    )
     return CalibrationOut(**calib)
