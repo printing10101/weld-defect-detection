@@ -127,8 +127,9 @@ def test_per_class_formulas():
 def test_composite_metrics():
     res = _fixture_eval(StdEvalConfig())
     std = res["standard"]
-    # TDR = 3/6 = 0.5；WDR 与 TDR 同分母同分子结构 → 0.5
-    assert std["tdr"] == 0.5 and std["wdr"] == 0.5
+    # TDR = 3/6 = 0.5；WDR = 位置检出（TD+FD）/全量 = 4/6（E-01 修正：
+    # 裂纹误检 1 条计入检出，不再像 TDR 那样扣除）
+    assert std["tdr"] == 0.5 and std["wdr"] == 0.6667
     # KDR（单面焊重点关注 3..7）：(TD3+FD3+TD4)/(3+2) = 4/5
     assert std["kdr"] == 0.8
     # FRR = 1/3
@@ -226,6 +227,58 @@ def test_miss_risk_general_conservative_class1():
     cfg = StdEvalConfig()
     res = evaluate([("i", [_gt(POR, [0, 0, 5, 5])], [])], [], cfg)
     assert res["standard"]["risks"]["miss"] == "Ⅰ类"
+    assert res["standard"]["miss_measured"] is False
+
+
+def test_miss_risk_grade_i_round_downgrades_to_class2():
+    # E-09：漏检气孔附 judge 评级 I（Ⅰ级圆形）→ 降为Ⅱ类风险，评级实测
+    cfg = StdEvalConfig()
+    gt = _gt(POR, [0, 0, 5, 5])
+    gt["grade"] = "I"
+    res = evaluate([("i", [gt], [])], [], cfg)
+    assert res["standard"]["risks"]["miss"] == "Ⅱ类"
+    assert res["standard"]["miss_measured"] is True
+
+
+def test_miss_risk_grade_ii_is_class1():
+    # E-09：漏检缺陷评级Ⅱ级及以上 → Ⅰ类风险（评级实测）
+    cfg = StdEvalConfig()
+    gt = _gt(POR, [0, 0, 5, 5])
+    gt["grade"] = "II"
+    res = evaluate([("i", [gt], [])], [], cfg)
+    assert res["standard"]["risks"]["miss"] == "Ⅰ类"
+    assert res["standard"]["miss_measured"] is True
+
+
+def test_miss_risk_grade_i_linear_stays_class1():
+    # Ⅰ级但为条形缺陷（夹渣长宽比>3）→ 不满足"仅Ⅰ级圆形"降级条件，仍Ⅰ类
+    cfg = StdEvalConfig()
+    gt = _gt(SLAG, [0, 0, 30, 5])  # 条形缺陷
+    gt["grade"] = "I"
+    res = evaluate([("i", [gt], [])], [], cfg)
+    assert res["standard"]["risks"]["miss"] == "Ⅰ类"
+    assert res["standard"]["miss_measured"] is True
+
+
+def test_miss_risk_partial_grades_measured_false():
+    # 多条漏检仅部分附评级 → 证据不齐，保守归Ⅰ类且 measured=False
+    cfg = StdEvalConfig()
+    g1 = _gt(POR, [0, 0, 5, 5])
+    g1["grade"] = "I"
+    g2 = _gt(POR, [20, 0, 5, 5])  # 无评级
+    res = evaluate([("i", [g1, g2], [])], [], cfg)
+    assert res["standard"]["risks"]["miss"] == "Ⅰ类"
+    assert res["standard"]["miss_measured"] is False
+
+
+def test_miss_risk_focus_ignores_grade():
+    # 重点关注（裂纹）漏检零容忍：即便附Ⅰ级评级仍归Ⅰ类
+    cfg = StdEvalConfig()
+    gt = _gt(CRACK, [0, 0, 10, 10])
+    gt["grade"] = "I"
+    res = evaluate([("i", [gt], [])], [], cfg)
+    assert res["standard"]["risks"]["miss"] == "Ⅰ类"
+    assert res["standard"]["md_focus"] == 1
 
 
 def test_false_detect_risk_heavy_to_light():

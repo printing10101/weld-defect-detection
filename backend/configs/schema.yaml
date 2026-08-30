@@ -9,8 +9,30 @@ model:
   backend: str   # onnx | torch | tensorrt
   weights_dir: str   # 模型注册表扫描目录（§7.4，M4）
   registry_state_file: str  # 活跃模型指针持久化路径
+  providers: list[str]        # S-04 ONNX Runtime 执行提供者（默认 CPU；国产后端预留，未真机验证）
+  infer_failure_threshold: int  # S-17 连续推理异常回退阈值
+  auto_rollback: bool           # S-17 是否自动回退上一稳定版本
 security:
   encrypt: bool
+auth:                             # 三员身份认证（C-06/C-07/C-09）
+  challenge_ttl_sec: int          # 登录挑战有效期（秒，一次一用防重放）
+  idle_timeout_min: int           # 会话空闲超时（分钟，滑动过期）
+  session_ttl_min: int            # 会话绝对有效期（分钟）
+  max_sessions: int               # 单账号并发会话上限（超限吊销最旧会话）
+  max_failed_attempts: int        # 连续挑战失败锁定阈值
+  lockout_min: int                # 锁定时长（分钟），触发时落安全告警
+alerts:                           # 安全告警规则（C-22 异常行为告警）
+  batch_export:                   # 批量导出告警（窗口期内导出≥threshold 次 → high）
+    enabled: bool
+    window_min: int               # 计数窗口（分钟）
+    threshold: int                # 触发阈值（仅跨越阈值那一刻告警一次）
+  unauthorized_access:            # 越权访问告警（require_role 403 → warn）
+    enabled: bool
+  account_lockout:                # 登录失败锁定告警（account_locked → critical）
+    enabled: bool
+export:                           # 导出管控（C-14）
+  require_approval: bool          # true=报告 PDF/清单导出需保密员预授权（一次性令牌）
+  token_ttl_sec: int              # 一次性导出令牌有效期（秒）
 eval:
   golden_dir: str               # 固定版本化评估集（禁止用于训练）；缺失则 evaluate 返回 409
   drift_baseline_path: str      # 漂移监控参考基线（尺寸/置信度/类别分布），首跑自动建立
@@ -21,6 +43,11 @@ sync:
   http_endpoint: str | None     # kind=http 时的推送 URL
   http_token: str | None        # 可选 Bearer Token（建议走环境变量注入，勿入版本库）
   http_timeout: float           # HTTP 同步推送超时（秒）
+egress:                           # 进程级外联防护（C-16）
+  enabled: bool                   # 启动时装配外联拦截（socket/urllib 层）
+  allow_cidrs: list[str]          # 额外放行的目的网段（回环代码恒放行，不在此列）
+ipc:                              # IPC 一次性启动令牌（C-17）
+  enforce: bool                   # true=业务请求须带 X-IPC-Token 头（或 Bearer 会话）
 annotator:
   enabled: bool                 # 随主应用同进程启动标注器（默认关）
   host: str
@@ -29,11 +56,19 @@ paths:
   data_dir: str
   tmp_dir: str
   db_path: str        # SQLite 数据库文件（§7.1）
+  db_url: str         # S-03 非空时为完整 SQLAlchemy URL（达梦/金仓，未真机验证）；空=sqlite
   images_dir: str     # 原图副本目录（报告缺陷图谱数据源）
   reports_dir: str    # PDF 报告输出目录（§7.2）
 density:
   low: float   # AB 级黑度下限（默认 2.0）
   high: float  # AB 级黑度上限（默认 4.5）
+  photo_policy: str  # 翻拍影像门禁策略：warn=降级告警+人工复核；block=与扫描件同等严格
+film_region:
+  enabled: bool               # 评片前先分割胶片有效区（翻拍影像可评的前置）
+  min_area_frac: float        # 胶片区最小占画面比例（低于视为分割失败）
+  max_photo_area_frac: float  # 胶片占比低于此值才可能判翻拍（满幅=扫描件）
+  surround_bright_gray: float # 环绕背景"亮"的灰度下限（灯箱过曝特征）
+  surround_min_frac: float    # 亮背景占整幅最小占比（扫描白边远低于此）
 iqi:
   type: str                       # wire | hole（线型/孔型像质计，§4.2）
   wire_diameters_mm: list[float]  # 线型像质计丝号1..N 直径(mm)，递增（公开参考，待官方复核）
@@ -126,6 +161,12 @@ standard:
   tables_filename: str            # 对应数值表文件（tables/ 下）
 review:
   kappa_threshold: float          # Cohen's κ 高度一致阈值（§15.3）；低于则升级仲裁
+gate:                             # 底片合格性门禁补充（DB50/T 1807-2025 §5 扫描参数）
+  min_dpi: int                    # 扫描分辨率下限（DICOM 按 PixelSpacing 推算）
+  require_dpi: bool               # dpi 无法确定时：true=拦截 | false=放行并告警留档
+  min_bit_depth: int              # 位深硬门禁下限
+  allow_8bit: bool                # true=8bit 降级放行（告警留档）| false=硬拦截
+  rejects_dir: str                # 不合格底片留档目录（密文归档）
 observability:
   log_format: str                 # text=人类可读 | json=结构化单行日志（可观测）
   enable_metrics: bool            # 是否启用进程内指标采集（/api/v1/metrics 导出）
@@ -133,6 +174,19 @@ batch:
   workers: int                    # 批量并行 worker 数（§12.1）
   max_per_batch: int              # 单批最大图数
   per_image_estimate_sec: float   # 单图预估耗时（预计时间展示用）
+backup:                           # S-12 备份增强
+  interval_hours: float           # 自动备份间隔（小时）；0=关闭定期调度
+  include_images: bool            # 备份是否纳入影像目录（逐文件 SM3 校验）
+watchdog:                         # S-09 内存监控与自愈
+  enabled: bool                   # 后台线程周期采样 RSS（默认关）
+  interval_sec: float             # 采样周期（秒）
+  rss_warn_mb: float              # RSS 告警阈值（MB）
+  rss_restart_mb: float           # RSS 重启标记阈值（MB）
+  graceful_restart: bool          # 超重启阈值是否写 data/restart_required 标记文件
+modelgate:                        # E-14 更新即重评投产门禁
+  enabled: bool                   # true=activate 先 Golden 评估 → candidate → sysadmin 审批投产
+  min_map: float                  # Golden mAP@0.5 下限（0=宽松）
+  min_recall: float               # Golden 召回下限（0=宽松）
 std_eval:                       # DB50/T 1807-2025 标准评价（§9~§11）
   iou_standard: float           # 标准口径 IOU 阈值（§9.2）
   iou_strict: float             # 严格口径 IOU 阈值（双阈值并行，取严分级）

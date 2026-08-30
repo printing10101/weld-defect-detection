@@ -20,6 +20,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use tauri::Manager;
 
 const BACKEND_PORT: u16 = 18773;
 /// 后端冷启动耗时上限：实测首次运行（重依赖导入 + 模型加载 + Defender 扫描）
@@ -53,8 +54,10 @@ fn resolve_app_root(dir: &std::path::Path) -> PathBuf {
     dir.to_path_buf()
 }
 
-/// 按优先级选择 Python 解释器：
-/// <根>/python_embed → <根>/src/python_embed（开发布局）→ <根>/venv → 系统 PATH。
+/// 按优先级选择 Python 解释器（S-02 国产 OS 打包，按目标平台条件编译）：
+/// Windows：<根>/python_embed/python.exe → <根>/src/python_embed/python.exe（开发布局）
+///        → <根>/venv/Scripts/python.exe → 系统 PATH 的 python.exe。
+#[cfg(not(target_os = "linux"))]
 fn pick_python(app_root: &std::path::Path) -> PathBuf {
     for base in [app_root.to_path_buf(), app_root.join("src")] {
         let embed = base.join("python_embed").join("python.exe");
@@ -67,6 +70,23 @@ fn pick_python(app_root: &std::path::Path) -> PathBuf {
         return venv;
     }
     PathBuf::from("python.exe")
+}
+
+/// Linux（麒麟 V10 / UOS 适配，未真机验证）：pyenv/venv 布局为 bin/python3，
+/// 侧车目录约定为 <根>/python_embed/bin/python3 → <根>/venv/bin/python3 → 系统 PATH python3。
+#[cfg(target_os = "linux")]
+fn pick_python(app_root: &std::path::Path) -> PathBuf {
+    for base in [app_root.to_path_buf(), app_root.join("src")] {
+        let embed = base.join("python_embed").join("bin").join("python3");
+        if embed.exists() {
+            return embed;
+        }
+    }
+    let venv = app_root.join("venv").join("bin").join("python3");
+    if venv.exists() {
+        return venv;
+    }
+    PathBuf::from("python3")
 }
 
 /// 后端日志输出对（stdout/stderr），写入 %TEMP%/ScanDetection/backend.log。
@@ -160,6 +180,57 @@ fn wait_for_port(host: &str, port: u16, timeout_secs: u64) {
     }
 }
 
+/// C-17：读取后端落盘的一次性 IPC 令牌并注入 WebView（window.__IPC_TOKEN__）。
+///
+/// 后端在 lifespan 启动时生成令牌写入 <应用根>/data/ipc_token（进程生命周期
+/// 有效）；端口可连即 lifespan 已完成，令牌已就绪。注入后前端 services/api.ts
+/// 统一携带 X-IPC-Token 头。
+///
+/// 诚实边界：令牌防"其他本机进程误调 / 网页 CSRF 式调用"，本机回环为明文
+/// 传输，令牌不解决传输加密（需 TLS 时后续挂本机证书，不在本次范围）。
+/// 文件权限为尽力而为（Windows 下依赖用户数据目录继承的 ACL）。
+fn inject_ipc_token(handle: &tauri::AppHandle) {
+    let dir = match exe_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("[ScanDetection] IPC 令牌注入失败（无法定位安装目录）: {e}");
+            return;
+        }
+    };
+    let path = resolve_app_root(&dir).join("data").join("ipc_token");
+    // 令牌落盘与端口就绪存在毫秒级竞态：短重试兜底（正常一次即中）。
+    let mut token: Option<String> = None;
+    for _ in 0..5 {
+        match std::fs::read_to_string(&path) {
+            Ok(t) if !t.trim().is_empty() => {
+                token = Some(t.trim().to_string());
+                break;
+            }
+            _ => thread::sleep(Duration::from_millis(300)),
+        }
+    }
+    let token = match token {
+        Some(t) => t,
+        None => {
+            eprintln!(
+                "[ScanDetection] 读取 IPC 令牌失败: {:?}（后端 ipc.enforce=false 时无需令牌）",
+                path
+            );
+            return;
+        }
+    };
+    if let Some(win) = handle.get_webview_window("main") {
+        // 令牌为 token_urlsafe 字符集（[A-Za-z0-9_-]），可安全内插 JS 字符串。
+        let js = format!("window.__IPC_TOKEN__ = '{}';", token);
+        match win.eval(&js) {
+            Ok(()) => println!("[ScanDetection] IPC token injected into webview"),
+            Err(e) => eprintln!("[ScanDetection] IPC 令牌注入 WebView 失败: {e}"),
+        }
+    } else {
+        eprintln!("[ScanDetection] 未找到主窗口，IPC 令牌未注入");
+    }
+}
+
 fn main() {
     let backend_state = BackendState {
         child: Arc::new(Mutex::new(None)),
@@ -170,12 +241,15 @@ fn main() {
 
     tauri::Builder::default()
         .manage(backend_state)
-        .setup(move |_app| {
+        .setup(move |app| {
             // 后台启动后端并等待就绪；窗口不阻塞，前端通过轮询 /health 自动恢复。
+            let handle = app.handle().clone();
             thread::spawn(move || {
                 if let Err(e) = launch_backend(launch_slot) {
                     eprintln!("[ScanDetection] launch_backend error: {e}");
                 }
+                // C-17：后端就绪（端口可连 = lifespan 完成）后注入 IPC 一次性令牌。
+                inject_ipc_token(&handle);
             });
             Ok(())
         })

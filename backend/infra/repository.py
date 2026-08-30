@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.domain.dto import DefectClass
+from backend.infra.crypto import sm3_hex
 from backend.infra.db import (
     AuditRecord,
     Base,
@@ -42,7 +43,10 @@ class InspectionRepository:
     def __init__(self, db_path: str) -> None:
         self._engine = create_db_engine(db_path)
         self._audit_lock = threading.Lock()  # 审计哈希链写串行化（防分叉，单进程内）
-        Base.metadata.create_all(self._engine)
+        from backend.infra.migrate import DDL_LOCK
+
+        with DDL_LOCK:  # 与迁移线程串行化，避免并发建表撞表
+            Base.metadata.create_all(self._engine)
 
     # ---- 写入 ----
     def create_inspection(
@@ -501,6 +505,41 @@ class InspectionRepository:
                         if k in g:
                             setattr(d, k, g[k])
 
+    def set_secret_level(
+        self,
+        image_id: str,
+        *,
+        secret_level: int,
+        classification_basis: str,
+    ) -> dict[str, Any]:
+        """设定/变更影像密级（C-10，仅安全保密管理员调用），同步其报告行。
+
+        返回 before/after 快照供调用方入安全审计链。0=非密 1=内部 2=秘密 3=机密；
+        变更密级必须登记定密依据（classification_basis 非空）。
+        """
+        if not 0 <= int(secret_level) <= 3:
+            raise ValueError("secret_level must be 0~3")
+        if not (classification_basis or "").strip():
+            raise ValueError("classification_basis is required（变更密级须登记定密依据）")
+        with Session(self._engine) as session, session.begin():
+            rec = session.get(ImageRecord, image_id)
+            if rec is None:
+                raise KeyError(f"image not found: {image_id}")
+            before = {
+                "secret_level": int(rec.secret_level or 0),
+                "classification_basis": rec.classification_basis,
+            }
+            rec.secret_level = int(secret_level)
+            rec.classification_basis = classification_basis.strip()
+            after = {
+                "secret_level": rec.secret_level,
+                "classification_basis": rec.classification_basis,
+            }
+            for r in session.scalars(select(ReportRecord).where(ReportRecord.image_id == image_id)):
+                r.secret_level = rec.secret_level
+                r.classification_basis = rec.classification_basis
+        return {"before": before, "after": after}
+
     def append_audit(
         self,
         *,
@@ -516,6 +555,8 @@ class InspectionRepository:
 
         防分叉：单进程内用 self._audit_lock 串行化读-改-写；并将时间戳纳入
         哈希覆盖，确保“何时”这一追溯要素不可被篡改。
+        国密化（C-02）：新记录一律 SM3（与 SHA-256 同为 256bit/64 hex）。
+        存量记录仍为 SHA-256，verify_chain 逐条双算法判定，兼容混合链。
         """
         now = datetime.now(UTC).replace(tzinfo=None)
         payload = json.dumps(
@@ -537,7 +578,8 @@ class InspectionRepository:
                 select(AuditRecord).order_by(AuditRecord.seq.desc()).limit(1)
             ).first()
             prev_hash = last.hash if last is not None else "0" * 64
-            h = hashlib.sha256(f"{prev_hash}|{payload}".encode()).hexdigest()
+            # C-02 国密化：新记录一律 SM3（历史段仍为 SHA-256，见 verify_chain）
+            h = sm3_hex(f"{prev_hash}|{payload}".encode())
             rec = AuditRecord(
                 actor=actor,
                 action=action,
@@ -571,11 +613,14 @@ class InspectionRepository:
         object_id: str | None = None,
         limit: int = 100,
         offset: int = 0,
+        actions: list[str] | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         """审计日志检索，按时间降序。
 
         返回 (当页条目, 匹配总数)。原实现只返回列表，调用方拿 len 当 total，
         在超过 limit 时会低报总数，审计场景不可接受。
+        actions: 多动作白名单过滤（C-18 运维操作回放用）；显式给单值 action
+        时以单值优先。
         """
         limit = max(1, min(limit, 500))
         offset = max(0, offset)
@@ -584,6 +629,8 @@ class InspectionRepository:
             conds.append(AuditRecord.actor == actor)
         if action:
             conds.append(AuditRecord.action == action)
+        elif actions:
+            conds.append(AuditRecord.action.in_(actions))
         if object_type:
             conds.append(AuditRecord.object_type == object_type)
         if object_id:
@@ -609,7 +656,14 @@ class InspectionRepository:
             session.add(ReportRecord(id=report_id, image_id=image_id))
 
     def verify_chain(self) -> bool:
-        """校验审计哈希链的连续性与不可分叉性。
+        """校验审计哈希链的连续性与不可分叉性（混合算法兼容，C-02）。
+
+        国密化后链上可能同时存在两段：国密化前的 SHA-256 历史记录与新增的
+        SM3 记录。表结构未存算法字段（migrations 不在本改动范围），故采用
+        逐条双算法判定：每条记录分别以 SHA-256 与 SM3 重算，命中任一候选
+        且 prev_hash 连续即视为完好。篡改任一条的载荷都会使两个候选同时
+        失配，防篡改强度不受影响；代价是单条记录无法自证其算法（攻击者
+        若能整链重写本就可重算任意算法，与改前一致）。
 
         原实现用 list(session.scalars(...)) 一次性把整张审计表 materialize 成
         ORM 对象，随表增长内存占用线性膨胀（O(N)），且每次 /audit 校验都会触发。
@@ -638,8 +692,9 @@ class InspectionRepository:
                     sort_keys=True,
                     ensure_ascii=False,
                 )
-                expected = hashlib.sha256(f"{prev}|{payload}".encode()).hexdigest()
-                if r.prev_hash != prev or r.hash != expected:
+                data = f"{prev}|{payload}".encode()
+                expected = (hashlib.sha256(data).hexdigest(), sm3_hex(data))  # 历史 / 国密
+                if r.prev_hash != prev or r.hash not in expected:
                     return False
                 prev = r.hash
             return True
@@ -668,6 +723,8 @@ class InspectionRepository:
             "need_review": rec.need_review,
             "standard_id": rec.standard_id,
             "standard_version": rec.standard_version,
+            "secret_level": int(rec.secret_level or 0),
+            "classification_basis": rec.classification_basis,
             "created_at": _fmt_dt(rec.created_at),
         }
 
@@ -710,6 +767,8 @@ class InspectionRepository:
             "basis": list(r.basis or []),
             "report_hash": r.report_hash,
             "signed_at": _fmt_dt(r.signed_at) if r.signed_at else None,
+            "secret_level": int(r.secret_level or 0),
+            "classification_basis": r.classification_basis,
         }
 
     @staticmethod

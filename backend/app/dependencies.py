@@ -9,9 +9,10 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from pathlib import Path
 
-from fastapi import Header
+from fastapi import Header, Request
 
 from backend.app.batch_queue import BatchManager
 from backend.app.plugins import bootstrap_plugins
@@ -69,6 +70,72 @@ def _resolve_path(p: str) -> str:
     return p
 
 
+class ResilientDetector:
+    """S-17 运行期模型回退：推理异常计数与自动回退上一稳定版本。
+
+    包装真实检测器：``infer`` 抛异常时累计连续失败次数，达到
+    ``threshold`` 且 auto_rollback 允许时回调 ``on_threshold``（由 Registry
+    实装：回退上一稳定权重 + 告警 + 审计 + degraded 标记）。异常始终原样
+    上抛——本类只负责"计数与触发回退"，不吞错、不伪造空结果。
+
+    ``load`` 透传：成功加载（含热切换）即清零计数并回调 ``on_load_success``
+    （Registry 据此更新"上一稳定版本"指针与 degraded 复位）。
+    """
+
+    def __init__(
+        self,
+        inner: DefectDetector,
+        *,
+        threshold: int,
+        auto_rollback: bool,
+        on_threshold,
+        on_load_success,
+    ) -> None:
+        self._inner = inner
+        self._threshold = max(1, int(threshold))
+        self._auto_rollback = bool(auto_rollback)
+        self._on_threshold = on_threshold
+        self._on_load_success = on_load_success
+        self.consecutive_failures = 0
+        self.rollback_count = 0
+        self.last_rollback_at: str | None = None
+
+    def load(self, model_uri: str, backend: str = "onnx") -> None:
+        """透传加载；成功即视为新稳定版本（清零计数、通知 Registry）。"""
+        self._inner.load(model_uri, backend)
+        self.consecutive_failures = 0
+        self._on_load_success(model_uri)
+
+    def infer(
+        self,
+        image,
+        conf: float,
+        iou: float,
+        class_conf: dict[int, float] | None = None,
+    ):
+        try:
+            dets = self._inner.infer(image, conf, iou, class_conf)
+        except Exception:
+            self.consecutive_failures += 1
+            if self.consecutive_failures >= self._threshold and self._auto_rollback:
+                self.consecutive_failures = 0
+                self.rollback_count += 1
+                from datetime import datetime
+
+                self.last_rollback_at = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+                try:
+                    self._on_threshold()
+                except Exception as exc:  # noqa: BLE001 - 回退失败不掩盖原始推理异常
+                    _LOG.error("自动回退执行失败: %s", exc)
+            raise
+        # 推理成功：连续失败计数清零（"连续"语义）。
+        self.consecutive_failures = 0
+        return dets
+
+    def infer_tta(self, image, conf, iou, class_conf=None, scales=(0.8, 1.0, 1.25)):
+        return self._inner.infer_tta(image, conf, iou, class_conf, scales)
+
+
 class Registry:
     """应用共享状态容器（单例）。"""
 
@@ -91,12 +158,30 @@ class Registry:
         self.model_registry = ModelRegistry(
             self.config.model.weights_dir, self.config.model.registry_state_file
         )
+        # S-17：上一稳定版本权重指针（启动期=配置默认权重，成功热切换后更新）。
+        self._last_stable_uri: str | None = model_uri
         self.detector: DefectDetector = self._build_detector()
         # 启动期同步：活跃指针对齐当前实际加载的权重 uri。
         self.model_registry.mark_active_by_uri(_resolve_model_uri(self.config.model.default_uri))
+        # E-14 投产门禁：candidate 状态（评估结果）暂存，进程内存态
+        # （重启后 candidate 失效，须重新评估——评估本身可重放，不丢一致性）。
+        self.pending_activations: dict[str, dict] = {}
         self.grader: StandardGrader = self._build_grader()
         self.preprocessor = self._build_preprocessor()
-        self.repository = InspectionRepository(_resolve_path(self.config.paths.db_path))
+        # S-03：paths.db_url 非空时优先作为完整 SQLAlchemy URL（达梦/金仓，未真机验证）；
+        # 默认空 = 传 db_path，保持 sqlite:/// 语义不变。
+        self.repository = InspectionRepository(
+            self.config.paths.db_url or self.config.paths.db_path
+        )
+        # 安全治理存储（C-06/C-19）：三员账号/会话/告警/独立安全审计链
+        from backend.infra.security_store import SecurityStore
+
+        self.security_store = SecurityStore(_resolve_path(self.config.paths.db_path))
+        # 合规存储（C-12/C-14）：涉密载体台账 + 导出审批
+        from backend.infra.compliance_store import CarrierStore, ExportStore
+
+        self.carrier_store = CarrierStore(_resolve_path(self.config.paths.db_path))
+        self.export_store = ExportStore(_resolve_path(self.config.paths.db_path))
         # reportlab 导入 ~0.4s，延迟到 Registry 装配时（Registry 本身在后台线程初始化），
         # 不占用进程导入→端口绑定的关键路径。
         from backend.infra.reporting.pdf_reporter import PdfReporter
@@ -111,6 +196,10 @@ class Registry:
         from backend.infra.device_store import DeviceStore
 
         self.device_store = DeviceStore(_resolve_path(self.config.paths.db_path))
+        # S-09 内存看门狗：默认 None（lifespan 按 config.watchdog.enabled 装配启动）。
+        self.watchdog = None
+        # S-12 定期备份调度器：默认 None（lifespan 按 config.backup.interval_hours 装配）。
+        self.backup_scheduler = None
 
     def eval_report(self, model_id: str) -> dict | None:
         """读取某模型的评估报告。"""
@@ -177,28 +266,86 @@ class Registry:
 
         决策（选哪种）仍由本方法负责，构造（如何建）收敛到 get_detector，
         兑现"换检测器不改主干"。训练模型加载失败时按 allow_baseline_fallback 回退基线。
+        S-17：装配结果统一以 ResilientDetector 包装（推理异常计数→自动回退）。
         """
         dc = self.config.detect
         # baseline_enabled 作为 kind 的兼容别名：显式 kind 优先。
         if dc.kind == "baseline_blob" or dc.baseline_enabled:
             self.detector_kind = "baseline_blob"
             self.detector_degraded = False
-            return get_detector("baseline_blob", blob_cfg=self._blob_cfg(dc))
+            return self._wrap_resilient(
+                get_detector("baseline_blob", blob_cfg=self._blob_cfg(dc))
+            )
         # 训练模型检测器（默认）。权重缺失/加载失败按策略处理。
         uri = _resolve_model_uri(self.config.model.default_uri)
         try:
-            det = get_detector("trained_yolo", model_uri=uri, backend=self.config.model.backend)
+            det = get_detector(
+                "trained_yolo",
+                model_uri=uri,
+                backend=self.config.model.backend,
+                providers=self.config.model.providers,
+            )
             self.detector_kind = "trained_yolo"
             self.detector_degraded = False
             _LOG.info("detector loaded: trained_yolo (uri=%s)", uri)
-            return det
+            return self._wrap_resilient(det)
         except Exception as exc:
             if not dc.allow_baseline_fallback:
                 raise ModelUnavailableError(f"训练模型加载失败: {exc}") from exc
             _LOG.error("M4b 权重加载失败，已回退 M4a 基线（评级不可用于正式判定）：%s", exc)
             self.detector_kind = "baseline_blob"
             self.detector_degraded = True
-            return get_detector("baseline_blob", blob_cfg=self._blob_cfg(dc))
+            return self._wrap_resilient(
+                get_detector("baseline_blob", blob_cfg=self._blob_cfg(dc))
+            )
+
+    def _wrap_resilient(self, det: DefectDetector) -> DefectDetector:
+        """S-17：以 ResilientDetector 包装检测器，接通告警/审计/回退回调。"""
+        return ResilientDetector(
+            det,
+            threshold=self.config.model.infer_failure_threshold,
+            auto_rollback=self.config.model.auto_rollback,
+            on_threshold=self._on_infer_failure_threshold,
+            on_load_success=self._on_detector_load_success,
+        )
+
+    def _on_infer_failure_threshold(self) -> None:
+        """S-17：连续推理异常达到阈值 → 回退上一稳定版本 + 告警 + 审计 + degraded。"""
+        last = self._last_stable_uri
+        _LOG.error("连续推理异常达到阈值，尝试回退上一稳定版本: %s", last)
+        if last:
+            # fail-safe：回退失败抛错由 ResilientDetector 记录，不吞掉原始异常
+            self.detector.load(last, self.config.model.backend)
+        self.detector_degraded = True
+        try:
+            self.security_store.raise_alert(
+                kind="model_rollback",
+                level="high",
+                message=f"推理连续异常，已自动回退上一稳定版本: {Path(last).name if last else '（无记录）'}",
+                detail={"last_stable_uri": last},
+            )
+        except Exception as exc:  # noqa: BLE001 - 告警失败不影响回退本身
+            _LOG.warning("model_rollback 告警落库失败: %s", exc)
+        try:
+            self.repository.append_audit(
+                actor="system",
+                action="model_rollback",
+                object_type="model",
+                object_id=Path(last).name if last else "unknown",
+                before=None,
+                after={"last_stable_uri": last, "degraded": True},
+                note="S-17 运行期模型自动回退（连续推理异常）",
+            )
+        except Exception as exc:  # noqa: BLE001 - 审计失败不影响回退本身
+            _LOG.warning("model_rollback 审计落库失败: %s", exc)
+
+    def _on_detector_load_success(self, uri: str) -> None:
+        """S-17：检测器成功加载（启动/热切换/回退）→ 更新稳定版本指针。"""
+        self._last_stable_uri = uri
+        # 主动加载成功（热切换/启动回退）视为恢复稳定；回退路径随后会再置
+        # degraded=True（_on_infer_failure_threshold 在 load 之后设置），不冲突。
+        if self.detector_degraded:
+            self.detector_degraded = False
 
     @staticmethod
     def _blob_cfg(dc) -> BlobConfig:
@@ -275,6 +422,108 @@ class Registry:
             self._auto_evaluate(entry.id)
         return entry
 
+    # ---- E-14 更新即重评投产门禁（状态机：candidate → approve → active）-------
+
+    def run_candidate_evaluation(self, model_id: str) -> dict:
+        """对候选模型跑 Golden 评估（同步；复用 /models/{id}/evaluate 逻辑）。
+
+        使用独立检测器实例（不干扰当前活跃检测器）；Golden Set 缺失抛
+        FileNotFoundError；其余评估失败原样上抛，由路由转 4xx/5xx。
+        """
+        entry = self.model_registry.get(model_id)
+        if entry is None:
+            raise KeyError(model_id)
+        from backend.evaluation.run_eval import run_golden_evaluation
+
+        det = get_detector(
+            "trained_yolo",
+            model_uri=entry.uri,
+            backend=self.config.model.backend,
+            providers=self.config.model.providers,
+        )
+        return run_golden_evaluation(
+            model_id,
+            det,
+            golden_dir=_resolve_path(self.config.eval.golden_dir),
+            eval_dir=self.eval_dir,
+            experiments_dir=_resolve_path(self.config.eval.experiments_dir),
+            drift_baseline_path=_resolve_path(self.config.eval.drift_baseline_path),
+            conf=self.config.detect.infer_conf,
+            iou=self.config.detect.infer_iou,
+            class_conf=self.config.detect.class_conf,
+            preprocess_fn=self._preprocess_fn(),
+        )
+
+    def _preprocess_fn(self):
+        """生产增强链路（与 activate 后自动评估一致）；preprocess 关闭返回 None。"""
+        if not self.config.preprocess.enabled:
+            return None
+        pp = self.preprocessor
+        gamma = self.config.preprocess.gamma
+        return lambda gray: pp.enhance(pp.denoise(gray), gamma)
+
+    def evaluate_activation_gate(self, model_id: str) -> dict:
+        """E-14 门禁判定：跑 Golden 评估并对照 modelgate 阈值。
+
+        返回 {model_id, passed, metrics, reason}；结果写入 pending_activations
+        （candidate 状态）。评估不可完成（Golden 缺失/加载失败）向上抛由路由转
+        HTTP 错误——诚实门禁：评估不了就不允许投产，不留"默认放行"。
+        """
+        summary = self.run_candidate_evaluation(model_id)
+        metrics = summary.get("metrics", {})
+        gate = self.config.modelgate
+        map50 = float(metrics.get("mAP50") or 0.0)
+        recall = float(metrics.get("recall") or 0.0)
+        reasons: list[str] = []
+        if map50 < gate.min_map:
+            reasons.append(f"mAP50={map50:.4f} < min_map={gate.min_map}")
+        if recall < gate.min_recall:
+            reasons.append(f"recall={recall:.4f} < min_recall={gate.min_recall}")
+        passed = not reasons
+        record = {
+            "model_id": model_id,
+            "passed": passed,
+            "reason": "；".join(reasons) if reasons else "",
+            "metrics": metrics,
+            "golden_fingerprint": summary.get("golden_fingerprint"),
+            "experiment_run_id": summary.get("experiment_run_id"),
+            "evaluated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+        self.pending_activations[model_id] = record
+        return record
+
+    def approve_model(self, model_id: str, actor: str | None = None) -> ModelEntry:
+        """E-14 投产审批：sysadmin 确认 candidate 评估通过后执行真正热切换。
+
+        - 门禁未启用 → ValueError（路由转 409，避免绕过状态机的"万能审批"）；
+        - 无通过评估记录 / 评估未达标 → ValueError（路由转 409/422）。
+        成功后审计 action=model_approve（actor=审批人）。
+        """
+        if not self.config.modelgate.enabled:
+            raise ValueError("模型投产门禁未启用（modelgate.enabled=false），无需审批")
+        record = self.pending_activations.get(model_id)
+        if record is None:
+            raise ValueError(f"模型 {model_id} 无 candidate 评估记录（先 POST /activate 触发评估）")
+        if not record.get("passed"):
+            raise ValueError(f"模型 {model_id} 门禁评估未通过: {record.get('reason')}")
+        entry = self.activate_model(model_id, actor=actor)
+        self.repository.append_audit(
+            actor=actor or "system",
+            action="model_approve",
+            object_type="model",
+            object_id=entry.id,
+            before=None,
+            after={
+                "model_id": model_id,
+                "metrics": record.get("metrics"),
+                "evaluated_at": record.get("evaluated_at"),
+            },
+            note="E-14 投产审批：Golden 评估达标后由 sysadmin 批准投产",
+        )
+        # 投产完成后 candidate 记录使命完成，移除（防止重复审批产生重复切换）。
+        self.pending_activations.pop(model_id, None)
+        return entry
+
     def _auto_evaluate(self, model_id: str) -> None:
         """后台线程：对刚激活的模型跑 Golden Set 评估（非阻塞、fail-soft）。"""
         import threading
@@ -329,13 +578,36 @@ class Registry:
                     "pending": self.syncer.pending_count,
                 },
                 **self.model.status,
+                # S-17 运行期回退可观测：degraded 标记已含于上，附回退计数/时间。
+                "resilience": {
+                    "rollback_count": getattr(self.detector, "rollback_count", 0),
+                    "last_rollback_at": getattr(self.detector, "last_rollback_at", None),
+                    "consecutive_failures": getattr(self.detector, "consecutive_failures", 0),
+                },
+                # S-09 内存看门狗状态（未启用时 enabled=false 显式呈现）。
+                "watchdog": (
+                    self.watchdog.snapshot()
+                    if getattr(self, "watchdog", None) is not None
+                    else {"enabled": False}
+                ),
             }
 
 
 def get_operator_name(
+    request: Request,
     x_operator_name: str | None = Header(default=None, alias="X-Operator-Name"),
 ) -> str:
-    """从请求头解析操作员姓名（单机科研自用，无用户系统）；缺省返回 "local"。"""
+    """解析操作者身份（审计 actor）。
+
+    C-06/C-19 兼容语义：登录态下以账号名为准——生产环境中 get_principal
+    （路由级依赖，先于本依赖执行）会把 Principal 写入 request.state；
+    未登录请求 X-Operator-Name 头仅作审计 actor 记录，不构成身份
+    （缺省 "local"）。测试经 dependency_overrides 注入 principal 时同样
+    会写入 request.state（见 tests/conftest.py）。
+    """
+    principal = getattr(request.state, "principal", None)
+    if principal is not None and getattr(principal, "username", ""):
+        return principal.username
     name = (x_operator_name or "").strip()
     return name or "local"
 

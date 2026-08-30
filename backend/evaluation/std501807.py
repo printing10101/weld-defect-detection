@@ -8,7 +8,9 @@
      系统分级取两者较差者；
   2) FRR 分级线默认取收紧值（自动 3% / 手工 4%，即标准 L2 线）而非 L1 线；
   3) 未匹配预测（FP_extra）单独暴露计数，不静默吞掉；
-  4) 漏检风险在无人工评级信息时保守按"≥Ⅱ级"处理（归Ⅰ类风险）。
+  4) 漏检风险在无人工评级信息时保守按"≥Ⅱ级"处理（归Ⅰ类风险）；评价输入
+     （gts）可携带每条缺陷的 NB/T 47013.2 评级（judge API per_defect_grade，
+     字段名 grade），此时漏检风险按实测评级判定并标注 measured=True。
 
 纯 numpy / 标准库，可离线单测。
 """
@@ -207,6 +209,7 @@ class StdEvalResult:
     frr: float
     level: str | None  # "L1".."L4" 或 None=未定级
     risks: dict[str, str]  # {"miss": "Ⅰ类"|..., "false_detect": ..., "false_report": ...}
+    miss_measured: bool  # 漏检风险评级是否实测（False=无逐缺陷评级，保守判定）
     fd_pairs: dict[str, int]  # "gt->pred" 误检方向计数（误检风险证据）
     md_focus: int  # 重点关注漏检数（漏检风险证据）
 
@@ -230,6 +233,7 @@ class StdEvalResult:
             "tdr": self.tdr,
             "level": self.level,
             "risks": self.risks,
+            "miss_measured": self.miss_measured,
             "fd_pairs": self.fd_pairs,
             "md_focus": self.md_focus,
         }
@@ -311,6 +315,7 @@ def _evaluate_at(
     fd_pairs: dict[str, int] = {}
     fp_extra_total = 0
     md_focus = 0
+    md_grades: dict[int, list[str | None]] = {}  # 漏检缺陷的 NB/T 47013.2 评级（可缺失）
     for _, gts, preds in defect_set:
         verdicts, fp_extra = match_image(gts, preds, iou_thr, cfg)
         fp_extra_total += len(fp_extra)
@@ -318,7 +323,7 @@ def _evaluate_at(
             _to_std_class(g["class_id"], g["bbox"], cfg.aspect_round_max, cfg.class_to_std)
             for g in gts
         ]
-        for (kind, pred_cls), gt_cls in zip(verdicts, gt_std):
+        for (kind, pred_cls), gt, gt_cls in zip(verdicts, gts, gt_std):
             c = per[gt_cls]
             if kind == "td":
                 c.td += 1
@@ -330,6 +335,7 @@ def _evaluate_at(
                 c.md += 1
                 if gt_cls in cfg.focus:
                     md_focus += 1
+                md_grades.setdefault(gt_cls, []).append(_norm_grade(gt.get("grade")))
 
     fr_by_class: dict[int, int] = {n: 0 for n in STD_CLASS_NAMES}
     a = 0
@@ -343,8 +349,11 @@ def _evaluate_at(
 
     denom = sum(c.total for c in per.values())
     tdr = round(sum(c.td for c in per.values()) / denom, 4) if denom else 0.0
-    # WDR/KDR：(TD+FD)/全量 —— 与 TDR 同分母（TD+FD+MD），仅分子不同
-    wdr = tdr
+    # WDR/KDR：位置检出（类型对错不论）口径 —— 与 TDR 同分母（TD+FD+MD），
+    # 分子为 TD+FD（E-01 修正：原实现误把 WDR 写成 tdr，丢掉了"位置检出即
+    # 计入"的宽口径，导致误检缺陷在 WDR 中被错误扣除）；KDR 同式但仅计
+    # 重点关注类别。
+    wdr = round(sum(c.td + c.fd for c in per.values()) / denom, 4) if denom else 0.0
     focus_num = focus_den = 0
     for n, c in per.items():
         if n in cfg.focus:
@@ -365,8 +374,9 @@ def _evaluate_at(
     ]
 
     level = grade_level(kdr, wdr, tdr, frr, cfg)
+    miss_risk, miss_measured = _miss_risk(per, md_grades, cfg)
     risks = {
-        "miss": _miss_risk(per, cfg),
+        "miss": miss_risk,
         "false_detect": _false_detect_risk(fd_pairs, cfg),
         "false_report": "Ⅰ类" if frr > cfg.frr_limit(strict=strict) else "Ⅱ类",
     }
@@ -384,6 +394,7 @@ def _evaluate_at(
         frr=frr,
         level=level,
         risks=risks,
+        miss_measured=miss_measured,
         fd_pairs=fd_pairs,
         md_focus=md_focus,
     )
@@ -395,16 +406,52 @@ def _evaluate_at(
 # ---------------------------------------------------------------------------
 
 
-def _miss_risk(per: dict[int, ClassCounts], cfg: StdEvalConfig) -> str:
-    """漏检风险（表2）：Ⅰ类=重点关注漏检，或一般关注漏检（保守按评定≥Ⅱ级）；
-    Ⅱ类=仅评定为Ⅰ级的圆形缺陷漏检。无逐缺陷评级数据时保守归Ⅰ类。"""
+# NB/T 47013.2 评级别名归一（judge API 输出 "I".."IV"；兼容全角与数字写法）
+_GRADE_ALIASES = {
+    "I": "I",
+    "II": "II",
+    "III": "III",
+    "IV": "IV",
+    "1": "I",
+    "2": "II",
+    "3": "III",
+    "4": "IV",
+    "Ⅰ": "I",
+    "Ⅱ": "II",
+    "Ⅲ": "III",
+    "Ⅳ": "IV",
+}
+
+
+def _norm_grade(raw: Any) -> str | None:
+    """归一逐缺陷评级；缺失/无法识别返回 None（按未实测处理，保守归Ⅰ类）。"""
+    if raw is None:
+        return None
+    return _GRADE_ALIASES.get(str(raw).strip().upper())
+
+
+def _miss_risk(
+    per: dict[int, ClassCounts], md_grades: dict[int, list[str | None]], cfg: StdEvalConfig
+) -> tuple[str, bool]:
+    """漏检风险（表2）。返回 (风险类别, 评级是否实测)。
+
+    - Ⅰ类 = 重点关注缺陷漏检（零容忍，与评级无关）；
+      或一般关注漏检中存在未附评级 / 评级≥Ⅱ级 / 非圆形缺陷者；
+    - Ⅱ类 = 漏检全部为评定Ⅰ级的圆形缺陷（须逐缺陷评级证据齐全）。
+    measured=False 表示存在一般关注漏检但无逐缺陷评级，按保守口径归Ⅰ类
+    （E-09：评级来源 = judge API 的 per_defect_grade，经 gts[].grade 传入）。
+    """
     if any(per[n].md for n in cfg.focus):
-        return "Ⅰ类"
-    if any(per[n].md for n in (1, 2)):
-        # 一般关注漏检：默认保守按"评定Ⅱ级及以上"→Ⅰ类；如确认全为Ⅰ级
-        # （需逐缺陷评级证据传入），可降为Ⅱ类。
-        return "Ⅰ类"
-    return "Ⅱ类"
+        return "Ⅰ类", True
+    grades = [g for n in (1, 2) for g in md_grades.get(n, [])]
+    if not grades:
+        return "Ⅱ类", True
+    if any(g is None for g in grades):
+        # 一般关注漏检但评级证据缺失：保守按"评定Ⅱ级及以上"→Ⅰ类
+        return "Ⅰ类", False
+    if all(g == "I" for g in grades) and all(n == 1 for n in (1, 2) if per[n].md):
+        return "Ⅱ类", True
+    return "Ⅰ类", True
 
 
 def _false_detect_risk(fd_pairs: dict[str, int], cfg: StdEvalConfig) -> str:

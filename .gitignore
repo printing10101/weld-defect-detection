@@ -86,3 +86,12 @@ data/eval/std_eval.json
 data/eval/std_record.json
 data/eval/std_personnel.json
 data/*.db.bak
+data/compliance/
+
+# 运行时数据与会话产物不入库（重装前快照 2026-08-30）
+data/backups/
+data/privacy/
+data/rejects/
+_doc_task/
+# 军工级要求文档：敏感，公开仓库禁止入库
+/扫描检测软件-军工级要求文档.docx

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+/** C-10 密级名称映射（与后端 classification_label 对齐）。 */
+const SECRET_LEVEL_NAMES: Record<number, string> = { 0: "非密", 1: "内部", 2: "秘密", 3: "机密" };
 /**
  * 档案检索视图（真实 GET /api/v1/records）。
  * 列表与统计全部来自后端查询；空态/错误态基于真实响应。
@@ -191,6 +193,7 @@ const levelOptions = ["", "I", "II", "III", "IV"] as const;
           <tr>
             <th>影像编号</th>
             <th>工件号</th>
+            <th>密级</th>
             <th>级别</th>
             <th>可评片</th>
             <th>待复核</th>
@@ -204,6 +207,13 @@ const levelOptions = ["", "I", "II", "III", "IV"] as const;
           >
             <td>{{ item.image_id }}</td>
             <td>{{ item.workpiece_no ?? "—" }}</td>
+            <td>
+              <!-- C-10 密级标识：0=非密 1=内部 2=秘密 3=机密（records.items 携带） -->
+              <span
+                class="lv"
+                :class="{ secret: (item.secret_level ?? 0) >= 2 }"
+              >{{ SECRET_LEVEL_NAMES[item.secret_level ?? 0] ?? "非密" }}</span>
+            </td>
             <td>
               <span
                 v-if="item.joint_level"
@@ -269,6 +279,11 @@ const levelOptions = ["", "I", "II", "III", "IV"] as const;
 </template>
 
 <style scoped>
+/* C-10：秘密/机密级红色高亮 */
+.lv.secret {
+  color: #b3261e;
+  font-weight: 700;
+}
 .pool {
   border: 1px dashed rgba(140, 140, 140, 0.5);
   border-radius: 8px;

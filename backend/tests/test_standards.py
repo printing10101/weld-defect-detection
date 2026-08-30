@@ -39,9 +39,15 @@ def _ctx(t: float = 20) -> ImageMeta:
     )
 
 
-def test_registry_lists_all_four_standards() -> None:
+def test_registry_lists_all_five_standards() -> None:
     ids = supported_standard_ids()
-    assert set(ids) == {"NB/T47013.2-2015", "GB/T3323-2019", "ASME-V", "ISO17636"}
+    assert set(ids) == {
+        "NB/T47013.2-2015",
+        "GB/T3323-2019",
+        "ASME-V",
+        "ISO17636",
+        "GJB 1187A",
+    }
 
 
 def test_capabilities_nb_enabled() -> None:
@@ -103,7 +109,7 @@ def test_standards_api_contract() -> None:
         resp = client.get("/api/v1/standards")
     assert resp.status_code == 200
     rows = resp.json()
-    assert len(rows) == 4
+    assert len(rows) == 5
     first = rows[0]
     for key in (
         "standard_id",

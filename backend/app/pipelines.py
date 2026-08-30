@@ -16,10 +16,14 @@ import time
 import uuid
 from pathlib import Path
 
+import numpy as np
+
 from backend.app.dependencies import Registry
 from backend.domain.density import check_density, estimate_density
 from backend.domain.dto import BBox, DefectClass, DefectShape, Detection, ImageMeta, Modality
 from backend.domain.errors import GradingAmbiguousError, IQIFailError
+from backend.domain.film_region import FilmRegionCfg as DomainFilmRegionCfg
+from backend.domain.film_region import detect_film_region
 from backend.domain.iqi import IqiConfig, enrich_grade, verify_iqi
 from backend.domain.preprocess.metrics import QualityCfg as DomainQualityCfg
 from backend.domain.preprocess.metrics import assess_quality
@@ -29,6 +33,8 @@ from backend.domain.recommend import recommend
 from backend.domain.review import ReviewDecision, ReviewRole, resolve_review
 from backend.domain.spacing import resolve_spacing as _resolve_spacing  # 单一真源（§T8/§6）
 from backend.domain.standards.tables.loader import disclaimer_for
+from backend.evaluation.gate_rejects import GateRejectStore
+from backend.infra.config import resolve_config_path
 from backend.infra.image_loader import load_image
 
 _LOG = logging.getLogger("scandetection.pipeline")
@@ -95,11 +101,53 @@ def _derive_deep_hole(
     return out
 
 
+# ---------------------------------------------------------------------------
+# 扫描参数门禁（DB50/T 1807-2025 §5：dpi / 位深，评片硬前置）
+# ---------------------------------------------------------------------------
+
+
+def _estimate_dpi(meta: ImageMeta) -> float | None:
+    """从影像元数据推算扫描分辨率 dpi；无法确定返回 None。
+
+    DICOM 提供 PixelSpacing（mm/px）→ dpi = 25.4 / spacing；通用图像的
+    文件密度元数据（PNG pHYs / JPEG JFIF）加载器未解析，只能交由
+    gate.require_dpi 配置决定处置（true=从严拦截，false=放行并告警留档）。
+    """
+    if meta.pixel_spacing_mm and meta.pixel_spacing_mm > 0:
+        return 25.4 / meta.pixel_spacing_mm
+    return None
+
+
+def _check_dpi(dpi: float | None, gate) -> tuple[bool, str]:
+    """dpi 门禁：已知且低于下限 → 拦截；未知按 require_dpi 处置。
+
+    返回 (是否通过, 不通过时的原因描述)。通过时原因串为空。
+    """
+    if dpi is not None:
+        if dpi < gate.min_dpi:
+            return False, f"扫描分辨率 {dpi:.0f} dpi 低于下限 {gate.min_dpi} dpi"
+        return True, ""
+    if gate.require_dpi:
+        return False, "无法确定扫描分辨率（无 PixelSpacing/文件元数据），门禁要求提供"
+    return True, ""
+
+
+def _check_bit_depth(bit_depth: int | None, gate) -> tuple[bool, str]:
+    """位深门禁：低于下限默认硬拦截（8bit 底片灰度精度不足），allow_8bit 可降级。"""
+    if bit_depth is not None and bit_depth < gate.min_bit_depth:
+        if gate.allow_8bit:
+            return True, ""
+        return False, f"位深 {bit_depth}bit 低于 {gate.min_bit_depth}bit 硬门禁"
+    return True, ""
+
+
 class InspectionPipeline:
     """一次完整评片的用例编排。"""
 
     def __init__(self, reg: Registry) -> None:
         self._reg = reg
+        # 拦截留档台账懒建：仅在不合格底片归档时连接 DB（见 _gate_reject_store）
+        self._reject_store_cache: GateRejectStore | None = None
 
     def run_inspection(
         self,
@@ -115,6 +163,7 @@ class InspectionPipeline:
         actor: str | None = None,
         template: str = "standard",
         force: bool = False,
+        witness: str | None = None,
     ) -> dict:
         """执行全链路并落库+生成报告，返回结果 dict。
 
@@ -122,6 +171,11 @@ class InspectionPipeline:
         IQIFailError（409），符合设计文档"不通过则阻断评片并提示重拍"的硬前置；
         force=True 时仍出片，但**不输出级别**（need_review=True），因为
         不合格底片不构成评定依据。
+
+        翻拍影像例外（film_region 判定 is_photo 且 density.photo_policy=warn）：
+        相机拍灯箱的 8bit 照片绝对黑度不可测、IQI 识别不可靠，黑度/IQI/质量
+        门禁不阻断，降级为告警（warnings）+ 强制人工复核（need_review=True），
+        缺陷检测/量化/报告链路照常执行；级别输出语义与 force 路径一致。
         """
         reg = self._reg
         image_id = uuid.uuid4().hex
@@ -132,12 +186,47 @@ class InspectionPipeline:
         # 1. 影像加载（infra）
         gray, meta = load_image(image_path)
 
+        # 1.5 底片区域分割（翻拍影像前置）：黑度按胶片掩膜计算，IQI/伪缺陷/
+        # 质量门禁在胶片区上评估，检测时屏蔽胶片区外背景（坐标系不变）。
+        # 翻拍影像（相机拍灯箱，8bit、无原始密度数组）绝对黑度不可测且 IQI
+        # 识别不可靠 → photo_mode 下门禁按 density.photo_policy 处置。
+        fr = reg.config.film_region
+        film = None
+        if fr.enabled:
+            film = detect_film_region(
+                gray,
+                DomainFilmRegionCfg(
+                    min_area_frac=fr.min_area_frac,
+                    max_photo_area_frac=fr.max_photo_area_frac,
+                    surround_bright_gray=fr.surround_bright_gray,
+                    surround_min_frac=fr.surround_min_frac,
+                ),
+            )
+        if film is not None and not (film.is_photo or film.area_frac >= 0.7):
+            # 分割结果既非翻拍、也不占大幅面（如 Otsu 只锁到焊缝条带）→ 不可信。
+            # 必须按整图处理：据此掩膜会把条带外的真实缺陷一并屏蔽掉。
+            film = None
+        photo_mode = bool(
+            film is not None
+            and film.is_photo
+            and meta.bit_depth == 8
+            and meta.density_array is None
+        )
+        eval_gray = (
+            gray[film.y : film.y + film.h, film.x : film.x + film.w]
+            if film is not None
+            else gray
+        )
+
         # 2. 影像质量校验：黑度 + IQI（复用 领域逻辑）
-        # 黑度须基于原始存储灰阶 + 位深，避免显示用的 min-max 拉伸破坏绝对光学密度。
+        # 黑度须基于原始存储灰阶 + 位深，避免显示用的 min-max 拉伸破坏绝对光学密度；
+        # 翻拍影像限定胶片掩膜，排除灯箱亮背景对平均灰阶的稀释。
+        density_src = meta.density_array if meta.density_array is not None else gray
         density = float(
             estimate_density(
-                meta.density_array if meta.density_array is not None else gray,
+                density_src,
                 bit_depth=meta.bit_depth,
+                mask=film.mask if film is not None else None,
             )
         )
         density_ok = bool(check_density(density, reg.config.density.low, reg.config.density.high))
@@ -152,7 +241,10 @@ class InspectionPipeline:
             locate_threshold=reg.config.iqi.locate_threshold,
             sensitivity=tuple(reg.config.iqi.sensitivity),
         )
-        iqi = verify_iqi(gray, iqi_cfg, roi=iqi_roi, iqi_type=reg.config.iqi.type)
+        # IQI 验证：用户给 ROI 时按原图坐标在全图上验证（ROI 已隔离像质计，
+        # 且胶片裁剪可能把像质计切掉）；无 ROI 时在胶片区上自动定位。
+        iqi_target = gray if iqi_roi is not None else eval_gray
+        iqi = verify_iqi(iqi_target, iqi_cfg, roi=iqi_roi, iqi_type=reg.config.iqi.type)
         # 用透照厚度 + 参考表补全 A/AB/B 等级（厚度缺失则 grade=None）。
         iqi = enrich_grade(iqi, base_metal_thickness_mm, iqi_cfg.sensitivity)
         # 伪缺陷筛查，仅严重项默认阻断。
@@ -173,14 +265,29 @@ class InspectionPipeline:
             block_on_uniformity=pd_cfg.block_on_uniformity,
             block_on_dust=pd_cfg.block_on_dust,
         )
-        pd = screen_pseudo_defects(gray, pd_domain)
-        # 质量度量门禁：在原始底片上评估（反映底片本身质量，与增强无关）。
+        pd = screen_pseudo_defects(eval_gray, pd_domain)
+        # 质量度量门禁：在胶片区上评估（反映底片本身质量，排除翻拍边框/灯箱背景）。
         q_cfg = reg.config.quality
-        quality = assess_quality(gray, DomainQualityCfg(**q_cfg.model_dump()))
+        quality = assess_quality(eval_gray, DomainQualityCfg(**q_cfg.model_dump()))
         quality_fail_block = bool(q_cfg.block_on_quality and not quality.passed)
         quality_warn = bool((not quality.passed) and not q_cfg.block_on_quality)
-        evaluable = bool(density_ok and iqi.passed and pd.passed and not quality_fail_block)
-        if not evaluable and not force:
+        # 扫描参数门禁（§5）：dpi 与位深。dpi 无法确定时按 gate.require_dpi
+        # 处置（默认放行+告警留档）；8bit 底片默认硬拦截（allow_8bit 可降级放行）。
+        dpi = _estimate_dpi(meta)
+        dpi_ok, dpi_reason = _check_dpi(dpi, reg.config.gate)
+        bit_depth_ok, bit_depth_reason = _check_bit_depth(meta.bit_depth, reg.config.gate)
+        evaluable = bool(
+            density_ok
+            and iqi.passed
+            and pd.passed
+            and not quality_fail_block
+            and dpi_ok
+            and bit_depth_ok
+        )
+        # 翻拍影像降级：photo_policy=warn 时黑度/IQI/质量门禁不阻断，
+        # 转为告警 + 强制人工复核（绝对黑度不可测，未验证 ≠ 不合格）。
+        photo_advisory = bool(photo_mode and reg.config.density.photo_policy == "warn")
+        if not evaluable:
             reasons = []
             if not density_ok:
                 reasons.append(
@@ -192,22 +299,82 @@ class InspectionPipeline:
                 reasons.append("存在严重伪缺陷（" + "；".join(pd.notes) + "）")
             if quality_fail_block:
                 reasons.append(f"底片质量不达标（RQI={quality.score:.1f} < {q_cfg.min_score:.0f}）")
-            raise IQIFailError("底片质量不合格，阻断评片并提示重拍：" + "；".join(reasons))
+            if not dpi_ok:
+                reasons.append(dpi_reason)
+            if not bit_depth_ok:
+                reasons.append(bit_depth_reason)
+            if not force and not photo_advisory:
+                # 不合格底片留档（E-05）：拦截发生在原图落盘之前，此前被拒
+                # 底片无任何记录；先归档（密文副本+台账+审计）再阻断。
+                self._archive_gate_reject(
+                    image_path=image_path,
+                    image_id=image_id,
+                    reasons=reasons,
+                    dpi=dpi,
+                    bit_depth=meta.bit_depth,
+                    operator=actor,
+                )
+                raise IQIFailError("底片质量不合格，阻断评片并提示重拍：" + "；".join(reasons))
+        # 门禁降级放行的告警（require_dpi=false / allow_8bit=true 路径）：
+        # 不阻断评片，但必须在结果与日志中留痕，避免"未验证"被静默当作合格。
+        gate_warnings: list[str] = []
+        if dpi is None and not reg.config.gate.require_dpi:
+            gate_warnings.append(
+                "无法确定扫描分辨率（无 PixelSpacing/文件元数据），已按配置放行并留档告警"
+            )
+        if (
+            meta.bit_depth is not None
+            and meta.bit_depth < reg.config.gate.min_bit_depth
+            and reg.config.gate.allow_8bit
+        ):
+            gate_warnings.append(
+                f"{meta.bit_depth}bit 底片按配置降级放行（灰度精度不足，建议 16bit 重新扫描）"
+            )
+        if gate_warnings:
+            _LOG.warning(
+                "gate advisory image_id=%s dpi=%s bit_depth=%s warnings=%s",
+                image_id,
+                dpi,
+                meta.bit_depth,
+                gate_warnings,
+            )
+        photo_warnings: list[str] = []
+        if photo_mode:
+            photo_warnings.append(
+                f"翻拍影像：绝对黑度不可测（8bit 照片黑度上限 2.41），"
+                f"胶片区估算 D={density:.2f} 仅供参考"
+            )
+            if not evaluable:
+                photo_warnings.append(
+                    "翻拍影像质量门禁未通过（" + "；".join(reasons) + "），已降级为人工复核"
+                )
+            _LOG.warning(
+                "photo-mode advisory image density=%.2f iqi_pass=%s quality_pass=%s",
+                density,
+                bool(iqi.passed),
+                quality.passed,
+            )
 
         # 3. 原图副本落盘（报告缺陷图谱数据源；勿删）
         suffix = image_path.suffix or ".png"
         saved = self._persist_image(image_path, image_id, suffix)
 
         # 4. 预处理 + 检测 + 量化（ 基线 /  训练模型，同一接口）
-        # 预处理（保边去噪+增强）在原始 gray 上做，检测在增强图上跑；
-        # IQI/黑度/伪缺陷/质量门禁已在原始 gray 上完成，不受增强影响。
+        # 预处理（保边去噪+增强）后送检测；黑度/IQI/伪缺陷/质量门禁已在原始
+        # 影像上完成，不受增强影响。检测源保持整图尺寸（缺陷框坐标系与
+        # 原图/落库一致），仅把胶片区外背景填充为胶片中位灰阶，防止灯箱
+        # 亮背景/翻拍边框被误检为缺陷。
+        detect_src = gray
+        if film is not None and not bool(film.mask.all()):
+            detect_src = gray.copy()
+            detect_src[~film.mask] = int(np.median(eval_gray))
         dc = reg.config.detect
         pp_cfg = reg.config.preprocess
-        enhanced = gray
+        enhanced = detect_src
         preprocess_params: dict = {"enabled": False, "gamma": None}
         if pp_cfg.enabled:
             pp = reg.preprocessor
-            denoised = pp.denoise(gray)
+            denoised = pp.denoise(detect_src)
             gamma_v = pp_cfg.gamma
             enhanced = pp.enhance(denoised, gamma_v)
             preprocess_params = {
@@ -255,6 +422,10 @@ class InspectionPipeline:
             basis = [str(exc)] if str(exc) else ["判定信息不足，需人工复核"]
             need_review = True
             std_version = ""
+        # 翻拍影像告警并入报告依据与人工复核标记：门禁未验证的结果不得静默当作合格片。
+        if photo_warnings:
+            basis = [*basis, *photo_warnings]
+            need_review = True
         # 质量门禁未达阈值且非阻断模式（block_on_quality=False）时仅告警，并入人工复核标记。
         need_review = bool(need_review or quality_warn)
 
@@ -366,13 +537,14 @@ class InspectionPipeline:
 
         # 7. 报告 PDF（Reporter 契约；读库拿数据 → 渲染 → 回填路径）
         # 复用已加载的灰度底片 gray，避免 pdf_reporter 对整张大底片二次解码
-        pdf_path = reg.reporter.build(image_id, template, gray=gray)
+        # S-22 见证：witness 可选透传到报告签字栏（生成时生效，不落库）。
+        pdf_path = reg.reporter.build(image_id, template, gray=gray, witness=witness)
         reg.repository.update_report(report_id, pdf_path=pdf_path)
 
         dt = time.perf_counter() - t0
         _LOG.info(
             "inspection done image_id=%s level=%s defects=%d density_ok=%s iqi_pass=%s "
-            "evaluable=%s need_review=%s (%.1f ms)",
+            "evaluable=%s need_review=%s photo_mode=%s (%.1f ms)",
             image_id,
             joint_level,
             len(quantified),
@@ -380,6 +552,7 @@ class InspectionPipeline:
             bool(iqi.passed),
             evaluable,
             need_review,
+            photo_mode,
             dt * 1000,
         )
         return {
@@ -392,12 +565,84 @@ class InspectionPipeline:
             "density_ok": density_ok,
             "iqi_pass": bool(iqi.passed),
             "defect_count": len(quantified),
+            "photo_mode": photo_mode,
+            "warnings": [*gate_warnings, *photo_warnings],
             "disclaimer": disclaimer,
             "disposition": disposition,
             "disposition_label": disposition_label,
             "disposition_actions": disposition_actions,
             "pdf_path": pdf_path,
         }
+
+    def _gate_reject_store(self) -> GateRejectStore:
+        """拦截留档台账（懒建）：只在首次归档时连接 DB，避免无关评片多开引擎。"""
+        if self._reject_store_cache is None:
+            self._reject_store_cache = GateRejectStore(
+                str(resolve_config_path(self._reg.config.paths.db_path))
+            )
+        return self._reject_store_cache
+
+    def _archive_gate_reject(
+        self,
+        *,
+        image_path: Path,
+        image_id: str,
+        reasons: list[str],
+        dpi: float | None,
+        bit_depth: int | None,
+        operator: str | None,
+    ) -> str:
+        """不合格底片留档（E-05）：密文归档 + gate_rejects 台账 + 审计哈希链。
+
+        复用影像加密落盘路径模式（security.encrypt 开启时 AES-GCM 密文，
+        密钥缺失降级明文并告警），保证留档不旁路加密；归档失败不吞掉门禁
+        拦截本身，降级为仅记台账原因并在日志报错。
+        """
+        reg = self._reg
+        reject_id = uuid.uuid4().hex
+        detail: dict = {"reasons": list(reasons), "source": str(image_path)}
+        try:
+            dest = self._persist_reject(image_path, reject_id, Path(image_path).suffix or ".png")
+            detail["archived"] = str(dest)
+        except Exception as exc:  # noqa: BLE001 - 归档故障不得阻断门禁拦截
+            _LOG.error("不合格底片归档失败 reject_id=%s: %s", reject_id, exc)
+            detail["archive_error"] = str(exc)
+        self._gate_reject_store().add(
+            reject_id=reject_id,
+            image_id=image_id,
+            reject_reason="；".join(reasons)[:256],
+            detail=detail,
+            dpi=dpi,
+            bit_depth=bit_depth,
+            operator=operator or "system",
+        )
+        reg.repository.append_audit(
+            actor=operator or "system",
+            action="gate_reject",
+            object_type="image",
+            object_id=reject_id,
+            before=None,
+            after={"reasons": list(reasons), "dpi": dpi, "bit_depth": bit_depth},
+        )
+        return reject_id
+
+    def _persist_reject(self, src: Path, reject_id: str, suffix: str) -> Path:
+        """不合格底片副本归档到 gate.rejects_dir（密文，模式同 _persist_image）。"""
+        rejects_dir = Path(resolve_config_path(self._reg.config.gate.rejects_dir))
+        rejects_dir.mkdir(parents=True, exist_ok=True)
+        dest = rejects_dir / f"{reject_id}{suffix}"
+        shutil.copyfile(src, dest)
+        if self._reg.config.security.encrypt:
+            from backend.infra.crypto import AesCrypto, CryptoKeyError
+
+            try:
+                cipher = AesCrypto()
+            except CryptoKeyError as exc:
+                _LOG.warning("静态加密未生效（%s）：不合格底片归档以明文落盘", exc)
+                return dest
+            plaintext = dest.read_bytes()
+            dest.write_bytes(cipher.encrypt(plaintext))
+        return dest
 
     def regenerate_report(self, image_id: str, template: str = "standard") -> dict:
         """对已入库检查重新生成报告（不重跑检测/判定）。"""

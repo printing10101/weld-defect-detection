@@ -39,6 +39,9 @@ class YoloDetector:
         self._onnx_input: str | None = None
         self._onnx_shape = (640, 640)
         self._yolo_model = None
+        # S-04 推理后端可插拔：ONNX Runtime 执行提供者清单（由 get_detector/
+        # Registry 从 config.model.providers 注入）；None = 默认 CPU 不变。
+        self.providers: list[str] | None = None
 
     # ---- 加载 ----------------------------------------------------------------
     def load(self, model_uri: str, backend: str = "onnx") -> None:
@@ -60,8 +63,10 @@ class YoloDetector:
             import onnxruntime as ort
         except ImportError as e:  # pragma: no cover
             raise RuntimeError("未安装 onnxruntime，无法加载 onnx 权重") from e
-        # 仅 CPU 执行提供者（部署如需 GPU 可换 onnxruntime-gpu 并启用 CUDAExecutionProvider）
-        sess = ort.InferenceSession(model_uri, providers=["CPUExecutionProvider"])
+        # 执行提供者由配置注入（S-04）：默认 CPU 不变；CUDA/昇腾 CANN/寒武纪/DCU
+        # 等后端为预留写法，需对应 onnxruntime 分发版与运行时库（未真机验证）。
+        providers = list(self.providers) if self.providers else ["CPUExecutionProvider"]
+        sess = ort.InferenceSession(model_uri, providers=providers)
         self._onnx_session = sess
         inp = sess.get_inputs()[0]
         self._onnx_input = inp.name

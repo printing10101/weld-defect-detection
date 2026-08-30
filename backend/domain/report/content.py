@@ -43,6 +43,9 @@ class ReportContent:
     signer: str | None
     disclaimer: str
     fingerprint: str | None = None  # 报告内容指纹（SHA-256，§7.2 数字签名，PDF 页脚展示）
+    secret_level: int = 0  # 密级（C-10）：0=非密 1=内部 2=秘密 3=机密
+    classification_basis: str = ""  # 定密依据（C-10，随密级嵌入报告页眉/页脚）
+    witness: str | None = None  # S-22 军代表/见证人（可选；不传则签字栏不出该行）
 
 
 def build_report_content(
@@ -51,11 +54,13 @@ def build_report_content(
     report: dict[str, Any] | None,
     disclaimer: str | None = None,
     fingerprint: str | None = None,
+    witness: str | None = None,
 ) -> ReportContent:
     """从检查记录（repository 返回的 dict）组装报告内容。
 
     - joint_level 为 None（未授权熔断/不可评级）时结论标注"无法自动评级，需人工复核"；
-    - evaluable=False（IQI/黑度不达标）时报告带免责声明，不冒充正式评片。
+    - evaluable=False（IQI/黑度不达标）时报告带免责声明，不冒充正式评片；
+    - witness（S-22）：军代表/见证人署名，可选；不传则签字栏不出该行。
     """
     return ReportContent(
         report_id=str((report or {}).get("report_id") or ""),
@@ -80,4 +85,7 @@ def build_report_content(
         signer=(report or {}).get("signer"),
         disclaimer=disclaimer or _DISCLAIMER_DEFAULT,
         fingerprint=fingerprint,
+        secret_level=int(image.get("secret_level") or 0),
+        classification_basis=str(image.get("classification_basis") or ""),
+        witness=witness,
     )

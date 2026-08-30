@@ -35,7 +35,7 @@ function loadFromArchive(): void {
 function pick(which: "A" | "B"): void {
   const input = document.createElement("input");
   input.type = "file";
-  input.accept = ".png,.jpg,.jpeg,.bmp";
+  input.accept = ".dcm,.png,.jpg,.jpeg,.jfif,.bmp,.gif,.webp,.tif,.tiff,.avif,.heic,.heif";
   input.onchange = () => {
     const f = input.files?.[0];
     if (!f) return;

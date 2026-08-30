@@ -5,6 +5,10 @@
  */
 import type {
   ActiveExportIn,
+  BootstrapOut,
+  ChallengeOut,
+  LoginOut,
+  MeOut,
   ActiveExportOut,
   ActivePoolOut,
   ActiveSampleIn,
@@ -27,11 +31,13 @@ import type {
   ReviewOut,
   StdPersonnel,
   StdPersonnelOut,
+  StdEvalHistoryOut,
   StdRecordIn,
   StdRecordOut,
   VerifyOut,
 } from "../types/api";
 import { getOperatorName } from "./operator";
+import { clearToken, getToken } from "./authToken";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "/api/v1";
 
@@ -54,6 +60,8 @@ export class ApiRequestError extends Error {
 export const BACKEND_DOWN_EVENT = "backend:down";
 /** 后端恢复信号：任意成功响应派发，供 App 清除离线横幅。 */
 export const BACKEND_UP_EVENT = "backend:up";
+/** 会话失效信号（C-06/C-07）：任意 401 派发，App 清除登录态并跳转登录页。 */
+export const AUTH_UNAUTHORIZED_EVENT = "auth:unauthorized";
 
 /** 单次请求超时（ms）：本地推理通常数秒，批量/复杂报告留 30s 余量。 */
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -65,6 +73,13 @@ const RETRY_BASE_MS = 400;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+/** IPC 一次性令牌（C-17）：Tauri 外壳在后端就绪后注入 window.__IPC_TOKEN__，
+ *  本机后端要求业务请求统一携带 X-IPC-Token（防其他本机进程误调/网页 CSRF
+ *  式调用）；浏览器开发环境无此值，仅调试时由后端关闭 ipc.enforce。 */
+function getIpcToken(): string | null {
+  return (window as unknown as { __IPC_TOKEN__?: string }).__IPC_TOKEN__ ?? null;
 }
 
 async function rawRequest<T>(path: string, init: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
@@ -118,14 +133,26 @@ async function rawRequest<T>(path: string, init: RequestInit, timeoutMs = REQUES
     } catch {
       /* 非 JSON 响应：保留 statusText */
     }
+    if (res.status === 401) {
+      // 会话无效/过期（C-07 空闲超时由后端判定）：清除本地登录态并通知 App 跳转
+      clearToken();
+      window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT));
+    }
     throw new ApiRequestError(res.status, code, message, detail);
   }
   return (await res.json()) as T;
 }
 
 async function request<T>(path: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
-  // 操作员姓名（X-Operator-Name）：单机无用户系统，由设置中的操作员姓名标识"谁在操作"
-  const headers = { "X-Operator-Name": getOperatorName(), ...(init?.headers ?? {}) };
+  // 会话令牌（C-06）：登录后统一携带 Authorization；调用方显式传入的头优先
+  const token = getToken();
+  // 操作员姓名（X-Operator-Name）：仅登录前场景作审计 actor 记录
+  const headers: Record<string, string> = { "X-Operator-Name": getOperatorName() };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  // IPC 一次性令牌（C-17）：每次请求实时读取（Tauri 注入时机晚于前端启动）
+  const ipcToken = getIpcToken();
+  if (ipcToken) headers["X-IPC-Token"] = ipcToken;
+  Object.assign(headers, init?.headers ?? {});
   const merged: RequestInit = { ...init, headers };
   let lastErr: unknown;
   // 仅后端不可达时重试（连接刚启动时短暂抖动）；超时/HTTP 错误直接抛，不重试。
@@ -323,12 +350,81 @@ export function createStdRecord(body: StdRecordIn): Promise<StdRecordOut> {
   });
 }
 
-/** 标准评价：附录A 记录表 PDF 下载地址。 */
+/** 标准评价：附录A 记录表 PDF 下载地址（直链经 access_token 鉴权）。 */
 export function stdRecordPdfUrl(recordName: string): string {
-  return `${BASE}/std-eval/record/pdf?record_name=${encodeURIComponent(recordName)}`;
+  return withAccessToken(`${BASE}/std-eval/record/pdf?record_name=${encodeURIComponent(recordName)}`);
 }
 
-/** 库内影像 PNG 预览地址（浏览器不解码 TIFF/DICOM，由后端统一转换）。 */
+/** 标准评价：评价历史时间线（E-15 等级曲线数据源），按 evaluated_at 降序。 */
+export function getStdEvalHistory(): Promise<StdEvalHistoryOut> {
+  return request<StdEvalHistoryOut>("/std-eval/history");
+}
+
+/** 库内影像 PNG 预览地址（浏览器不解码 TIFF/DICOM，由后端统一转换；直链经 access_token 鉴权）。 */
 export function imagePreviewUrl(imageId: string): string {
-  return `${BASE}/images/${encodeURIComponent(imageId)}/preview.png`;
+  return withAccessToken(`${BASE}/images/${encodeURIComponent(imageId)}/preview.png`);
+}
+
+/** 报告 PDF 下载地址（C-14：默认需导出审批，直链经 access_token 鉴权）。 */
+export function reportPdfUrl(reportId: string): string {
+  return withAccessToken(`${BASE}/report/${encodeURIComponent(reportId)}/pdf`);
+}
+
+/** 为直链 URL 追加 access_token 查询参数（已登录时）；未登录原样返回。 */
+function withAccessToken(url: string): string {
+  const token = getToken();
+  if (!token) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}access_token=${encodeURIComponent(token)}`;
+}
+
+/* ── 三员身份认证（C-06/C-07）────────────────────────────── */
+
+/** 签发登录挑战（一次一用，60s 有效）。 */
+export function getChallenge(): Promise<ChallengeOut> {
+  return request<ChallengeOut>("/auth/challenge");
+}
+
+/**
+ * SM2 挑战-响应登录。
+ * 软件模式简化流程（诚实声明）：私钥文件内容提交给本机后端代签后验签——
+ * 单机本地软件可接受；私钥仅在本机进程内存中出现，不落日志/审计。
+ */
+export function login(
+  username: string,
+  challengeId: string,
+  privateKey: string,
+): Promise<LoginOut> {
+  return request<LoginOut>("/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username,
+      challenge_id: challengeId,
+      private_key: privateKey,
+    }),
+  });
+}
+
+/** 引导窗口：仅系统尚无账号时可用（创建后永久关闭）。 */
+export function bootstrap(body: {
+  username: string;
+  role: string;
+  public_key?: string;
+}): Promise<BootstrapOut> {
+  return request<BootstrapOut>("/auth/bootstrap", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** 注销当前会话。 */
+export function logout(): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>("/auth/logout", { method: "POST" });
+}
+
+/** 当前登录身份。 */
+export function getMe(): Promise<MeOut> {
+  return request<MeOut>("/auth/me");
 }

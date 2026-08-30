@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from backend.app.routers.std_eval import router as std_eval_router
@@ -171,6 +171,18 @@ def test_build_record_pdf(eval_result, people, tmp_path: Path):
 def client(tmp_path: Path, monkeypatch, eval_result) -> TestClient:
     app = FastAPI()
     app.include_router(std_eval_router)
+
+    # C-14 起导出端点需鉴权 + registry：本文件用独立 app 装配 std_eval 路由，
+    # 这里注入测试 principal（sysadmin）并复用全局 registry（require_approval
+    # 由 conftest 环境放宽为 false）。
+    from backend.app import auth as _auth
+
+    def _fake_principal(request: Request):
+        p = _auth.Principal("test-account", "测试管理员", "sysadmin")
+        request.state.principal = p
+        return p
+
+    app.dependency_overrides[_auth.get_principal] = _fake_principal
     # 隔离：评价产物/人员记录都指向 tmp_path
     eval_dir = tmp_path / "data" / "eval"
     eval_dir.mkdir(parents=True, exist_ok=True)

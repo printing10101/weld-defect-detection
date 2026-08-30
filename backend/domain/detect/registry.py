@@ -88,11 +88,14 @@ def get_detector(
     model_uri: str | None = None,
     backend: str = "onnx",
     blob_cfg: BlobConfig | None = None,
+    providers: list[str] | None = None,
 ) -> DefectDetector:
     """按 kind 装配检测器：``cls + load(model_uri, backend)``。
 
     - trained_yolo：须提供真实 model_uri（权重缺失由调用方策略处理）；
-    - baseline_blob：权重可选占位，装配 BlobConfig（缺省用默认配置）。
+    - baseline_blob：权重可选占位，装配 BlobConfig（缺省用默认配置）；
+    - providers（S-04）：ONNX 执行提供者清单，仅在实现暴露 ``providers``
+      属性时注入（鸭子类型，不改 DefectDetector 契约；未知实现静默忽略）。
     未知 kind 抛 ModelUnavailableError（503，需人工复核配置）。
     """
     spec = _DETECTOR_SPECS.get(kind)
@@ -106,5 +109,9 @@ def get_detector(
         det: DefectDetector = BlobDetector(blob_cfg or BlobConfig())
     else:
         det = spec.cls()
+    if providers is not None:
+        # S-04：仅对支持 providers 的实现（YoloDetector）注入；接口契约不变。
+        if hasattr(det, "providers"):
+            det.providers = list(providers)
     det.load(model_uri or "", backend)
     return det

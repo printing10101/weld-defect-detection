@@ -146,14 +146,22 @@ class PdfReporter:
         self._out.mkdir(parents=True, exist_ok=True)
         self._font = _register_font()
 
-    def build(self, image_id: str, template: str = "standard", gray=None) -> str:
+    def build(self, image_id: str, template: str = "standard", gray=None, witness: str | None = None) -> str:
         """生成 PDF/A-1b 报告，返回绝对路径。image_id 不存在抛 ValueError。
 
          数字签名：按报告关键字段计算内容指纹（SHA-256），写入 PDF 页脚
-        并持久化到 reports.report_hash / signed_at，供 verify 端点防篡改校验。
+        并持久化到 reports.report_hash / signed_at，供 verify 端点防篡改校验；
+        国密化（C-03）后在此之外叠加 SM2 数字签名（SM3withSM2，对指纹签名），
+        签名值落 sidecar 文件 <pdf>.sig（指纹本体已入 reports.report_hash，
+        表结构不变故签名落文件）。未配置 SCAN_CRYPTO_KEY 时签名降级为仅
+        指纹（不阻断出片，与静态加密的降级策略一致）。
 
         gray：可选，pipeline 已加载的灰度底片（numpy）。传入则复用，避免对整张
         大底片二次解码；缺省时自行从 image["path"] 解码。
+
+        witness（S-22）：可选军代表/见证人署名，透传到签字栏（不传则不出该行）。
+        诚实边界：witness 仅在本次生成时生效（不落库），重生成报告（regenerate）
+        需再次传入。
         """
         # 报告模板数据化：模板名 → YAML 数据文件；未知/损坏回退 standard。
         tpl = load_report_template(template)
@@ -167,7 +175,12 @@ class PdfReporter:
         disclaimer = _report_disclaimer(image.get("standard_id") or "")
         fingerprint = report_fingerprint(image, defects, report)
         content = build_report_content(
-            image, defects, report, disclaimer=disclaimer or None, fingerprint=fingerprint
+            image,
+            defects,
+            report,
+            disclaimer=disclaimer or None,
+            fingerprint=fingerprint,
+            witness=witness,
         )
 
         # 原图解码：pipeline 已传入灰度图则复用，否则自行解码（ 避免重复解码）
@@ -199,6 +212,9 @@ class PdfReporter:
                 )
             except (KeyError, OSError) as exc:  # pragma: no cover - 持久化尽力而为
                 _LOG.warning("fingerprint persist failed report=%s: %s", report_id, exc)
+        # SM2 签名落 sidecar（C-03）：在 SHA-256 指纹之外叠加国密签名；
+        # 未配置密钥时降级为仅指纹（写 sidecar 返回 False，不阻断出片）。
+        write_signature_sidecar(pdf_path, fingerprint)
         return str(pdf_path)
 
 
@@ -217,6 +233,7 @@ def report_fingerprint(image: dict, defects: list[dict], report: dict | None) ->
         "base_metal_thickness_mm": image.get("base_metal_thickness_mm"),
         "joint_level": image.get("joint_level"),
         "need_review": bool(image.get("need_review", False)),
+        "secret_level": int(image.get("secret_level") or 0),  # C-10：密级纳入防篡改指纹
         "standard_id": image.get("standard_id"),
         "standard_version": image.get("standard_version"),
         "defects": [
@@ -241,6 +258,81 @@ def report_fingerprint(image: dict, defects: list[dict], report: dict | None) ->
     }
     canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# SM2 报告签名（C-03）：对 SHA-256 指纹做 SM3withSM2 签名，值落 sidecar。
+# ---------------------------------------------------------------------------
+
+_SIDE_SUFFIX = ".sig"  # 签名 sidecar 后缀（<pdf>.sig，JSON）
+
+
+def report_signature(fingerprint: str) -> dict[str, str] | None:
+    """对报告指纹做 SM2 数字签名（SM3withSM2），返回 sidecar 元数据。
+
+    签名对象是指纹字符串本身，指纹覆盖报告全部关键字段（见
+    report_fingerprint），SM2 签名由此间接覆盖全内容。未配置
+    SCAN_CRYPTO_KEY（或 provider 初始化失败）时返回 None：签名降级为仅
+    指纹，不阻断出片——与静态加密的降级策略一致。
+    """
+    try:
+        from backend.infra.crypto import CryptoKeyError, get_provider
+
+        try:
+            provider = get_provider()
+        except CryptoKeyError as exc:
+            _LOG.warning("SM2 签名未生效（%s）：报告仅落 SHA-256 指纹", exc)
+            return None
+    except ImportError as exc:  # pragma: no cover - gmssl 为硬依赖，防御性降级
+        _LOG.warning("国密库不可用（%s）：报告仅落 SHA-256 指纹", exc)
+        return None
+    return {
+        "algo": "SM2",
+        "hash_algo": "SHA-256",
+        "fingerprint": fingerprint,
+        "signature": provider.sign(fingerprint.encode("utf-8")),
+        "public_key": provider.public_key_hex,
+        "signed_at": datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds"),
+    }
+
+
+def signature_sidecar_path(pdf_path: str | Path) -> Path:
+    """签名 sidecar 文件路径（<pdf>.sig）。"""
+    return Path(str(pdf_path) + _SIDE_SUFFIX)
+
+
+def write_signature_sidecar(pdf_path: str | Path, fingerprint: str) -> bool:
+    """SM2 签名落 sidecar 文件（<pdf>.sig，JSON）。
+
+    指纹本体已入 reports.report_hash，表结构不变，故签名值落文件；sidecar
+    内附带公钥，验签方无需持有签名私钥即可校验。返回是否写入成功。
+    """
+    meta = report_signature(fingerprint)
+    if meta is None:
+        return False
+    meta["report_pdf"] = Path(pdf_path).name
+    try:
+        signature_sidecar_path(pdf_path).write_text(
+            json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+        return True
+    except OSError as exc:  # 落盘失败不阻断出片（签名尽力而为）
+        _LOG.warning("SM2 签名 sidecar 写入失败 %s: %s", pdf_path, exc)
+        return False
+
+
+def read_signature_sidecar(pdf_path: str | Path) -> dict | None:
+    """读取签名 sidecar；文件不存在/损坏/格式不符返回 None（旧报告无签名）。"""
+    try:
+        data = json.loads(signature_sidecar_path(pdf_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    sig, pub = data.get("signature"), data.get("public_key")
+    if not isinstance(sig, str) or not isinstance(pub, str):
+        return None
+    return data
 
 
 def _report_disclaimer(standard_id: str) -> str:
@@ -275,8 +367,9 @@ def _register_font() -> str:
 def _read_gray(image_path: str) -> np.ndarray | None:
     """以 unicode 安全方式读取灰度图（cv2.imread 在中文路径上会失败）。
 
-     静态加密兼容：影像副本可能为 AES-256-GCM 密文（魔数 b"SDC1"），
-    检测到则用 SCAN_CRYPTO_KEY 解密后再解码；明文旧数据直接解码。
+     静态加密兼容：影像副本可能为国密密文（SM4，魔数 b"SDC2"）或历史
+    AES-256-GCM 密文（b"SDC1"），检测到任一魔数则用 SCAN_CRYPTO_KEY 委托
+    crypto 模块按魔数分流解密后再解码；明文旧数据直接解码。
     密钥缺失/解密失败时返回 None（报告图谱降级为空，不抛 500）。
     """
     try:
@@ -286,8 +379,8 @@ def _read_gray(image_path: str) -> np.ndarray | None:
         return None
     if not buf:
         return None
-    _MAGIC = b"SDC1"
-    if buf.startswith(_MAGIC):
+    # C-01 国密化：新副本 SDC2（SM4-CTR+HMAC-SM3），存量副本 SDC1（AES-GCM）
+    if buf.startswith((b"SDC2", b"SDC1")):
         try:
             from backend.infra.crypto import AesCrypto, CryptoKeyError
 
@@ -392,6 +485,13 @@ def _defect_label(idx: int, d: dict) -> str:
 # ---------------------------------------------------------------------------
 
 _CONTENT_START_PAGE = 3  # 封面、注意事项不计页码，正文从此页起算
+_SECRET_LEVEL_NAMES = {0: "非密", 1: "内部", 2: "秘密", 3: "机密"}
+
+
+def classification_label(secret_level: int) -> str:
+    """密级数值 → 页面横标文本（C-10）；非密（0）返回空串（不绘制横标）。"""
+    level = int(secret_level or 0)
+    return _SECRET_LEVEL_NAMES.get(level, "") if level > 0 else ""
 _QUALITY_DOC_NO = "SD-RT-R01-1.00"  # 质量文件编号（版式占位）
 _RT_LEVEL = "RT-Ⅱ"  # 评片/审核人员资格级别（版式占位）
 _ROMAN = {"I": "Ⅰ", "II": "Ⅱ", "III": "Ⅲ", "IV": "Ⅳ"}
@@ -412,12 +512,25 @@ class _ReportCanvas(pdfcanvas.Canvas):
 
     正文页页眉绘制机构名（模板 cover_title），页脚绘制『第x页 共y页』；
     封面与注意事项页不绘制（与参考报告一致）。
+    密级标识（C-10）：secret_level>0 时在**每页顶部居中**绘制密级横标
+    （军工合规要求密级标识覆盖全部页面，含封面/注意事项），正文页页脚
+    另附定密依据。
     """
 
-    def __init__(self, *args, header_text: str = "", font: str = "Helvetica", **kwargs):
+    def __init__(
+        self,
+        *args,
+        header_text: str = "",
+        font: str = "Helvetica",
+        classification: str = "",
+        basis: str = "",
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self._header_text = header_text
         self._chrome_font = font
+        self._classification = classification  # 如 "秘密"（空串=非密不绘制）
+        self._basis = basis  # 定密依据（正文页页脚附注）
         self._saved_states: list[dict] = []
 
     def showPage(self) -> None:
@@ -434,15 +547,30 @@ class _ReportCanvas(pdfcanvas.Canvas):
 
     def _draw_chrome(self, total: int) -> None:
         page = self._pageNumber  # type: ignore[attr-defined]  # reportlab Canvas 私有属性，stub 未声明
+        # 密级横标（C-10）：全部页面绘制，红色加粗，位于页眉文字上方
+        if self._classification:
+            self.saveState()
+            self.setFont(self._chrome_font, 12)
+            self.setFillColor(colors.red)
+            self.drawCentredString(
+                _PAGE_W / 2.0, _PAGE_H - 16, f"密级：{self._classification}"
+            )
+            self.restoreState()
         if page < _CONTENT_START_PAGE:
             return
         n = page - _CONTENT_START_PAGE + 1
         n_total = total - _CONTENT_START_PAGE + 1
         self.saveState()
-        self.setFont(self._chrome_font, 14)
-        self.drawCentredString(_PAGE_W / 2.0, _PAGE_H - 30, self._header_text)
+        if self._header_text:
+            self.setFont(self._chrome_font, 14)
+            self.drawCentredString(_PAGE_W / 2.0, _PAGE_H - 32, self._header_text)
         self.setFont(self._chrome_font, 9)
         self.drawCentredString(_PAGE_W / 2.0, 22, f"第{n}页 共{n_total}页")
+        if self._classification and self._basis:
+            self.setFont(self._chrome_font, 8)
+            self.drawCentredString(
+                _PAGE_W / 2.0, 12, f"定密依据：{self._basis[:80]}"
+            )
         self.restoreState()
 
 
@@ -500,7 +628,14 @@ def _render(
 
     doc.build(
         flow,
-        canvasmaker=lambda *a, **k: _ReportCanvas(*a, header_text=tpl.cover_title, font=font, **k),
+        canvasmaker=lambda *a, **k: _ReportCanvas(
+            *a,
+            header_text=tpl.cover_title,
+            font=font,
+            classification=classification_label(getattr(c, "secret_level", 0)),
+            basis=getattr(c, "classification_basis", "") or "",
+            **k,
+        ),
     )
 
 
@@ -710,10 +845,15 @@ def _conclusion_flow(c, styles: dict[str, ParagraphStyle], w: float) -> list[Flo
 
 
 def _signature_table(c, styles: dict[str, ParagraphStyle], w: float) -> Table:
-    """签字栏：检测/审核/审批（左）+ 检验机构检验专用章区（右，占位）。"""
+    """签字栏：检测/审核/审批（左）+ 检验机构检验专用章区（右，占位）。
+
+    S-22 军标见证：content.witness（军代表/见证人）可选；传入时在审批行下
+    增加一行"军代表/见证人"，不传则不出现在版式（默认版式不变）。
+    """
     date = _cn_date(c.generated_at) or "　年　月　日"
     signer = c.signer or "（签字）"
-    data = [
+    witness = getattr(c, "witness", None)
+    rows = [
         [
             Paragraph(f"检测（级别）<br/>{_RT_LEVEL}<br/>{signer}<br/>{date}", styles["sig"]),
             Paragraph("检 验 机 构<br/><br/>检 验 专 用 章", styles["stamp"]),
@@ -721,6 +861,17 @@ def _signature_table(c, styles: dict[str, ParagraphStyle], w: float) -> Table:
         [Paragraph(f"审核（级别）<br/>{_RT_LEVEL}<br/>（签字）<br/>{date}", styles["sig"]), ""],
         [Paragraph(f"审批<br/>（签字）<br/>{date}", styles["sig"]), ""],
     ]
+    if witness:
+        rows.append(
+            [
+                Paragraph(
+                    f"军代表/见证人<br/>{witness}<br/>{date}",
+                    styles["sig"],
+                ),
+                "",
+            ]
+        )
+    data = rows
     t = Table(data, colWidths=[w * 0.58, w * 0.42])
     t.setStyle(
         TableStyle(

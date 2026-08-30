@@ -8,6 +8,10 @@ edition = "2021"
 name = "ScanDetection"
 path = "src/main.rs"
 
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

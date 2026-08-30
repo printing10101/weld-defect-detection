@@ -3,6 +3,8 @@
  *  交互约定：单击菜单名展开，展开后悬停切换，单击外部或选中项后收起；
  *  所有动作以 action 事件上抛，由 AppShell 统一分发。 */
 import { onBeforeUnmount, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
+import { useAuthStore } from "../stores/auth";
 
 interface MenuItem {
   id: string;
@@ -18,6 +20,17 @@ interface Menu {
 
 defineProps<{ activeView: string }>();
 const emit = defineEmits<{ action: [id: string] }>();
+// 三员认证（C-06）：顶栏展示当前登录身份，支持手动登出
+const auth = useAuthStore();
+const router = useRouter();
+const ROLE_NAMES: Record<string, string> = {
+  sysadmin: "系统管理员",
+  secadmin: "安全保密管理员",
+  auditor: "安全审计员",
+};
+function logout(): void {
+  void auth.logout().then(() => router.push("/login"));
+}
 
 const MENUS: Menu[] = [
   {
@@ -145,10 +158,31 @@ onBeforeUnmount(() => document.removeEventListener("click", onDocClick));
               : "设备标定"
       }}
     </div>
+    <!-- 右侧：当前登录身份（三员之一）+ 登出 -->
+    <div
+      v-if="auth.isLoggedIn"
+      class="ctx user"
+    >
+      {{ auth.username }}（{{ ROLE_NAMES[auth.role] ?? auth.role }}）
+      <button
+        type="button"
+        class="logout"
+        @click="logout"
+      >登出</button>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.logout {
+  margin-left: 8px;
+  padding: 1px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  border: 1px solid var(--line, #ccc);
+  border-radius: 2px;
+  background: #fff;
+}
 .menubar {
   display: flex;
   align-items: stretch;

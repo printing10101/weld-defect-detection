@@ -149,6 +149,9 @@ def main() -> None:
         defect_set.append((p.stem, gts, preds_by_stem.get(p.stem, [])))
 
     no_defect_set: list[tuple[str, list[dict]]] = []
+    # 误报底片清单（E-10）：此前只累计误报计数（FRR 的 a），被误报的具体底片
+    # 无从追溯；现收集 id+路径+误报框数，随结果 JSON 落盘并可供 API 导出。
+    false_report_films: list[dict] = []
     if args.clean_img_dir:
         clean_dir = _ROOT / args.clean_img_dir
         clean_paths = _list_images(clean_dir)
@@ -169,13 +172,19 @@ def main() -> None:
                 raise SystemExit(
                     f"无缺陷测试集发现缺陷标注: {p.stem}（§9.1.2 口径被污染，拒绝评价）"
                 )
-            no_defect_set.append((p.stem, clean_preds.get(p.stem, [])))
+            preds = clean_preds.get(p.stem, [])
+            if preds:
+                false_report_films.append(
+                    {"id": p.stem, "path": str(p), "n_false_reports": len(preds)}
+                )
+            no_defect_set.append((p.stem, preds))
 
     result = evaluate(defect_set, no_defect_set, cfg)
     payload = {
         "generated_at": _now_iso(),
         "n_defect_images": len(defect_set),
         "n_no_defect_images": len(no_defect_set),
+        "false_report_films": false_report_films,  # 误报底片清单（E-10）
         "result": result,
     }
     out = _ROOT / args.out

@@ -43,10 +43,84 @@ class ModelCfg(BaseModel):
     backend: str = "onnx"  # onnx | torch | tensorrt
     weights_dir: str = "models/weights"  # 模型注册表扫描目录（§7.4，M4）
     registry_state_file: str = "data/model_registry.json"  # 活跃模型指针持久化
+    # ONNX Runtime 执行提供者（S-04 推理后端可插拔）。默认 CPU 不变；
+    # 换 onnxruntime-gpu 后可配 ["CUDAExecutionProvider", "CPUExecutionProvider"]。
+    # 昇腾 CANN / 寒武纪 / DCU 等国产后端为预留写法，未真机验证（见 default.yaml 注释）。
+    providers: list[str] = ["CPUExecutionProvider"]
+    # S-17 运行期模型回退：连续推理异常达到阈值 → 自动回退上一稳定版本权重
+    # （fail-safe 语义），并落告警+审计+degraded 标记。
+    infer_failure_threshold: int = 3
+    auto_rollback: bool = True
 
 
 class SecurityCfg(BaseModel):
     encrypt: bool = True
+
+
+class AuthCfg(BaseModel):
+    """三员身份认证配置（C-06/C-07/C-09）。
+
+    challenge_ttl_sec      : 登录挑战有效期（一次一用，防重放）；
+    idle_timeout_min       : 会话空闲超时（分钟，滑动过期）；
+    session_ttl_min        : 会话绝对有效期（分钟，从签发起算上限）；
+    max_sessions           : 单账号并发会话上限（超限吊销最旧会话，单点登录语义）；
+    max_failed_attempts    : 连续挑战失败锁定阈值；
+    lockout_min            : 触发锁定后的锁定时长（分钟），并落安全告警。
+    """
+
+    challenge_ttl_sec: int = 60
+    idle_timeout_min: int = 15
+    session_ttl_min: int = 720
+    max_sessions: int = 1
+    max_failed_attempts: int = 5
+    lockout_min: int = 30
+
+
+class BatchExportAlertCfg(BaseModel):
+    """批量导出告警规则（C-22）。
+
+    enabled     : 是否启用"窗口期内批量导出"异常行为告警；
+    window_min  : 计数窗口（分钟）；
+    threshold   : 窗口期内同一操作者的导出下载次数达到该值即触发一次 high 告警
+                  （仅在跨越阈值的那一刻告警一次，防告警刷屏）。
+    """
+
+    enabled: bool = True
+    window_min: int = 10
+    threshold: int = 5
+
+
+class SimpleAlertCfg(BaseModel):
+    """布尔开关型告警规则（C-22）：每次事件触发即落一条告警。"""
+
+    enabled: bool = True
+
+
+class AlertsCfg(BaseModel):
+    """安全告警规则配置（C-22 异常行为告警完善）。
+
+    各告警 kind 的开关/阈值集中于此，替代散落硬编码：
+    - batch_export        : 批量导出（窗口期内导出≥threshold 次 → high 告警）；
+    - unauthorized_access : 越权访问（require_role 403 → warn 告警）；
+    - account_lockout     : 登录失败锁定（account_locked → critical 告警）。
+    """
+
+    batch_export: BatchExportAlertCfg = BatchExportAlertCfg()
+    unauthorized_access: SimpleAlertCfg = SimpleAlertCfg()
+    account_lockout: SimpleAlertCfg = SimpleAlertCfg()
+
+
+class ExportCfg(BaseModel):
+    """导出管控配置（C-14）。
+
+    require_approval : true=报告 PDF/清单导出需保密员预授权（申请→批准→
+                       一次性令牌→凭令下载）或导出审批令牌；false=仅登录即可导出
+                       （单机调试用，生产保持 true）。
+    token_ttl_sec    : 一次性导出令牌有效期（秒）。
+    """
+
+    require_approval: bool = True
+    token_ttl_sec: int = 600
 
 
 class EvalCfg(BaseModel):
@@ -77,6 +151,35 @@ class SyncCfg(BaseModel):
     http_timeout: float = 10.0  # HTTP 同步推送超时（秒，§13.6 配置中心化）
 
 
+class EgressCfg(BaseModel):
+    """进程级外联防护（C-16）。
+
+    enabled     : true=启动时装配外联拦截（socket/urllib 层，进程级）；
+    allow_cidrs : 允许外连的目的网段（CIDR）。本机回环 127.0.0.0/8 与 ::1/128
+                  在代码中恒放行（本机前后端/标注器通信必需，不可配置关闭），
+                  此处只需登记额外放行的内网网段；默认空 = 除回环外全拦截
+                  （纯离线部署的从严默认）。配置 sync.kind=http 推送端点时，
+                  须将其网段显式加入白名单。
+    """
+
+    enabled: bool = True
+    allow_cidrs: list[str] = []
+
+
+class IpcCfg(BaseModel):
+    """IPC 一次性启动令牌（C-17）。
+
+    enforce: true=除存活/指标/认证与静态资源外，所有请求须携带 X-IPC-Token
+             头（或已带 Bearer 会话）——防其他本机进程误调/网页 CSRF 式调用。
+             后端启动时生成一次性令牌写入 data/ipc_token（进程生命周期有效），
+             Tauri 外壳读取后注入 WebView。单机调试/测试可置 false（诚实声明：
+             本机回环为明文 HTTP，令牌不解决传输加密；需 TLS 时挂本机证书，
+             不在本次范围）。
+    """
+
+    enforce: bool = True
+
+
 class AnnotatorCfg(BaseModel):
     """人工标注服务是否随主应用同进程启动。
 
@@ -93,6 +196,10 @@ class PathsCfg(BaseModel):
     data_dir: str = "data"
     tmp_dir: str = "data/tmp"
     db_path: str = "data/scan.db"  # SQLite 数据库文件（§7.1）
+    # S-03 数据库方言：非空时作为完整 SQLAlchemy URL 优先于 db_path 使用
+    # （如达梦/人大金仓，示例见 infra/db.py docstring；未真机验证）。
+    # 默认空 = 保持 sqlite:///<db_path> 语义不变。
+    db_url: str = ""
     images_dir: str = "data/images"  # 原图副本目录（报告缺陷图谱数据源）
     reports_dir: str = "data/reports"  # PDF 报告输出目录（§7.2）
 
@@ -100,6 +207,24 @@ class PathsCfg(BaseModel):
 class DensityCfg(BaseModel):
     low: float = 2.0  # AB 级黑度下限
     high: float = 4.5  # AB 级黑度上限
+    # 翻拍影像（相机拍灯箱，8bit 且黑度物理上限 2.41、绝对黑度不可测）门禁策略：
+    # warn=黑度/IQI/质量门禁降级为告警+强制人工复核（不阻断出片）；
+    # block=与扫描件同等严格（不通过即阻断评片）。
+    photo_policy: str = "warn"
+
+
+class FilmRegionCfg(BaseModel):
+    """底片区域分割配置（backend/domain/film_region.py 的配置镜像）。
+
+    enabled=True 时评片前先分割胶片有效区：黑度按掩膜计算、IQI/伪缺陷/
+    质量门禁在胶片区上评估、检测时屏蔽胶片区外背景（坐标系不变）。
+    """
+
+    enabled: bool = True
+    min_area_frac: float = 0.08  # 胶片区最小占画面比例（低于视为分割失败）
+    max_photo_area_frac: float = 0.88  # 胶片占比低于此值才可能判翻拍（满幅=扫描件）
+    surround_bright_gray: float = 200.0  # 环绕背景"亮"的灰度下限（灯箱过曝特征）
+    surround_min_frac: float = 0.05  # 亮背景占**整幅**最小占比（低阈偏安全：误判翻拍仅多人工复核）
 
 
 class IqiCfg(BaseModel):
@@ -310,6 +435,23 @@ class ReviewCfg(BaseModel):
     kappa_threshold: float = 0.8  # Cohen's κ 高度一致阈值（§15.3）；低于则升级仲裁
 
 
+class GateCfg(BaseModel):
+    """底片合格性门禁补充配置（DB50/T 1807-2025 §5 扫描参数，评片硬前置）。
+
+    dpi      : 扫描分辨率下限。DICOM 按 PixelSpacing 推算；通用图像文件
+               元数据加载器未解析、无法确定时由 require_dpi 决定处置
+               （true=从严拦截，false=放行并告警留档）。
+    bit_depth: 位深硬门禁。8bit 底片灰度精度不足默认拦截，allow_8bit=true
+               可降级放行（告警留档，仍强制人工复核语义由上层决定）。
+    """
+
+    min_dpi: int = 600
+    require_dpi: bool = False  # dpi 无法确定时：true=拦截（从严），false=放行+告警
+    min_bit_depth: int = 16
+    allow_8bit: bool = False
+    rejects_dir: str = "data/rejects"  # 不合格底片留档目录（密文归档）
+
+
 class StdEvalCfg(BaseModel):
     """DB50/T 1807-2025 标准评价配置（backend/evaluation/std501807.py）。
 
@@ -362,15 +504,69 @@ class BatchCfg(BaseModel):
     per_image_estimate_sec: float = 8.0  # 单图预估耗时（进度条/预计时间展示用）
 
 
+class BackupCfg(BaseModel):
+    """备份策略配置（S-12 备份增强）。
+
+    interval_hours : 自动备份间隔（小时）；0=关闭定期调度（默认，不影响测试）。
+                     >0 时应用启动后由后台线程按间隔 create_backup 并记审计。
+    include_images : 备份是否纳入影像目录（paths.images_dir）。默认 false
+                     （影像体积大，归档策略 v1 不并入）；true 时逐文件 SM3 校验。
+    """
+
+    interval_hours: float = 0.0
+    include_images: bool = False
+
+
+class WatchdogCfg(BaseModel):
+    """内存看门狗（S-09）：后台线程周期采样 RSS，超阈值告警/可选标记重启。
+
+    enabled          : 默认 false（不影响既有测试/部署）。
+    interval_sec     : 采样周期（秒）。
+    rss_warn_mb      : RSS 告警阈值（MB），超限落 security alert + 审计。
+    rss_restart_mb   : RSS 重启标记阈值（MB）；仅 graceful_restart=true 时写
+                       data/restart_required 标记文件（由 Tauri 壳检测重启，
+                       当前壳侧集成待做——诚实边界，仅告警+审计兜底）。
+    graceful_restart : 是否允许写重启标记文件。
+    """
+
+    enabled: bool = False
+    interval_sec: float = 30.0
+    rss_warn_mb: float = 2048.0
+    rss_restart_mb: float = 4096.0
+    graceful_restart: bool = False
+
+
+class ModelGateCfg(BaseModel):
+    """模型投产门禁状态机（E-14：更新即重评投产门禁）。
+
+    enabled    : 门禁开关。默认 false = 保持旧行为（activate 即切换，评估仅
+                 激活后补跑）；true = activate 先跑 Golden 评估，达标进入
+                 candidate 状态，需 sysadmin 经 POST /models/{id}/approve
+                 审批后才真正切换（审批留审计）。
+    min_map    : Golden 评估 mAP@0.5 下限（默认 0 = 宽松，仅要求评估可完成）。
+    min_recall : Golden 评估召回下限（默认 0 = 宽松）。
+    """
+
+    enabled: bool = False
+    min_map: float = 0.0
+    min_recall: float = 0.0
+
+
 class AppConfig(BaseSettings):
     server: ServerCfg = ServerCfg()
     model: ModelCfg = ModelCfg()
     security: SecurityCfg = SecurityCfg()
+    auth: AuthCfg = AuthCfg()
+    alerts: AlertsCfg = AlertsCfg()
+    export: ExportCfg = ExportCfg()
     eval: EvalCfg = EvalCfg()
     sync: SyncCfg = SyncCfg()
+    egress: EgressCfg = EgressCfg()
+    ipc: IpcCfg = IpcCfg()
     annotator: AnnotatorCfg = AnnotatorCfg()
     paths: PathsCfg = PathsCfg()
     density: DensityCfg = DensityCfg()
+    film_region: FilmRegionCfg = FilmRegionCfg()
     iqi: IqiCfg = IqiCfg()
     pseudo_defect: PseudoDefectCfg = PseudoDefectCfg()
     preprocess: PreprocessCfg = PreprocessCfg()
@@ -380,8 +576,14 @@ class AppConfig(BaseSettings):
     upload: UploadCfg = UploadCfg()
     standard: StandardCfg = StandardCfg()
     review: ReviewCfg = ReviewCfg()
+    gate: GateCfg = GateCfg()
     observability: ObservabilityCfg = ObservabilityCfg()
     batch: BatchCfg = BatchCfg()
+    backup: BackupCfg = BackupCfg()
+    watchdog: WatchdogCfg = WatchdogCfg()
+    # 注意字段名 modelgate（非 model_gate）：E-14 专项测试/部署用环境变量
+    # SCAN_MODELGATE__ENABLED=true 开启完整门禁链（env 解析按小写段匹配）。
+    modelgate: ModelGateCfg = ModelGateCfg()
     std_eval: StdEvalCfg = StdEvalCfg()
 
     model_config = {"env_prefix": "SCAN_"}
