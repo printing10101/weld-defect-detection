@@ -124,6 +124,7 @@ def test_report_pdf_embeds_classification():
         )
         assert resp.status_code == 200
     image = reg.repository.get_image(image_id)
+    assert image is not None, "入库后应可查回"
     content = build_report_content(image, [], image.get("report"))
     assert content.secret_level == 3
     assert content.classification_basis == "机密依据条款"

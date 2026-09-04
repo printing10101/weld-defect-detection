@@ -34,6 +34,9 @@ import urllib.request
 from collections.abc import Callable
 from urllib.parse import urlsplit
 
+# socket 模块私有哨兵（urllib 默认超时占位），提为模块常量供签名默认值引用
+_SOCK_DEFAULT_TIMEOUT = socket._GLOBAL_DEFAULT_TIMEOUT  # type: ignore[attr-defined]  # 模块私有哨兵
+
 _LOG = logging.getLogger("scandetection.egress")
 
 # 代码级恒放行的回环网段（本机 IPC 通信必需，不提供配置关闭）
@@ -83,7 +86,7 @@ class EgressGuard:
                 infos = socket.getaddrinfo(host, None)
             except OSError:
                 return False  # 无法确定目的地址 → 从严拦截
-            return all(self._ip_allowed(info[4][0]) for info in infos)
+            return all(self._ip_allowed(str(info[4][0])) for info in infos)
         return self._ip_allowed(str(ip))
 
     def _ip_allowed(self, ip: str) -> bool:
@@ -162,7 +165,7 @@ def _guarded_socket_connect(sock_self, address):
     return _ORIG_SOCKET_CONNECT(sock_self, address)
 
 
-def _guarded_opener_open(opener_self, fullurl, data=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT):
+def _guarded_opener_open(opener_self, fullurl, data=None, timeout=_SOCK_DEFAULT_TIMEOUT):
     try:
         host = urlsplit(str(getattr(fullurl, "full_url", fullurl))).hostname
     except ValueError:

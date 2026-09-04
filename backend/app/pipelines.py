@@ -285,8 +285,8 @@ class InspectionPipeline:
         # 翻拍影像降级：photo_policy=warn 时黑度/IQI/质量门禁不阻断，
         # 转为告警 + 强制人工复核（绝对黑度不可测，未验证 ≠ 不合格）。
         photo_advisory = bool(photo_mode and reg.config.density.photo_policy == "warn")
+        reasons: list[str] = []
         if not evaluable:
-            reasons = []
             if not density_ok:
                 reasons.append(
                     f"黑度 {density:.2f} 超出 [{reg.config.density.low}, {reg.config.density.high}]"

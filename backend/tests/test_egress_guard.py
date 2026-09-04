@@ -65,7 +65,9 @@ def test_block_writes_alert_and_audit():
     reg = get_registry()
     before_alerts = reg.security_store.count_alerts(kind="egress_blocked")
     with _guard_enabled(), pytest.raises(EgressBlockedError):
-        get_guard().check(EXTERNAL_IP, 8080, context="unit-test")
+        guard = get_guard()
+        assert guard is not None, "守卫应已装配"
+        guard.check(EXTERNAL_IP, 8080, context="unit-test")
     after_alerts = reg.security_store.count_alerts(kind="egress_blocked")
     assert after_alerts == before_alerts + 1
     entries, _total = reg.repository.list_audit(action="egress_blocked", limit=5)
@@ -89,6 +91,7 @@ def test_allowlisted_cidr_and_loopback_pass(monkeypatch):
             s.close()
         assert executed == [(EXTERNAL_IP, 80)]
         guard = get_guard()
+        assert guard is not None, "守卫应已装配"
         assert guard.is_allowed("127.0.0.1")
         assert guard.is_allowed("127.8.8.8")  # 整个 127.0.0.0/8
         assert guard.is_allowed("::1")

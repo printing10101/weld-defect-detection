@@ -103,10 +103,10 @@ def test_audit_kind_classification(kind: str, tmp_path: Path) -> None:
         ds.PatientName = "张三"  # 患者隐私标签（PHI 残留）
         ds.is_little_endian = True
         ds.is_implicit_VR = True
-        ds.file_meta = Dataset()
-        ds.file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.1"
-        ds.file_meta.MediaStorageSOPInstanceUID = generate_uid()
-        ds.file_meta.TransferSyntaxUID = "1.2.840.10008.1.2"
+        ds.file_meta = Dataset()  # type: ignore[assignment]
+        ds.file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.1"  # type: ignore[assignment]
+        ds.file_meta.MediaStorageSOPInstanceUID = generate_uid()  # type: ignore[assignment]
+        ds.file_meta.TransferSyntaxUID = "1.2.840.10008.1.2"  # type: ignore[assignment]
         ds.save_as(tmp_path / "b.dcm", write_like_original=False)
     report = audit_directory_phi(tmp_path)
     assert report["findings"], "应发现残留"

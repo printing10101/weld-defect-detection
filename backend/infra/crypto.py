@@ -283,7 +283,7 @@ class SoftSmProvider:
 
     @property
     def public_key_hex(self) -> str:
-        return self._sm2_pub
+        return self._sm2_pub  # type: ignore[return-value]  # __init__ 中恒已赋值
 
     # ---- 静态加密（SM4-CTR + HMAC-SM3）----
 
@@ -409,7 +409,7 @@ class Pkcs11Provider:
         """
         if self._lib is None:
             try:
-                import pkcs11  # python-pkcs11 绑定，部署硬件环境时安装
+                import pkcs11  # type: ignore  # python-pkcs11 绑定，可选硬件依赖
             except ImportError as exc:
                 raise CryptoKeyError(
                     "PKCS#11 运行时缺失：需安装 python-pkcs11 并配置厂商动态库"
@@ -433,7 +433,7 @@ class Pkcs11Provider:
 
     def _find_key(self, session, *, private: bool):
         """按标签定位硬件内密钥对象（私钥需已登录会话）。"""
-        from pkcs11 import ObjectClass
+        from pkcs11 import ObjectClass  # type: ignore  # 可选硬件依赖
 
         template = {
             "CKA_LABEL": self._KEY_LABEL,
@@ -453,7 +453,7 @@ class Pkcs11Provider:
     @property
     def public_key_hex(self) -> str:
         """SM2 公钥：从硬件读取 EC 点（CKA_EC_POINT，非压缩 x||y）。"""
-        from pkcs11 import ObjectClass
+        from pkcs11 import ObjectClass  # type: ignore  # 可选硬件依赖
 
         session = self._session()
         template = {"CKA_LABEL": self._KEY_LABEL, "CKA_CLASS": ObjectClass.PUBLIC_KEY}
@@ -553,6 +553,8 @@ def sm2_public_from_private(d_hex: str) -> str:
     """由私钥计算 SM2 公钥（Q = d·G，128 hex x||y）。"""
     d_int = int(d_hex, 16)
     pub = sm2.CryptSM2(private_key=d_hex, public_key="")._kg(d_int, sm2.default_ecc_table["g"])
+    if not pub:
+        raise CryptoKeyError("SM2 公钥派生结果为空（私钥 d 非法）")
     return pub
 
 

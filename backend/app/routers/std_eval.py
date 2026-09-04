@@ -201,7 +201,11 @@ def post_consensus(body: ConsensusIn) -> dict[str, Any]:
     if not body.annotations:
         raise HTTPException(422, "annotations 不能为空")
     boxes = [
-        LabelBox(annotator=a.annotator, class_id=a.class_id, bbox=tuple(a.bbox))
+        LabelBox(
+            annotator=a.annotator,
+            class_id=a.class_id,
+            bbox=(a.bbox[0], a.bbox[1], a.bbox[2], a.bbox[3]),
+        )
         for a in body.annotations
     ]
     try:
@@ -338,8 +342,8 @@ def export_false_reports(
 
 @router.get("/std-eval/history")
 def get_history(
+    reg: Annotated[Registry, Depends(get_registry)],
     limit: int = 200,
-    reg: Annotated[Registry, Depends(get_registry)] = None,
 ) -> dict[str, Any]:
     """评价历史时间线（E-15）：[{evaluated_at, model_version, level, tdr, wdr, frr, ...}]。
 

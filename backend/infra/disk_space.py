@@ -57,8 +57,8 @@ class DiskWatchdog:
         warn_ratio_pct: float,
         warn_min_bytes: int,
         data_dir: str | Path,
-        raise_alert: Callable[..., None] | None = None,
-        append_audit: Callable[..., None] | None = None,
+        raise_alert: Callable[..., Any] | None = None,
+        append_audit: Callable[..., Any] | None = None,
         sampler: Callable[[], tuple[int, int]] | None = None,
     ) -> None:
         """raise_alert/append_audit 由 Registry 注入（security_store / repository）。"""

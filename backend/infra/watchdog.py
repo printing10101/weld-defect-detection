@@ -111,8 +111,8 @@ class MemoryWatchdog:
         rss_restart_mb: float,
         graceful_restart: bool,
         data_dir: str | Path,
-        raise_alert: Callable[..., None] | None = None,
-        append_audit: Callable[..., None] | None = None,
+        raise_alert: Callable[..., Any] | None = None,
+        append_audit: Callable[..., Any] | None = None,
         sampler: Callable[[], tuple[float, str]] | None = None,
     ) -> None:
         """raise_alert/append_audit 由 Registry 注入（security_store / repository）。
