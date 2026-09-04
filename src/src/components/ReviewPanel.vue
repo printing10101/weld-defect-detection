@@ -4,6 +4,7 @@
  * （POST/PATCH/DELETE，DB50/T 1807 §6.1.4），变更后后端自动重评级。
  */
 import { ref } from "vue";
+import { toErrorMessage } from "../utils/errorMessage";
 import ConfirmDialog from "./ConfirmDialog.vue";
 import {
   addReviewDefect,
@@ -12,19 +13,12 @@ import {
   getReportDetections,
   submitReview,
 } from "../services/api";
+import { DEFECT_CLASS_LABELS } from "../types/api";
 import type { ReviewOut } from "../types/api";
 
 const props = defineProps<{ imageId: string; reportId?: string }>();
 
-const DEFECT_CLASSES = [
-  { id: 0, name: "气孔" },
-  { id: 1, name: "夹渣" },
-  { id: 2, name: "未焊透" },
-  { id: 3, name: "未熔合" },
-  { id: 4, name: "裂纹" },
-  { id: 5, name: "咬边" },
-  { id: 6, name: "内凹" },
-];
+const DEFECT_CLASSES = DEFECT_CLASS_LABELS.map((name, id) => ({ id, name }));
 
 interface DefectRow {
   id: string;
@@ -68,7 +62,7 @@ async function reloadDefects(): Promise<void> {
       source: (x.source as string | null) ?? null,
     }));
   } catch (e) {
-    defectErr.value = e instanceof Error ? e.message : String(e);
+    defectErr.value = toErrorMessage(e);
   }
 }
 
@@ -99,7 +93,7 @@ async function onAddDefect(): Promise<void> {
     defectMsg.value = `已添加，综合级别 ${out.joint_level ?? "需人工"}（缺陷 ${out.defect_count}）`;
     await reloadDefects();
   } catch (e) {
-    defectErr.value = e instanceof Error ? e.message : String(e);
+    defectErr.value = toErrorMessage(e);
   } finally {
     defectBusy.value = false;
   }
@@ -115,7 +109,7 @@ async function onEditClass(row: DefectRow, classId: number): Promise<void> {
     defectMsg.value = `已修改类型，综合级别 ${out.joint_level ?? "需人工"}`;
     await reloadDefects();
   } catch (e) {
-    defectErr.value = e instanceof Error ? e.message : String(e);
+    defectErr.value = toErrorMessage(e);
   } finally {
     defectBusy.value = false;
   }
@@ -141,7 +135,7 @@ async function onDeleteDefectConfirmed(): Promise<void> {
     defectMsg.value = `已删除，综合级别 ${out.joint_level ?? "需人工"}（缺陷 ${out.defect_count}）`;
     await reloadDefects();
   } catch (e) {
-    defectErr.value = e instanceof Error ? e.message : String(e);
+    defectErr.value = toErrorMessage(e);
   } finally {
     defectBusy.value = false;
   }
@@ -164,7 +158,7 @@ async function onSubmit(): Promise<void> {
       note: note.value.trim() || null,
     });
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    error.value = toErrorMessage(e);
   } finally {
     submitting.value = false;
   }

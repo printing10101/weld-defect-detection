@@ -12,7 +12,19 @@ export const DefectClass = {
   LACK_OF_FUSION: 3,
   CRACK: 4,
   UNDERCUT: 5,
+  CONCAVITY: 6,
 } as const;
+
+/** 缺陷类别中文标签（镜像 backend/domain/dto.py DefectClass 0..6，全前端唯一事实源）。 */
+export const DEFECT_CLASS_LABELS: readonly string[] = [
+  "气孔",
+  "夹渣",
+  "未焊透",
+  "未熔合",
+  "裂纹",
+  "咬边",
+  "内凹",
+];
 export type DefectClassId = (typeof DefectClass)[keyof typeof DefectClass];
 
 export type DefectShape = "round" | "linear";

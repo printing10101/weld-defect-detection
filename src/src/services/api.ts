@@ -90,7 +90,8 @@ async function rawRequest<T>(path: string, init: RequestInit, timeoutMs = REQUES
     res = await fetch(`${BASE}${path}`, { ...init, signal: ctrl.signal });
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") {
-      window.dispatchEvent(new CustomEvent(BACKEND_DOWN_EVENT));
+      // 超时 ≠ 后端离线（长任务处理中同样会超时），不派发全局 DOWN 事件，
+      // 避免慢请求把全局横幅误打成「后端未连接」。
       throw new ApiRequestError(
         0,
         "TIMEOUT",
@@ -141,6 +142,19 @@ async function rawRequest<T>(path: string, init: RequestInit, timeoutMs = REQUES
     throw new ApiRequestError(res.status, code, message, detail);
   }
   return (await res.json()) as T;
+}
+
+/** JSON POST 样板统一出口（headers/body 构造收敛一处）。 */
+function postJson<T>(path: string, body: unknown, timeoutMs?: number): Promise<T> {
+  return request<T>(
+    path,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    timeoutMs,
+  );
 }
 
 async function request<T>(path: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
@@ -197,29 +211,17 @@ export function listRecords(params?: {
 
 /** 提交一次人工复核（初评/复评/仲裁），结果由后端计算并返回。 */
 export function submitReview(body: ReviewIn): Promise<ReviewOut> {
-  return request<ReviewOut>("/review", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  return postJson<ReviewOut>("/review", body);
 }
 
 /** 主动学习：从一次评片检出中采样高价值样本（优先人工标注，）。 */
 export function activeSample(body: ActiveSampleIn): Promise<ActiveSampleOut> {
-  return request<ActiveSampleOut>("/active/sample", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  return postJson<ActiveSampleOut>("/active/sample", body);
 }
 
 /** 主动学习：人工确认缺陷回流训练池（YOLO 标注 + 版本指纹，）。 */
 export function activeExport(body: ActiveExportIn): Promise<ActiveExportOut> {
-  return request<ActiveExportOut>("/active/export", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  return postJson<ActiveExportOut>("/active/export", body);
 }
 
 /** 主动学习：训练池状态（样本数 / 数据版本指纹 / 最近导出）。 */
@@ -264,11 +266,7 @@ export function listDevices(): Promise<DeviceOut[]> {
 
 /** 注册检测设备。 */
 export function registerDevice(body: DeviceIn): Promise<DeviceOut> {
-  return request<DeviceOut>("/devices", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  return postJson<DeviceOut>("/devices", body);
 }
 
 /** 设备详情：档案 + 完整标定档案。 */
@@ -343,11 +341,7 @@ export function putStdPersonnel(people: StdPersonnel[]): Promise<StdPersonnelOut
 
 /** 标准评价：装配附录A 记录表（JSON）。 */
 export function createStdRecord(body: StdRecordIn): Promise<StdRecordOut> {
-  return request<StdRecordOut>("/std-eval/record", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  return postJson<StdRecordOut>("/std-eval/record", body);
 }
 
 /** 标准评价：附录A 记录表 PDF 下载地址（直链经 access_token 鉴权）。 */
@@ -412,11 +406,7 @@ export function bootstrap(body: {
   role: string;
   public_key?: string;
 }): Promise<BootstrapOut> {
-  return request<BootstrapOut>("/auth/bootstrap", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  return postJson<BootstrapOut>("/auth/bootstrap", body);
 }
 
 /** 注销当前会话。 */

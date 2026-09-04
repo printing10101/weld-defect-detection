@@ -7,6 +7,7 @@ const SECRET_LEVEL_NAMES: Record<number, string> = { 0: "非密", 1: "内部", 2
  * 附加：主动学习训练池状态（，GET /api/v1/active/pool）。
  */
 import { onMounted, ref, watch } from "vue";
+import { toErrorMessage } from "../utils/errorMessage";
 import { activePool, listRecords } from "../services/api";
 import type { ActivePoolOut, RecordsResponse } from "../types/api";
 
@@ -56,7 +57,7 @@ async function load(): Promise<void> {
     total.value = r.total;
   } catch (e) {
     if (myId !== loadReqId) return; // 同上，非最新请求的错误不覆盖状态
-    err.value = e instanceof Error ? e.message : String(e);
+    err.value = toErrorMessage(e);
   } finally {
     if (myId === loadReqId) loading.value = false;
   }

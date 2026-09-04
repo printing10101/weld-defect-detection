@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /** 应用壳（AutoCAD/WPS 桌面软件范式）：
- *  MenuBar（菜单栏）→ RibbonBar（工具栏）→ DocTabs（文档标签页）→ main（RouterView 工作区）→ StatusBar（状态栏）。
+ *  MenuBar（菜单栏）→ RibbonBar（工具栏）→ 内联文档标签区（doctabs）→ main（RouterView 工作区）→ StatusBar（状态栏）。
  *  当前工作区由 Vue Router 驱动，操作员状态来自 Pinia workspace store。
- *  快捷键：Ctrl+1..4 切换工作区，Ctrl+O/Ctrl+Shift+O 打开影像/批量导入。
+ *  快捷键：Ctrl+1..6 切换工作区，Ctrl+O/Ctrl+Shift+O 打开影像/批量导入。
  *  帮助菜单提供「快捷键」「关于」模态（桌面软件标准 About 对话框）。 */
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
@@ -88,6 +88,8 @@ function onKeydown(e: KeyboardEvent): void {
   else if (k === "2") goto("batch");
   else if (k === "3") goto("archive");
   else if (k === "4") goto("device");
+  else if (k === "5") goto("viewer");
+  else if (k === "6") goto("std-eval");
   else if (k === "o" && e.shiftKey) goto("batch");
   else if (k === "o") goto("journey");
   else return;
@@ -165,6 +167,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
               <tr><td>批量检测</td><td>Ctrl+2</td></tr>
               <tr><td>档案检索</td><td>Ctrl+3</td></tr>
               <tr><td>设备标定</td><td>Ctrl+4</td></tr>
+              <tr><td>底片查看</td><td>Ctrl+5</td></tr>
+              <tr><td>系统评价</td><td>Ctrl+6</td></tr>
               <tr><td>退出</td><td>Alt+F4</td></tr>
             </tbody>
           </table>

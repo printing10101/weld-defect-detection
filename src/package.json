@@ -11,7 +11,7 @@
     "lint": "eslint",
     "test": "vitest",
     "test:run": "vitest run",
-    "format": "prettier --write \"src/**/*.{ts,vue}\""
+    "format": "prettier --write \"src/**/*.{ts,vue,css}\" \"*.{ts,js,json,html}\""
   },
   "dependencies": {
     "pinia": "^2.3.1",

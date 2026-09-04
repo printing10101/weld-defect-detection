@@ -8,6 +8,7 @@
  * - elapsedMs：真实请求耗时计时。
  */
 import { readonly, ref } from "vue";
+import { toErrorMessage } from "../utils/errorMessage";
 import { createReport } from "../services/api";
 import type { ReportOut } from "../types/api";
 
@@ -43,7 +44,7 @@ export function useJourney() {
       result.value = await createReport(fd);
       phase.value = "result";
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e);
+      error.value = toErrorMessage(e);
       phase.value = "result";
     } finally {
       if (timer) clearInterval(timer);

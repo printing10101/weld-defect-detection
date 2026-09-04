@@ -23,8 +23,8 @@ export default [
   },
   {
     rules: {
-      // 前端大量使用 any 桥接后端契约，暂不强约束
-      "@typescript-eslint/no-explicit-any": "off",
+      // 实测全库 any 为 0（后端契约经 types/api.ts 镜像），恢复强约束
+      "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
       "vue/multi-word-component-names": "off",
       "vue/no-v-html": "off",
