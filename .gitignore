@@ -37,6 +37,7 @@ data/demo/
 data/prelabels/
 backend/data/
 data/eval/.gate_work/
+data/eval/evidence/
 data/experiments/
 runs/
 backend/models/weights/*.onnx
