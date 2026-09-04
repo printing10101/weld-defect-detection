@@ -351,7 +351,8 @@ def _check_boundary(reg) -> list[dict[str, str]]:
                 "IPC 一次性令牌强制",
                 "分级保护要求：防止其他本机进程/未授权调用方访问系统接口",
                 "pass",
-                f"ipc.enforce=true，令牌文件存在: {token_path}",
+                f"ipc.enforce=true（配置级核验），令牌已签发: {token_path}；"
+                "中间件在岗核验由加固自检（app 中间件栈内省）承担",
             )
         )
     elif cfg.ipc.enforce:
