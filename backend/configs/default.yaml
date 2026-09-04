@@ -214,15 +214,22 @@ batch:
   workers: 2            # 批量并行 worker 数（§12.1）
   max_per_batch: 100    # 单批最大图数（防一次性打爆资源）
   per_image_estimate_sec: 8.0  # 单图预估耗时（进度/预计时间展示用）
+  max_retained_batches: 50     # 内存保留终结批次上限（防长跑内存随批次无界增长）
+  max_retained_snapshot_files: 200  # 磁盘快照保留上限（data/batch/*.json 超限后剪枝最旧"已完成且无重试价值"快照，防磁盘无界增长）
 backup:  # S-12 备份增强
   interval_hours: 0.0   # 自动备份间隔（小时）；0=关闭定期调度（默认不影响测试）
   include_images: false # 备份是否纳入影像目录（true 时逐文件 SM3 校验，归档变大）
-watchdog:  # S-09 内存监控与自愈（默认关闭）
-  enabled: false          # 后台线程周期采样 RSS，超阈值告警
+watchdog:  # S-09 内存监控与自愈（生产开启：告警阈值偏低 + 超阈触发壳侧重启）
+  enabled: true           # 后台线程周期采样 RSS，超阈值告警
   interval_sec: 30.0      # 采样周期（秒）
   rss_warn_mb: 2048.0     # RSS 告警阈值（MB）→ security alert + 审计
   rss_restart_mb: 4096.0  # RSS 重启标记阈值（MB）；graceful_restart=true 时写标记文件
-  graceful_restart: false # true=写 data/restart_required 由 Tauri 壳检测重启（壳侧待集成）
+  graceful_restart: true  # true=写 data/restart_required，由 Tauri 壳检测并优雅重启后端
+disk_space:  # S-20 磁盘水位告警（生产开启：防磁盘写满导致 DB/WAL/报告故障）
+  enabled: true           # 后台线程周期统计 data 分区剩余空间，低水位告警
+  interval_sec: 300.0     # 采样周期（秒），低频避免无谓 I/O
+  warn_ratio_pct: 10.0    # 剩余空间比例阈值（%），低于即告警
+  warn_min_bytes: 1073741824  # 剩余空间绝对阈值（字节，1 GiB），任一触发即告警
 modelgate:  # E-14 更新即重评投产门禁（默认 false=旧行为：activate 即切换）
   enabled: false        # true=activate 先跑 Golden 评估，达标进 candidate，需 sysadmin 审批投产
   min_map: 0.0          # Golden mAP@0.5 下限（0=宽松，仅要求评估可完成）

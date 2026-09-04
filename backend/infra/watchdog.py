@@ -4,9 +4,9 @@
 - 超过 ``rss_warn_mb`` → security alert（kind=memory_pressure，跨阈值只告警一次，
   回落后再超限才再次告警，防刷屏）+ 主审计链留痕；
 - 超过 ``rss_restart_mb`` 且 ``graceful_restart``=true → 写重启标记文件
-  ``<data_dir>/restart_required``（含原因与时间戳）。诚实边界：当前 Tauri 壳
-  尚未消费该标记（壳侧检测逻辑待集成），标记文件本身不触发任何强制终止——
-  进程继续运行，由告警+审计兜底；标记文件供运维/壳侧后续接入。
+  ``<data_dir>/restart_required``（含原因与时间戳）。Tauri 壳（main.rs 的
+  supervisor）周期检测到该标记即重启后端，实现内存超限的优雅自愈。
+  标记文件本身不触发本进程强制终止——进程继续运行，由告警+审计+壳侧重启兜底。
 
 RSS 采样优先 psutil；不可用时尽力回退：
 - Windows：ctypes GetProcessMemoryInfo（WorkingSetSize）；
@@ -62,10 +62,20 @@ def sample_rss_mb() -> tuple[float, str]:
 
             pmc = _PROCESS_MEMORY_COUNTERS()
             pmc.cb = ctypes.sizeof(_PROCESS_MEMORY_COUNTERS)
-            handle = ctypes.windll.kernel32.GetCurrentProcess()  # type: ignore[attr-defined]
-            if ctypes.windll.psapi.GetProcessMemoryInfo(  # type: ignore[attr-defined]
-                handle, ctypes.byref(pmc), pmc.cb
-            ):
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            psapi = ctypes.windll.psapi  # type: ignore[attr-defined]
+            # 必须声明 restype/argtypes：否则 GetCurrentProcess 的 64 位伪句柄会被
+            # ctypes 截断成 32 位，GetProcessMemoryInfo 因句柄无效而返回 0（RSS==0，
+            # 采样失效）。实测补齐签名后返回 1、正常读到工作集。
+            kernel32.GetCurrentProcess.restype = ctypes.c_void_p  # type: ignore[attr-defined]
+            psapi.GetProcessMemoryInfo.restype = ctypes.c_int  # type: ignore[attr-defined]
+            psapi.GetProcessMemoryInfo.argtypes = [  # type: ignore[attr-defined]
+                ctypes.c_void_p,
+                ctypes.POINTER(_PROCESS_MEMORY_COUNTERS),
+                wintypes.DWORD,
+            ]
+            handle = kernel32.GetCurrentProcess()
+            if psapi.GetProcessMemoryInfo(handle, ctypes.byref(pmc), pmc.cb):
                 return float(pmc.WorkingSetSize) / (1024 * 1024), "ctypes-psapi"
         except Exception:  # noqa: BLE001 - 尽力采样，失败不致命
             pass
@@ -203,7 +213,7 @@ class MemoryWatchdog:
                         "rss_mb": rss,
                         "threshold_mb": self._restart,
                         "at": self.last_sample_at,
-                        "note": "Tauri 壳检测到本文件后可执行重启；当前壳侧集成待做",
+                        "note": "Tauri 壳检测到本文件后将重启后端（优雅自愈）",
                     }
                 ),
                 encoding="utf-8",

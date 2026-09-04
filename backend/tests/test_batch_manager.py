@@ -213,3 +213,101 @@ def test_batch_manager_list_orders_recent_first(tmp_path: Path) -> None:
         assert 0.0 <= rows[0]["progress"] <= 1.0
     finally:
         bm.shutdown()
+
+
+def _seed_finished_snapshots(
+    bm: BatchManager, batch_dir: Path, n: int, *, retryable: bool = False
+) -> list[str]:
+    """写入 n 个'已终结'批次快照（内存中同步登记），供磁盘剪枝测试。
+
+    retryable=True 时第 0 个批次含 failed 任务（模拟可断点续跑，须恒保留）。
+    mtime 随写入递增，保证 sorted(st_mtime) 是稳定的创建序。
+    """
+    ids: list[str] = []
+    for i in range(n):
+        bid = f"b{i:04d}"
+        batch = {
+            "batch_id": bid,
+            "status": "finished",
+            "total": 1,
+            "done": 0 if retryable and i == 0 else 1,
+            "failed": 1 if retryable and i == 0 else 0,
+            "cancelled": 0,
+            "tasks": [
+                {
+                    "task_id": f"{bid}_t",
+                    "status": "failed" if retryable and i == 0 else "done",
+                    "image_name": f"{i}.png",
+                    "image_path": str(batch_dir / f"{i}.png"),
+                }
+            ],
+            "created_at": "2026-01-01T00:00:00",
+        }
+        with bm._lock:  # noqa: SLF001 - 测试写入
+            bm._batches[bid] = batch
+        bm._persist(batch)
+        ids.append(bid)
+    return ids
+
+
+def test_batch_manager_prunes_old_finished_snapshots(tmp_path: Path) -> None:
+    """磁盘快照保留上限：超限只剪最旧的'已完成且无 retry 价值'文件。"""
+    batch_dir = tmp_path / "batch"
+    bm = BatchManager(
+        _factory,
+        workers=1,
+        per_image_estimate_sec=1.0,
+        batch_dir=batch_dir,
+        max_retained_batches=50,  # 大内存上限，保持全部批次在内存以便被剪
+        max_retained_snapshot_files=3,
+    )
+    try:
+        _seed_finished_snapshots(bm, batch_dir, 6)
+        files = sorted(p.name for p in batch_dir.glob("*.json"))
+        assert len(files) == bm._max_snapshot_files == 3  # noqa: SLF001
+        # 最旧三个被剪，保留 b0003/b0004/b0005
+        assert files == ["b0003.json", "b0004.json", "b0005.json"]
+    finally:
+        bm.shutdown()
+
+
+def test_batch_manager_prune_keeps_retryable_snapshots(tmp_path: Path) -> None:
+    """磁盘剪枝不得破坏断点续跑：failed 批次（含 retry 价值）快照恒保留。"""
+    batch_dir = tmp_path / "batch"
+    bm = BatchManager(
+        _factory,
+        workers=1,
+        per_image_estimate_sec=1.0,
+        batch_dir=batch_dir,
+        max_retained_batches=50,
+        max_retained_snapshot_files=2,
+    )
+    try:
+        for i in range(4):
+            bid = f"r{i}"
+            batch = {
+                "batch_id": bid,
+                "status": "finished",
+                "total": 2,
+                "done": 1,
+                "failed": 0 if i else 1,
+                "cancelled": 0,
+                "tasks": [
+                    {"task_id": f"{bid}_a", "status": "done", "image_name": "a.png"},
+                    {
+                        "task_id": f"{bid}_b",
+                        "status": "failed" if i == 0 else "done",
+                        "image_name": "b.png",
+                    },
+                ],
+                "created_at": "2026-01-01T00:00:00",
+            }
+            with bm._lock:  # noqa: SLF001
+                bm._batches[bid] = batch
+            bm._persist(batch)
+        # 保留上限 = 2；r0 含 failed（可重试）必须保留 → 只保留 r0 + 最新的一个安全批次
+        names = sorted(p.name for p in batch_dir.glob("*.json"))
+        assert "r0.json" in names
+        assert len(names) == bm._max_snapshot_files  # noqa: SLF001
+    finally:
+        bm.shutdown()

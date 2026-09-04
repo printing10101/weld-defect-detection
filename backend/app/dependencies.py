@@ -198,6 +198,8 @@ class Registry:
         self.device_store = DeviceStore(_resolve_path(self.config.paths.db_path))
         # S-09 内存看门狗：默认 None（lifespan 按 config.watchdog.enabled 装配启动）。
         self.watchdog = None
+        # S-20 磁盘水位看门狗：默认 None（lifespan 按 config.disk_space.enabled 装配启动）。
+        self.disk_watchdog = None
         # S-12 定期备份调度器：默认 None（lifespan 按 config.backup.interval_hours 装配）。
         self.backup_scheduler = None
 
@@ -220,6 +222,8 @@ class Registry:
             workers=self.config.batch.workers,
             per_image_estimate_sec=self.config.batch.per_image_estimate_sec,
             batch_dir=_resolve_path(str(Path(self.config.paths.data_dir) / "batch")),
+            max_retained_batches=self.config.batch.max_retained_batches,
+            max_retained_snapshot_files=self.config.batch.max_retained_snapshot_files,
         )
         bm._load_existing()
         return bm
@@ -588,6 +592,12 @@ class Registry:
                 "watchdog": (
                     self.watchdog.snapshot()
                     if getattr(self, "watchdog", None) is not None
+                    else {"enabled": False}
+                ),
+                # S-20 磁盘水位看门狗状态（未启用时 enabled=false 显式呈现）。
+                "disk_space": (
+                    self.disk_watchdog.snapshot()
+                    if getattr(self, "disk_watchdog", None) is not None
                     else {"enabled": False}
                 ),
             }
