@@ -293,16 +293,26 @@ def _check_endpoints(app, auth_dep) -> list[dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 
-def _check_transport(reg) -> list[dict[str, str]]:
+def _check_transport(reg, app) -> list[dict[str, str]]:
     cfg = reg.config
     items = []
     if cfg.ipc.enforce:
+        # 核验中间件真实挂载：配置开启 ≠ 在岗（避免"读自己写的配置自证"回环）。
+        mounted = any(
+            getattr(getattr(m, "cls", None), "__name__", "") == "IpcTokenMiddleware"
+            for m in getattr(app, "user_middleware", [])
+        )
         items.append(
             _finding(
                 "IPC 一次性令牌",
                 "medium",
-                "pass",
-                "ipc.enforce=true——非认证调用方（其他本机进程/网页）被令牌中间件拦截",
+                "pass" if mounted else "fail",
+                (
+                    "ipc.enforce=true 且 IpcTokenMiddleware 已挂载——非认证调用方"
+                    "（其他本机进程/网页）被令牌中间件拦截"
+                )
+                if mounted
+                else "ipc.enforce=true 但 app 中间件栈未见 IpcTokenMiddleware（启动装配异常）",
             )
         )
     else:
@@ -404,7 +414,7 @@ def run_hardening_check(reg, app, auth_dep) -> dict[str, Any]:
         _check_default_credential(reg)
         + _check_ports(reg)
         + _check_endpoints(app, auth_dep)
-        + _check_transport(reg)
+        + _check_transport(reg, app)
         + _check_file_permissions(reg)
     )
     high_failed = [f for f in findings if f["severity"] == "high" and f["result"] == "fail"]
