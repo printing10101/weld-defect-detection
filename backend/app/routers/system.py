@@ -20,25 +20,11 @@ from pydantic import BaseModel, Field
 
 from backend.app.dependencies import Registry, get_registry
 from backend.infra.backup import create_backup, restore_backup, verify_backup
-from backend.infra.config import AppConfig, resolve_config_path
+from backend.infra.config import resolve_config_path
 from backend.infra.fs import safe_resolve
+from backend.infra.offline import offline_conclusion
 
 router = APIRouter(prefix="/system", tags=["system"])
-
-
-def offline_conclusion(config: AppConfig) -> dict:
-    """C-15 纯离线自检：由静态配置得出"无外网依赖"结论（启动自检与端点共用）。
-
-    判定（诚实边界：这是软件侧配置层的自证，物理断网须由 OS/主机防火墙
-    出站默认拒绝兜底，见 docs/deployment-baseline.md）：
-    - offline_mode = sync.kind == local（同步通道不留任何外发出口）；
-    - egress_guard_enabled = egress.enabled（进程级外联拦截是否在岗）。
-    """
-    return {
-        "offline_mode": config.sync.kind == "local",
-        "sync_kind": config.sync.kind,
-        "egress_guard_enabled": bool(config.egress.enabled),
-    }
 
 
 class BackupResponse(BaseModel):

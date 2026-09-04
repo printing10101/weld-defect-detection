@@ -184,9 +184,10 @@ def test_hardening_check_role_matrix():
 
 def test_unauth_route_scanner_detects_injected_route():
     """扫描器自证：正常 app 空集；注入无鉴权路由可被检出（活检查不造假）。"""
+    from backend.app.auth import get_principal
     from backend.infra.compliance.hardening import unauthenticated_api_routes
 
-    assert unauthenticated_api_routes(app) == []
+    assert unauthenticated_api_routes(app, get_principal) == []
 
     rogue = APIRouter()
 
@@ -198,5 +199,5 @@ def test_unauth_route_scanner_detects_injected_route():
 
     test_app = FastAPI()
     test_app.include_router(rogue, prefix="/api/v1")
-    hits = unauthenticated_api_routes(test_app)
+    hits = unauthenticated_api_routes(test_app, get_principal)
     assert hits == ["POST /api/v1/rogue-open"]

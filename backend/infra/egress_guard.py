@@ -31,6 +31,7 @@ import logging
 import socket
 import threading
 import urllib.request
+from collections.abc import Callable
 from urllib.parse import urlsplit
 
 _LOG = logging.getLogger("scandetection.egress")
@@ -105,28 +106,16 @@ class EgressGuard:
         raise EgressBlockedError(host, port, context)
 
     def _record_block(self, host: str, port: int | None, context: str) -> None:
-        """阻断事件持久化：安全告警（high）+ 主审计链。失败不掩盖阻断本身。"""
-        try:
-            from backend.app.dependencies import try_get_registry
+        """阻断事件持久化：安全告警（high）+ 主审计链。失败不掩盖阻断本身。
 
-            reg = try_get_registry()
-            if reg is None:
-                return  # registry 装配中的极早期阻断：日志已留痕
-            reg.security_store.raise_alert(
-                kind="egress_blocked",
-                level="high",
-                message=f"检测到非白名单外联尝试并已拦截: {host}:{port}",
-                detail={"host": host, "port": port, "context": context},
-            )
-            reg.repository.append_audit(
-                actor="system",
-                action="egress_blocked",
-                object_type="network",
-                object_id=f"{host}:{port}" if port else host,
-                before=None,
-                after={"host": host, "port": port, "context": context, "blocked": True},
-                note="C-16 外联防护拦截",
-            )
+        记录器由 app 层在 registry 装配完成后注入（set_block_recorder，
+        watchdog raise_alert/append_audit 注入同范式）；未注入前的极早期
+        阻断仅日志留痕。
+        """
+        if _recorder is None:
+            return  # registry 装配中的极早期阻断：日志已留痕
+        try:
+            _recorder(host, port, context)
         except Exception as exc:  # noqa: BLE001 - 告警落库失败不影响阻断语义
             _LOG.warning("外联拦截告警落库失败: %s", exc)
 
@@ -138,6 +127,18 @@ class EgressGuard:
 _guard: EgressGuard | None = None
 _patched = False
 _guard_lock = threading.Lock()
+_recorder: Callable[[str, int | None, str], None] | None = None
+
+
+def set_block_recorder(recorder: Callable[[str, int | None, str], None]) -> None:
+    """注入阻断事件记录器（告警 + 审计），由 app 层在 registry 就绪后调用。
+
+    记录器签名 (host, port, context)；注入动作幂等（后者覆盖前者）。
+    """
+    global _recorder
+    _recorder = recorder
+    _LOG.info("egress guard block recorder wired")
+
 
 _ORIG_SOCKET_CONNECT = socket.socket.connect
 _ORIG_OPENER_OPEN = urllib.request.OpenerDirector.open
