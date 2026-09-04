@@ -56,6 +56,12 @@ def _test_env(auth_table: Path) -> None:
     os.environ["SCAN_PATHS__DB_PATH"] = str(_TMP_ROOT / "test.db")
     os.environ["SCAN_PATHS__IMAGES_DIR"] = str(_TMP_ROOT / "images")
     os.environ["SCAN_PATHS__REPORTS_DIR"] = str(_TMP_ROOT / "reports")
+    # data 根目录一并隔离：合规自检/加固报告（data/compliance）、IPC 令牌、
+    # 批次快照、同步队列等均落在 paths.data_dir 之下——不隔离会让测试以
+    # 测试环境变量（export.require_approval=false 等）生成"fail 自检报告"
+    # 污染真实合规证据目录（实测踩中：data/compliance 被 fail 报告刷屏，
+    # 差点误判为生产姿态漂移）。
+    os.environ["SCAN_PATHS__DATA_DIR"] = str(_TMP_ROOT / "data")
     # 检测器确定性：默认强制 基线（blob），不依赖开发机是否存在训练权重。
     # 集成测试用合成底片断言 ≥N 缺陷，训练 YOLO 在合成图上 0 检出；
     # 训练模型路径由 test_yolo_detector_ml（@pytest.mark.ml）等直接实例化 YoloDetector 覆盖。

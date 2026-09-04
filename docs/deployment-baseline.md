@@ -210,7 +210,10 @@ GET /api/v1/compliance/selfcheck      # 生成 JSON+PDF 自检报告（data/comp
 
 - 检查项按 GB/T 22239 / GB/T 17859 二级口径（软件侧自动检查部分）设计，
   覆盖身份鉴别、访问控制、安全审计、边界防护等 18 项；
-- 历史上出现过的 fail 均为"生产加固开关未打开"（`export.require_approval`、
-  `ipc.enforce` 被临时关闭用于调试）——交付前必须恢复出厂默认（均为 true）
-  并重跑至 `overall=pass`；
+- **判读须知**：自动化测试会以测试环境变量（`SCAN_EXPORT__REQUIRE_APPROVAL=false`、
+  `SCAN_IPC__ENFORCE=false` 等）运行，历史上 data/compliance 曾被测试产出的
+  "fail 自检报告"污染（conftest 现已隔离 data 目录，不会再发生）。判读报告
+  时先核对生成来源：含上述 fail 项的报告属测试产物，不代表部署姿态；
+- 交付门槛：在真实部署环境（出厂默认 `export.require_approval=true`、
+  `ipc.enforce=true`）重跑自检，确认 `overall=pass` 后方可交付；
 - 自检报告随交付物归档（PDF 版本可直接纳入验收材料）。
