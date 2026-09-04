@@ -80,8 +80,8 @@ def postprocess_to_pdfa(
     reader = PdfReader(str(src))
     writer = PdfWriter()
     writer.append_pages_from_reader(reader)
-    # PDF/A-1 基于 PDF 1.4：用公共 API 设定文件头，写出时 xref 偏移自洽。
-    # （原实现在写出后直接改字节，一旦头部长度变化即破坏 xref 偏移。）
+    # PDF/A-1 基于 PDF 1.4：用公共 API 设定文件头，写出时 xref 偏移自洽
+    # （写出后直接改字节，一旦头部长度变化即破坏 xref 偏移）。
     writer.pdf_header = "%PDF-1.4"
 
     # pypdf 私有 API（已在模块文档说明并经测试验证可用）
@@ -118,7 +118,7 @@ def postprocess_to_pdfa(
 
     # 3. 文档 ID（trailer /ID，PDF/A 要求），由输出路径 + 页数派生稳定值。
     # 注意属性名是 _ID 且必须是 ArrayObject[ByteStringObject]；写成 _id 或
-    # 裸 tuple 都会被 pypdf 忽略——产出的 PDF 将没有 /ID（原实现即如此）。
+    # 裸 tuple 都会被 pypdf 忽略——产出的 PDF 将没有 /ID。
     seed = str(out).encode("utf-8") + str(len(reader.pages)).encode("utf-8")
     doc_id = hashlib.sha256(seed).digest()[:16]
     writer._ID = ArrayObject([ByteStringObject(doc_id), ByteStringObject(doc_id)])

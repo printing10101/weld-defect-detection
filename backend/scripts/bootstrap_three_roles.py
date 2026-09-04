@@ -20,7 +20,7 @@ import stat
 from pathlib import Path
 
 # Request 须模块级可解析：脚本启用 PEP 563（延迟注解），FastAPI 解析
-# override 函数注解时在模块全局查找名字，函数内导入会解析失败（实测踩中）。
+# override 函数注解时在模块全局查找名字，函数内导入会解析失败。
 from fastapi import Request
 
 _INSTALL_ROOT = Path(__file__).resolve().parents[2]

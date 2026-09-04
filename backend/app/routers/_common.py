@@ -34,10 +34,11 @@ def api_error(status: int, code: str, message: str) -> HTTPException:
 async def staged_upload(upload: UploadFile, cfg: AppConfig) -> AsyncIterator[Path]:
     """把上传文件落到受控临时目录并产出路径，退出时连目录一并删除。
 
-    相较各路由原先的 `write_bytes(await image.read)`：
-    - 分块写盘 + 累计计数，超过 upload.max_bytes 立即 413（原实现无上限，单请求可打爆内存）；
-    - 扩展名白名单，非影像类型 415（原实现任意后缀均落盘）；
-    - 临时目录随上下文退出清理（原实现只删文件，目录持续泄漏）。
+    保障三件事：
+    - 分块写盘 + 累计计数，超过 upload.max_bytes 立即 413（整读无上限时
+      单请求即可打爆内存）；
+    - 扩展名白名单，非影像类型 415；
+    - 临时目录随上下文退出整体清理（只删文件会持续泄漏目录）。
     """
     up = cfg.upload
     suffix = Path(upload.filename or "upload.png").suffix.lower() or ".png"
@@ -70,8 +71,8 @@ async def staged_upload(upload: UploadFile, cfg: AppConfig) -> AsyncIterator[Pat
 def parse_roi(raw: str | None) -> tuple[int, int, int, int] | None:
     """解析 "x,y,w,h" 形式的 ROI；缺省返回 None（全图）。
 
-    原实现 `int(v)` 未捕获异常（非数字直接 500），且四元组长度不符时静默返回 None
-    —— 用户以为限定了 ROI，实际按全图计算，属静默错误结果。这里一律显式 422。
+    非数字直接 422（不得 500）；四元组长度不符同样 422——静默回退全图
+    会让用户以为限定了 ROI 而实际按全图计算，属静默错误结果。
     """
     if raw is None:
         return None

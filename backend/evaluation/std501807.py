@@ -350,9 +350,8 @@ def _evaluate_at(
     denom = sum(c.total for c in per.values())
     tdr = round(sum(c.td for c in per.values()) / denom, 4) if denom else 0.0
     # WDR/KDR：位置检出（类型对错不论）口径 —— 与 TDR 同分母（TD+FD+MD），
-    # 分子为 TD+FD（E-01 修正：原实现误把 WDR 写成 tdr，丢掉了"位置检出即
-    # 计入"的宽口径，导致误检缺陷在 WDR 中被错误扣除）；KDR 同式但仅计
-    # 重点关注类别。
+    # 分子为 TD+FD（E-01 口径："位置检出即计入"的宽口径，误检缺陷不
+    # 从 WDR 中扣除）；KDR 同式但仅计重点关注类别。
     wdr = round(sum(c.td + c.fd for c in per.values()) / denom, 4) if denom else 0.0
     focus_num = focus_den = 0
     for n, c in per.items():

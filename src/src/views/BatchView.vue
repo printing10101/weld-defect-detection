@@ -3,7 +3,7 @@
  * 批量处理视图：多底片/文件夹导入 → 异步队列 → 进度可视化 → 取消/重试 → 历史。
  * 数据全部来自真实后端 /batch 系列接口；进度经 2s 轮询实时更新。
  */
-import { onMounted, onUnmounted, ref, watch } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import { IMAGE_EXTS as EXTS } from "../services/imageFormats";
 import { toErrorMessage } from "../utils/errorMessage";
 import BatchProgress from "../components/BatchProgress.vue";
@@ -11,7 +11,6 @@ import ConfirmDialog from "../components/ConfirmDialog.vue";
 import { cancelBatch, getBatchStatus, listBatches, retryBatch, submitBatch } from "../services/api";
 import type { BatchStatusOut, BatchSummaryOut } from "../types/api";
 
-const props = defineProps<{ active: boolean }>();
 const emit = defineEmits<{ archive: [] }>();
 
 const MAX_PER_BATCH = 100;
@@ -227,13 +226,6 @@ function reset(): void {
   submitError.value = null;
   void refreshHistory();
 }
-
-watch(
-  () => props.active,
-  (v) => {
-    if (v) void refreshHistory();
-  },
-);
 
 onMounted(() => {
   void refreshHistory();

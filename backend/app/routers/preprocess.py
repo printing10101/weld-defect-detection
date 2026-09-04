@@ -82,7 +82,7 @@ def _preprocess_sync(
 
 def _thumbnail(image, max_side: int = 256) -> str:
     h, w = image.shape[:2]
-    if h <= 0 or w <= 0:  # 空影像：原实现在 max(h,w)=0 处 ZeroDivisionError
+    if h <= 0 or w <= 0:  # 空影像：避免 max(h,w)=0 处除零
         return ""
     scale = min(1.0, max_side / max(h, w))
     if scale < 1.0:

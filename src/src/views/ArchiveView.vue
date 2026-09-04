@@ -4,14 +4,12 @@ const SECRET_LEVEL_NAMES: Record<number, string> = { 0: "非密", 1: "内部", 2
 /**
  * 档案检索视图（真实 GET /api/v1/records）。
  * 列表与统计全部来自后端查询；空态/错误态基于真实响应。
- * 附加：主动学习训练池状态（，GET /api/v1/active/pool）。
+ * 附加：主动学习训练池状态（GET /api/v1/active/pool）。
  */
-import { onMounted, ref, watch } from "vue";
+import { onMounted, ref } from "vue";
 import { toErrorMessage } from "../utils/errorMessage";
 import { activePool, listRecords } from "../services/api";
 import type { ActivePoolOut, RecordsResponse } from "../types/api";
-
-const props = defineProps<{ active: boolean }>();
 
 const loading = ref(true);
 const err = ref<string | null>(null);
@@ -67,17 +65,6 @@ onMounted(() => {
   void load();
   void loadPool();
 });
-
-// 视图被切换到档案时重新拉取，确保展示最新真实归档
-watch(
-  () => props.active,
-  (v) => {
-    if (v) {
-      void load();
-      void loadPool();
-    }
-  },
-);
 
 function onFilter(): void {
   page.value = 1; // 重新过滤回到首页

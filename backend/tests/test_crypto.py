@@ -256,7 +256,7 @@ def _build_report_with_env(tmp_path: Path, monkeypatch, key: str | None) -> tupl
     for sub in ("db", "images", "reports", "tmp"):
         (tmp_path / sub).mkdir(parents=True, exist_ok=True)
     # 同步自建 Registry 并注入：经由环境变量 + 全局懒加载的间接链路会与
-    # lifespan 的后台初始化线程竞态（CI Linux 实测踩中——上一个测试的装配线程
+    # lifespan 的后台初始化线程竞态（上一个测试的装配线程
     # 可能在本测试重置之后才完成构建，把 conftest 配置的 registry 塞回全局）。
     # 自建实例单线程赋值，时序确定。
     deps._registry = None

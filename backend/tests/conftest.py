@@ -31,7 +31,7 @@ os.environ.setdefault("SCAN_IPC__ENFORCE", "false")
 
 # P2-9：测试禁用限流（TestClient 共享计数会误伤套件）；安全头中间件保持生效。
 # 同上：create_app 在收集期构造中间件，必须模块体设置（fixture 内设置无效——
-# 曾因此导致全量运行时限流 60 req/min 跨测试共享，登录请求偶发 429）。
+# 否则限流计数跨测试实例共享，登录请求会偶发 429）。
 os.environ.setdefault("SCAN_RATE_LIMIT", "0")
 
 
@@ -59,7 +59,7 @@ def _test_env(auth_table: Path) -> None:
     # data 根目录一并隔离：合规自检/加固报告（data/compliance）、IPC 令牌、
     # 批次快照、同步队列等均落在 paths.data_dir 之下——不隔离会让测试以
     # 测试环境变量（export.require_approval=false 等）生成"fail 自检报告"
-    # 污染真实合规证据目录（实测踩中：data/compliance 被 fail 报告刷屏，
+    # 污染真实合规证据目录（fail 报告会刷进 data/compliance，
     # 差点误判为生产姿态漂移）。
     os.environ["SCAN_PATHS__DATA_DIR"] = str(_TMP_ROOT / "data")
     # 检测器确定性：默认强制 基线（blob），不依赖开发机是否存在训练权重。

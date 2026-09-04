@@ -156,9 +156,6 @@ function clear(which: "A" | "B"): void {
 .dual {
   grid-template-columns: 1fr 1fr;
 }
-</style>
-
-<style scoped>
 .aid {
   font-size: 13px;
   padding: 4px 8px;

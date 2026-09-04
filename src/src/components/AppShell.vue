@@ -128,11 +128,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 
     <main class="main">
       <RouterView v-slot="{ Component }">
-        <component
-          :is="Component"
-          :active="true"
-          @archive="goto('archive')"
-        />
+        <component :is="Component" @archive="goto('archive')" />
       </RouterView>
     </main>
 

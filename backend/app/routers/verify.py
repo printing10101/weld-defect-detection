@@ -25,8 +25,9 @@ from backend.app.routers._common import parse_roi, staged_upload
 from backend.domain.density import check_density, estimate_density
 from backend.domain.film_region import FilmRegionCfg as DomainFilmRegionCfg
 from backend.domain.film_region import detect_film_region
-from backend.domain.iqi import IqiConfig, enrich_grade, verify_iqi
-from backend.domain.pseudo_defect import PseudoDefectCfg, screen_pseudo_defects
+from backend.domain.gate_adapters import iqi_cfg_from_settings, pseudo_cfg_from_settings
+from backend.domain.iqi import enrich_grade, verify_iqi
+from backend.domain.pseudo_defect import screen_pseudo_defects
 from backend.infra.image_loader import load_image
 
 router = APIRouter(tags=["verify"])
@@ -111,40 +112,14 @@ def _verify_sync(
     )
     density_ok = bool(check_density(density, reg.config.density.low, reg.config.density.high))
 
-    iqi_cfg = IqiConfig(
-        type=reg.config.iqi.type,
-        wire_diameters_mm=tuple(reg.config.iqi.wire_diameters_mm),
-        required_wire_no=reg.config.iqi.required_wire_no,
-        hole_diameters_mm=tuple(reg.config.iqi.hole_diameters_mm),
-        required_hole_no=reg.config.iqi.required_hole_no,
-        min_contrast_ratio=reg.config.iqi.min_contrast_ratio,
-        auto_locate=reg.config.iqi.auto_locate,
-        locate_threshold=reg.config.iqi.locate_threshold,
-        sensitivity=tuple(reg.config.iqi.sensitivity),
-    )
+    iqi_cfg = iqi_cfg_from_settings(reg.config.iqi)
     # 用户给 ROI 时按原图坐标在全图上验证；无 ROI 时在胶片区上自动定位。
     iqi = verify_iqi(gray if roi is not None else eval_gray, iqi_cfg, roi=roi, iqi_type=iqi_type)
     # 用透照厚度 + 参考表补全 A/AB/B 等级（厚度缺失则 grade=None）。
     iqi = enrich_grade(iqi, thickness_mm, iqi_cfg.sensitivity)
 
     # 伪缺陷筛查。仅严重项默认阻断。
-    # 将 infra 配置适配为 domain 类型（隔离 pydantic，避免跨层字段耦合）。
-    pd_cfg = reg.config.pseudo_defect
-    pd_domain = PseudoDefectCfg(
-        hough_threshold=pd_cfg.hough_threshold,
-        scratch_min_ratio=pd_cfg.scratch_min_ratio,
-        scratch_grating_min_lines=pd_cfg.scratch_grating_min_lines,
-        canny_lo=pd_cfg.canny_lo,
-        canny_hi=pd_cfg.canny_hi,
-        uniformity_low_freq=pd_cfg.uniformity_low_freq,
-        uniformity_max_ratio=pd_cfg.uniformity_max_ratio,
-        dust_tophat_k=pd_cfg.dust_tophat_k,
-        dust_min_area=pd_cfg.dust_min_area,
-        dust_max_count=pd_cfg.dust_max_count,
-        block_on_scratch=pd_cfg.block_on_scratch,
-        block_on_uniformity=pd_cfg.block_on_uniformity,
-        block_on_dust=pd_cfg.block_on_dust,
-    )
+    pd_domain = pseudo_cfg_from_settings(reg.config.pseudo_defect)
     pd = screen_pseudo_defects(eval_gray, pd_domain)
 
     # 翻拍影像降级（与 run_inspection 的 photo_advisory 同语义）：

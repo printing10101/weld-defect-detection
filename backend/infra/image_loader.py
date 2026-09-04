@@ -213,9 +213,6 @@ def read_gray(image_path: str) -> np.ndarray | None:
     静态加密兼容：影像副本可能为国密密文（SM4，魔数 b"SDC2"）或历史
     AES-256-GCM 密文（b"SDC1"），检测到任一魔数则解密后再解码；明文旧
     数据直接解码。密钥缺失/解密失败时返回 None（调用方降级，不抛 500）。
-
-    分层说明：原为 pdf_reporter 私有函数 _read_gray，records/report 等
-    路由跨层 import 私有符号，故提升为 image_loader 公有 API。
     """
     try:
         with open(image_path, "rb") as fh:

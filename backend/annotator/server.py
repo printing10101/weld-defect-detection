@@ -30,10 +30,9 @@ PRE.mkdir(parents=True, exist_ok=True)
 def _safe_image_path(name: str) -> Path | None:
     """把 URL 中的影像名解析到 IMG 目录内，越界即返回 None（防路径穿越）。
 
-    原实现直接 `IMG / name` 后仅用 .exists 判断，未校验解析后是否仍落在 IMG
-    之内：name 形如 `../../etc/passwd` 会越界读任意文件。这里与主 API 的
-    backend.infra.fs.safe_resolve 保持同语义——空名/'.'/'..' 拒绝，解析结果
-    必须仍相对 IMG，否则返回 None（调用方按 404 处理）。
+    与主 API 的 backend.infra.fs.safe_resolve 同语义：空名/'.'/'..' 拒绝，
+    解析结果必须仍落在 IMG 之内（否则 `../../` 形式的名字会越界读任意
+    文件），越界返回 None（调用方按 404 处理）。
     """
     if not name or name in (".", ".."):
         return None

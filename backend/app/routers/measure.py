@@ -21,7 +21,7 @@ router = APIRouter(tags=["measure"])
 def _checked_bytes(image: UploadFile) -> bytes:
     """读取上传内容并强制大小限额（与 _common.staged_upload 同口径）。
 
-    此前 image.file.read() 无上限整读，200MB 限额可被绕过（内存 DoS 面）。
+    无限额整读时单请求即可打爆内存，且会绕过统一上传限额。
     """
     from backend.infra.config import load_config
 
