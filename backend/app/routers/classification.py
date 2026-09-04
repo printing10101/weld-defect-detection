@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from backend.app.auth import Principal, require_role
 from backend.app.dependencies import Registry, get_registry
+from backend.infra.audit import dual_audit
 
 router = APIRouter(prefix="/classification", tags=["classification"])
 
@@ -82,7 +83,9 @@ def set_secret_level(
     except ValueError as exc:
         raise HTTPException(422, detail={"code": "INVALID_LEVEL", "message": str(exc)}) from None
     # C-19 双链：主审计链（统一查询）+ 独立安全审计链（防单链覆盖）
-    reg.repository.append_audit(
+    dual_audit(
+        reg.repository,
+        reg.security_store,
         actor=principal.username,
         action="secret_level_change",
         object_type="image",
@@ -90,15 +93,7 @@ def set_secret_level(
         before=snap["before"],
         after=snap["after"],
         note=body.classification_basis,
-    )
-    reg.security_store.append_security_audit(
-        actor=principal.username,
-        action="secret_level_change",
-        object_type="image",
-        object_id=image_id,
-        before=snap["before"],
-        after=snap["after"],
-        note=body.classification_basis,
+        security=True,
     )
     return SecretLevelOut(
         image_id=image_id,

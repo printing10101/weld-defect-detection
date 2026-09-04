@@ -21,19 +21,19 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
 
 from backend.evaluation.std501807 import STD_CLASS_NAMES, StdEvalConfig, evaluate
 from backend.infra.config import load_config
+from backend.infra.timeutil import fmt_naive_utc
 
 _EXT = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
 
 
 def _now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")  # noqa: DTZ005
+    return fmt_naive_utc()
 
 
 def _config_from_app() -> StdEvalConfig:

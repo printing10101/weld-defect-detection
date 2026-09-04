@@ -25,6 +25,11 @@ def _reject(status: int, code: str, message: str) -> NoReturn:
     raise HTTPException(status_code=status, detail={"code": code, "message": message})
 
 
+def api_error(status: int, code: str, message: str) -> HTTPException:
+    """统一错误信封构造（各 router 此前各自复制同签名 _err/_reject 三份）。"""
+    return HTTPException(status_code=status, detail={"code": code, "message": message})
+
+
 @asynccontextmanager
 async def staged_upload(upload: UploadFile, cfg: AppConfig) -> AsyncIterator[Path]:
     """把上传文件落到受控临时目录并产出路径，退出时连目录一并删除。

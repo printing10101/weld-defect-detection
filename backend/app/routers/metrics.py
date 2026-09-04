@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
@@ -18,6 +17,7 @@ from fastapi.responses import JSONResponse
 
 from backend.app.dependencies import Registry, try_get_registry
 from backend.infra.metrics import get_metrics
+from backend.infra.timeutil import fmt_naive_utc
 
 router = APIRouter(tags=["metrics"])
 
@@ -32,7 +32,7 @@ def metrics_endpoint(
     snapshot = metrics.snapshot()
     return JSONResponse(
         {
-            "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
+            "ts": fmt_naive_utc(),
             "metrics_enabled": metrics.enabled,
             "counters": snapshot["counters"],
             "histograms": snapshot["histograms"],

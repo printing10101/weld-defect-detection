@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from backend.infra.timeutil import fmt_naive_utc
+
 _LOG = logging.getLogger("scandetection.batch")
 
 
@@ -109,7 +111,7 @@ class BatchManager:
             "cancelled": 0,
             "cancelled_flag": False,
             "estimated_sec": round(len(items) * self._per_image_estimate_sec, 1),
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "created_at": fmt_naive_utc(),
             "finished_at": None,
             "tasks": [t.__dict__ for t in tasks],
             "cleanup_dirs": sorted({str(i.cleanup_dir) for i in items if i.cleanup_dir}),
@@ -271,7 +273,7 @@ class BatchManager:
         terminal = {"done", "failed", "cancelled"}
         if all(t["status"] in terminal for t in batch["tasks"]):
             batch["status"] = "finished"
-            batch["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+            batch["finished_at"] = fmt_naive_utc()
             self._cleanup_staging(batch)
 
     def _cleanup_staging(self, batch: dict) -> None:

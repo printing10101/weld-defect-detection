@@ -16,10 +16,11 @@
 from __future__ import annotations
 
 import json
-import time
 import uuid
 from pathlib import Path
 from typing import Any
+
+from backend.infra.timeutil import fmt_naive_utc
 
 
 class ExperimentTracker:
@@ -45,7 +46,7 @@ class ExperimentTracker:
                         "params": params or {},
                         "metrics": {},
                         "artifacts": [],
-                        "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "created_at": fmt_naive_utc(),
                     },
                     ensure_ascii=False,
                 )
@@ -112,7 +113,7 @@ def build_model_card(
         "data_distribution": data_summary,  # 数据分布（类别占比/厚度范围/来源）
         "limitations": limitations,  # 局限（未覆盖场景/低置信行为）
         "ethics": ethics,  # ethically 使用说明（合规边界）
-        "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "created_at": fmt_naive_utc(),
     }
 
 

@@ -17,13 +17,16 @@ from pydantic import BaseModel, Field
 
 from backend.app.auth import Principal, get_principal, require_role
 from backend.app.dependencies import Registry, get_registry
+from backend.infra.audit import dual_audit
 from backend.infra.reporting.certificates import build_destroy_certificate
 
 router = APIRouter(prefix="/carriers", tags=["carriers"])
 
 
 def _err(status: int, code: str, message: str) -> HTTPException:
-    return HTTPException(status_code=status, detail={"code": code, "message": message})
+    from backend.app.routers._common import api_error
+
+    return api_error(status, code, message)
 
 
 class CarrierIn(BaseModel):
@@ -62,25 +65,18 @@ def _audit(
     reg: Registry, principal: Principal, action: str, carrier: dict, note: str | None
 ) -> None:
     """载体动作留痕：主链全记；登记/销毁类关键动作另入安全审计链（C-19）。"""
-    reg.repository.append_audit(
+    dual_audit(
+        reg.repository,
+        reg.security_store,
         actor=principal.username,
         action=action,
         object_type="carrier",
         object_id=str(carrier["carrier_id"]),
-        before=None,
         after={"status": carrier["status"], "kind": carrier["kind"]},
         note=note,
+        security=action in ("carrier_register", "carrier_destroy"),
+        sec_after={"status": carrier["status"]},
     )
-    if action in ("carrier_register", "carrier_destroy"):
-        reg.security_store.append_security_audit(
-            actor=principal.username,
-            action=action,
-            object_type="carrier",
-            object_id=str(carrier["carrier_id"]),
-            before=None,
-            after={"status": carrier["status"]},
-            note=note,
-        )
 
 
 def _carrier_or_404(reg: Registry, carrier_id: str) -> dict[str, Any]:

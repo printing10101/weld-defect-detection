@@ -31,11 +31,12 @@ import os
 import shutil
 import tempfile
 import threading
-import time
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypedDict
+
+from backend.infra.timeutil import fmt_naive_utc
 
 
 class ManifestEntry(TypedDict):
@@ -119,7 +120,7 @@ def create_backup(
                 (stage / _safe_zipname(ekey)).write_bytes(data)
         manifest: Manifest = {
             "app_version": app_version,
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
+            "created_at": fmt_naive_utc(),
             "hash_algo": hash_algo,
             "entries": entries,
         }
@@ -242,7 +243,7 @@ class BackupScheduler:
             try:
                 self._job()
                 self.run_count += 1
-                self.last_run_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+                self.last_run_at = fmt_naive_utc()
                 self.last_error = None
             except Exception as exc:  # noqa: BLE001 - 定时备份失败只记录，不拖垮进程
                 self.last_error = str(exc)[:200]
