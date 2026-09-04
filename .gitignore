@@ -53,6 +53,14 @@ src/python_embed/
 models/weights/
 nul
 
+# 本地构建/调试产物（不入库）：tauri-cli 安装/构建日志、下载的二进制包、
+# 本地 cargo 镜像配置（rsproxy，个人网络环境，不入库防 CI 失败）
+.cargo/
+build_log*.txt
+tauri_build*.txt
+install_tauri_cli.txt
+cli.tgz
+
 # Env / secrets
 .env
 .env.*

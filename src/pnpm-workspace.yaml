@@ -1,0 +1,5 @@
+# pnpm v10 构建脚本白名单：仅允许这两个依赖包运行 postinstall 脚本
+# （供应链最小化；其余依赖的构建脚本一律拦截）。
+onlyBuiltDependencies:
+  - esbuild
+  - vue-demi
