@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from backend.app.auth import Principal, require_role
 from backend.app.dependencies import Registry, get_registry
+from backend.infra.audit import dual_audit
 from backend.infra.audit_export import build_audit_export
 
 router = APIRouter(tags=["audit"])
@@ -205,12 +206,13 @@ def audit_export(
     不在本归档件中（只追加语义）。
     """
     body, footer = build_audit_export(reg.repository, reg.security_store, principal.username)
-    reg.repository.append_audit(
+    dual_audit(
+        reg.repository,
+        reg.security_store,
         actor=principal.username,
         action="audit_export",
         object_type="audit",
         object_id=f"main:{footer['main_chain_total']}+security:{footer['security_chain_total']}",
-        before=None,
         after={
             "main_chain_total": footer["main_chain_total"],
             "security_chain_total": footer["security_chain_total"],
@@ -218,15 +220,9 @@ def audit_export(
             "security_chain_valid": footer["security_chain_valid"],
         },
         note="C-20 审计归档导出",
-    )
-    reg.security_store.append_security_audit(
-        actor=principal.username,
-        action="audit_export",
-        object_type="audit",
-        object_id="archive",
-        before=None,
-        after={"records": footer["main_chain_total"] + footer["security_chain_total"]},
-        note="C-20 审计归档导出",
+        security=True,
+        sec_object_id="archive",
+        sec_after={"records": footer["main_chain_total"] + footer["security_chain_total"]},
     )
     ts = datetime.now(UTC).replace(tzinfo=None).strftime("%Y%m%d_%H%M%S")
     return Response(

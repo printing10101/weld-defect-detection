@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -29,6 +28,7 @@ from backend.infra.model_store import LocalModelStore
 from backend.infra.paths import resolve_model_uri as _resolve_model_uri
 from backend.infra.repository import InspectionRepository
 from backend.infra.standards.tables_source import FileTableSource
+from backend.infra.timeutil import fmt_naive_utc
 
 if TYPE_CHECKING:
     from backend.infra.backup import BackupScheduler
@@ -469,9 +469,10 @@ class Registry:
             "metrics": metrics,
             "golden_fingerprint": summary.get("golden_fingerprint"),
             "experiment_run_id": summary.get("experiment_run_id"),
-            "evaluated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "evaluated_at": fmt_naive_utc(),
         }
-        self.pending_activations[model_id] = record
+        with self._lock:  # check-then-act 竞态防护（并发 evaluate 同一模型）
+            self.pending_activations[model_id] = record
         return record
 
     def approve_model(self, model_id: str, actor: str | None = None) -> ModelEntry:
@@ -483,7 +484,8 @@ class Registry:
         """
         if not self.config.modelgate.enabled:
             raise ValueError("模型投产门禁未启用（modelgate.enabled=false），无需审批")
-        record = self.pending_activations.get(model_id)
+        with self._lock:
+            record = self.pending_activations.get(model_id)
         if record is None:
             raise ValueError(f"模型 {model_id} 无 candidate 评估记录（先 POST /activate 触发评估）")
         if not record.get("passed"):
@@ -503,7 +505,8 @@ class Registry:
             note="E-14 投产审批：Golden 评估达标后由 sysadmin 批准投产",
         )
         # 投产完成后 candidate 记录使命完成，移除（防止重复审批产生重复切换）。
-        self.pending_activations.pop(model_id, None)
+        with self._lock:
+            self.pending_activations.pop(model_id, None)
         return entry
 
     def _auto_evaluate(self, model_id: str) -> None:

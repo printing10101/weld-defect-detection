@@ -11,7 +11,6 @@ GET  /api/v1/system/network-status  纯离线自证（C-15）：离线模式结�
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import Annotated
 
@@ -23,6 +22,7 @@ from backend.infra.backup import create_backup, restore_backup, verify_backup
 from backend.infra.config import resolve_config_path
 from backend.infra.fs import safe_resolve
 from backend.infra.offline import offline_conclusion
+from backend.infra.timeutil import fmt_naive_utc
 
 router = APIRouter(prefix="/system", tags=["system"])
 
@@ -75,7 +75,7 @@ def run_backup(reg: Registry, actor: str = "system", note: str = "system backup 
     """执行一次备份并记审计（手动端点与 S-12a 定期调度共用）。返回结果 dict。"""
     backups_dir = resolve_config_path(reg.config.paths.data_dir) / "backups"
     backups_dir.mkdir(parents=True, exist_ok=True)
-    ts = time.strftime("%Y%m%d_%H%M%S")
+    ts = fmt_naive_utc("%Y%m%d_%H%M%S")
     archive_path = backups_dir / f"scan_backup_{ts}.zip"
 
     result = create_backup(

@@ -15,8 +15,8 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -159,7 +159,7 @@ def training_pool_manifest(store: PoolStore) -> dict[str, Any]:
         "sample_count": len(files),
         "fingerprint": store.fingerprint(),
         "files": files,
-        "exported_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "exported_at": datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M:%S"),
     }
 
 

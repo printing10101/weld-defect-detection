@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import cv2
 import numpy as np
+
+from backend.infra.timeutil import fmt_naive_utc
 
 # 框颜色（BGR）：绿=人工标注（真值），红=系统识别（检测）
 _GT_COLOR = (0, 200, 0)
@@ -100,7 +101,7 @@ def build_evidence(
         "evidence_image": str(img_file),
         "evidence_image_sha256": _sha256(img_file),
         "layout": "left=标注原图(绿框) | right=系统识别图(红框)",
-        "generated_at": datetime.now().isoformat(timespec="seconds"),  # noqa: DTZ005
+        "generated_at": fmt_naive_utc(),
     }
     manifest_file = out / "manifest.json"
     manifest_file.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")

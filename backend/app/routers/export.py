@@ -25,13 +25,16 @@ from pydantic import BaseModel, Field
 
 from backend.app.auth import Principal, get_principal, require_role
 from backend.app.dependencies import Registry, get_registry
+from backend.infra.audit import dual_audit
 from backend.infra.crypto import sm3_hex
 
 router = APIRouter(prefix="/export", tags=["export"])
 
 
 def _err(status: int, code: str, message: str) -> HTTPException:
-    return HTTPException(status_code=status, detail={"code": code, "message": message})
+    from backend.app.routers._common import api_error
+
+    return api_error(status, code, message)
 
 
 class ExportRequestIn(BaseModel):
@@ -163,7 +166,9 @@ def _decision_audit(
     reg: Registry, actor: str, action: str, row: dict[str, Any], body: DecisionIn | None
 ) -> None:
     note = body.note if body else None
-    reg.repository.append_audit(
+    dual_audit(
+        reg.repository,
+        reg.security_store,
         actor=actor,
         action=action,
         object_type="export_request",
@@ -171,15 +176,8 @@ def _decision_audit(
         before={"status": "pending"},
         after={"status": row["status"]},
         note=note,
-    )
-    reg.security_store.append_security_audit(
-        actor=actor,
-        action=action,
-        object_type="export_request",
-        object_id=row["request_id"],
-        before={"subject": row["subject"]},
-        after={"status": row["status"]},
-        note=note,
+        security=True,
+        sec_before={"subject": row["subject"]},
     )
 
 

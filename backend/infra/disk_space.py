@@ -25,10 +25,11 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+from backend.infra.timeutil import fmt_naive_utc
 
 _LOG = logging.getLogger("scandetection.disk")
 
@@ -108,7 +109,7 @@ class DiskWatchdog:
         self.last_free_bytes = free
         self.last_total_bytes = total
         self.last_ratio_pct = (free / total * 100.0) if total > 0 else 0.0
-        self.last_check_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+        self.last_check_at = fmt_naive_utc()
         low = free < self._warn_bytes or self.last_ratio_pct < self._warn_ratio
         if low:
             self.breach_count += 1

@@ -22,10 +22,11 @@ from __future__ import annotations
 import logging
 import os
 import threading
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+from backend.infra.timeutil import fmt_naive_utc
 
 _LOG = logging.getLogger("scandetection.watchdog")
 
@@ -161,7 +162,7 @@ class MemoryWatchdog:
         rss, source = self._sampler()
         self.last_rss_mb = rss
         self.last_sample_source = source
-        self.last_sample_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+        self.last_sample_at = fmt_naive_utc()
         if rss < 0:
             return self.snapshot()
         if rss >= self._warn:

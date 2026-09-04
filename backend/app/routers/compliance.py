@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from backend.app.auth import Principal, get_principal, require_role
 from backend.app.dependencies import Registry, get_registry
+from backend.infra.audit import dual_audit
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
@@ -42,23 +43,16 @@ def _audit_action(
     note: str | None = None,
 ) -> None:
     """合规动作入主审计链 + 安全审计链（审计员/保密员自身操作留痕）。"""
-    reg.repository.append_audit(
+    dual_audit(
+        reg.repository,
+        reg.security_store,
         actor=principal.username,
         action=action,
         object_type="compliance",
         object_id=action,
-        before=None,
         after=after,
         note=note,
-    )
-    reg.security_store.append_security_audit(
-        actor=principal.username,
-        action=action,
-        object_type="compliance",
-        object_id=action,
-        before=None,
-        after=after,
-        note=note,
+        security=True,
     )
 
 

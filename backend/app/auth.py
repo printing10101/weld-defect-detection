@@ -35,6 +35,7 @@ from fastapi import Depends, Header, Request
 from fastapi.security.utils import get_authorization_scheme_param
 
 from backend.app.dependencies import Registry, get_registry
+from backend.infra.audit import dual_audit
 from backend.infra.crypto import (
     sm2_generate_keypair,
     sm2_sign_with_private,
@@ -236,23 +237,18 @@ class AuthService:
                     message=msg,
                     detail={"account_id": account["account_id"], "role": account["role"]},
                 )
-            self._store.append_security_audit(
+            dual_audit(
+                get_registry().repository,
+                self._store,
                 actor="system",
                 action="account_lock",
                 object_type="account",
                 object_id=account["account_id"],
-                before={"status": "active"},
-                after={"locked": True, "lockout_min": self._cfg.lockout_min},
-                note=msg,
-            )
-            get_registry().repository.append_audit(
-                actor="system",
-                action="account_lock",
-                object_type="account",
-                object_id=account["account_id"],
-                before=None,
                 after={"username": account["username"]},
                 note=msg,
+                security=True,
+                sec_before={"status": "active"},
+                sec_after={"locked": True, "lockout_min": self._cfg.lockout_min},
             )
         except Exception as exc:  # noqa: BLE001 - 告警失败不掩盖 401 响应
             import logging

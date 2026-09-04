@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import hmac
+import json
 import threading
 import time
 from collections import defaultdict
@@ -20,8 +21,6 @@ from typing import ClassVar
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
-
-_HITS_LOCK = threading.Lock()
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -62,19 +61,24 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._limit = max(0, limit)
         self._window = window_s
         self._hits: dict[str, list[float]] = defaultdict(list)
+        # 实例级锁：原模块级单锁会让多个 app 实例（测试）互相串行
+        self._hits_lock = threading.Lock()
 
     async def dispatch(self, request: Request, call_next) -> Response:
         if self._limit <= 0:  # 禁用限流
             return await call_next(request)
         client = request.client.host if request.client else "unknown"
         now = time.monotonic()
-        with _HITS_LOCK:
+        with self._hits_lock:
             bucket = self._hits[client]
             cutoff = now - self._window
             self._hits[client] = [t for t in bucket if t > cutoff]
             if len(self._hits[client]) >= self._limit:
+                body = {
+                    "error": {"code": "RATE_LIMITED", "message": "请求过于频繁", "detail": None}
+                }
                 return Response(
-                    content='{"error":{"code":"RATE_LIMITED","message":"请求过于频繁","detail":null}}',
+                    content=json.dumps(body, ensure_ascii=False),
                     status_code=429,
                     media_type="application/json",
                 )
