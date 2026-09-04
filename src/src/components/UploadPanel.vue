@@ -5,16 +5,13 @@
  * 校验消息针对真实文件（扩展名/大小）。不包含任何预设样例。
  */
 import { computed, onUnmounted, ref } from "vue";
+import { IMAGE_EXTS as FILE_EXTS } from "../services/imageFormats";
 
 const emit = defineEmits<{
   fileChanged: [file: File | null];
   submit: [form: FormData];
 }>();
 
-const FILE_EXTS = [
-  "dcm", "dicom", "ima", "png", "jpg", "jpeg", "jfif", "bmp", "gif", "webp",
-  "tif", "tiff", "avif", "heic", "heif", "pgm", "ppm", "pnm", "ico",
-] as const;
 const MAX_BYTES = 50 * 1024 * 1024;
 
 const file = ref<File | null>(null);

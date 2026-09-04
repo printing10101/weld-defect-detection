@@ -4,6 +4,8 @@
  * 数据全部来自真实后端 /batch 系列接口；进度经 2s 轮询实时更新。
  */
 import { onMounted, onUnmounted, ref, watch } from "vue";
+import { IMAGE_EXTS as EXTS } from "../services/imageFormats";
+import { toErrorMessage } from "../utils/errorMessage";
 import BatchProgress from "../components/BatchProgress.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 import { cancelBatch, getBatchStatus, listBatches, retryBatch, submitBatch } from "../services/api";
@@ -12,10 +14,6 @@ import type { BatchStatusOut, BatchSummaryOut } from "../types/api";
 const props = defineProps<{ active: boolean }>();
 const emit = defineEmits<{ archive: [] }>();
 
-const EXTS = [
-  "dcm", "dicom", "ima", "png", "jpg", "jpeg", "jfif", "bmp", "gif", "webp",
-  "tif", "tiff", "avif", "heic", "heif", "pgm", "ppm", "pnm", "ico",
-] as const;
 const MAX_PER_BATCH = 100;
 
 type Phase = "upload" | "running" | "result";
@@ -139,7 +137,7 @@ async function doSubmit(fd: FormData): Promise<void> {
     phase.value = "running";
     startPolling(out.batch_id);
   } catch (e) {
-    submitError.value = e instanceof Error ? e.message : String(e);
+    submitError.value = toErrorMessage(e);
   } finally {
     submitting.value = false;
   }
@@ -216,7 +214,7 @@ async function onRetry(): Promise<void> {
     phase.value = "running";
     startPolling(activeBatchId.value);
   } catch (e) {
-    submitError.value = e instanceof Error ? e.message : String(e);
+    submitError.value = toErrorMessage(e);
   }
 }
 

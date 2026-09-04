@@ -6,6 +6,7 @@
  * 另含评价历史档案与等级曲线（E-15：GET /std-eval/history，版本-指标随时间）。
  */
 import { computed, onMounted, ref } from "vue";
+import { toErrorMessage } from "../utils/errorMessage";
 import {
   createStdRecord,
   getStdEvalHistory,
@@ -49,7 +50,7 @@ async function reload(): Promise<void> {
     evaluators.value = out.evaluators;
     labelers.value = out.labelers;
   } catch (e) {
-    err.value = e instanceof Error ? e.message : String(e);
+    err.value = toErrorMessage(e);
   }
 }
 
@@ -99,7 +100,7 @@ async function savePersonnel(): Promise<void> {
     issues.value = out.issues;
     msg.value = out.qualified ? "资质校验通过。" : "已保存，但存在资质问题（见下方列表）。";
   } catch (e) {
-    err.value = e instanceof Error ? e.message : String(e);
+    err.value = toErrorMessage(e);
   } finally {
     busy.value = false;
   }
@@ -124,7 +125,7 @@ async function buildRecord(): Promise<void> {
       ? "记录表已生成（正式分级结论）。"
       : "记录表已生成（资质或 FRR 未满足，仅参考值）。";
   } catch (e) {
-    err.value = e instanceof Error ? e.message : String(e);
+    err.value = toErrorMessage(e);
   } finally {
     busy.value = false;
   }
@@ -146,7 +147,7 @@ async function loadHistory(): Promise<void> {
     history.value = [...out.items].reverse();
   } catch (e) {
     // 历史档案缺失/为空不阻断本页主功能，仅在曲线区提示
-    historyErr.value = e instanceof Error ? e.message : String(e);
+    historyErr.value = toErrorMessage(e);
   }
 }
 onMounted(() => {

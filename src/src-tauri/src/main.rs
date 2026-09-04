@@ -28,27 +28,18 @@ const BACKEND_PORT: u16 = 18773;
 /// 可超过 60s，放宽到 180s 避免误报“后端未响应”。
 const BACKEND_STARTUP_TIMEOUT_SECS: u64 = 180;
 
-/// 构建指针字段（供监督器与停止标志复用）。
-struct BackendState {
-    child: Arc<Mutex<Option<Child>>>,
-}
-
 const SUPERVISOR_CHECK_INTERVAL_MS: u64 = 2000;
 
 fn main() {
-    let backend_state = BackendState {
-        child: Arc::new(Mutex::new(None)),
-    };
     // 供后台监督线程与窗口事件钩子各自持有一份 Arc 克隆（引用计数，零额外开销）。
-    let launch_slot = backend_state.child.clone();
-    let event_slot = backend_state.child.clone();
+    let launch_slot: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
+    let event_slot = launch_slot.clone();
     // 停止标志：窗口销毁即置位，监督线程据此退出并回收后端子进程。
     let stop = Arc::new(AtomicBool::new(false));
     let supervisor_stop = stop.clone();
     let event_stop = stop.clone();
 
     tauri::Builder::default()
-        .manage(backend_state)
         .setup(move |app| {
             // 单一后台监督线程：负责首次启动 + 存活监控 + 崩溃自愈 + 优雅退出回收；
             // 窗口不阻塞显示，前端通过轮询 /health 自动恢复。
@@ -74,7 +65,7 @@ fn main() {
                 );
                 if ready {
                     // C-17：后端就绪（端口可连 = lifespan 完成）后注入 IPC 一次性令牌。
-                    inject_ipc_token(&handle);
+                    inject_ipc_token(&handle, &app_root);
                 }
 
                 // 进入存活监控/自愈循环（含看门狗重启标记消费）。
@@ -85,6 +76,8 @@ fn main() {
                     marker,
                     SUPERVISOR_CHECK_INTERVAL_MS,
                     handle,
+                    app_root,
+                    python,
                 );
             });
             Ok(())
@@ -282,23 +275,16 @@ fn wait_for_port_stoppable(
 ///
 /// 说明：Tauri 进程在 main() 返回时随宿主退出，本线程会在该时机被打断；正常
 /// 关机路径由 on_window_event 直接 kill + 置位 stop 兜底，避免后端子进程残留。
+#[allow(clippy::too_many_arguments)]
 fn run_supervisor(
     child_slot: Arc<Mutex<Option<Child>>>,
     stop: Arc<AtomicBool>,
     marker_path: PathBuf,
     check_interval_ms: u64,
     handle: tauri::AppHandle,
+    app_root: PathBuf,
+    python: PathBuf,
 ) {
-    let dir = match exe_dir() {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("[ScanDetection] supervisor cannot resolve exe dir: {e}");
-            return;
-        }
-    };
-    let app_root = resolve_app_root(&dir);
-    let python = pick_python(&app_root);
-
     let interval = Duration::from_millis(check_interval_ms.max(200));
     while !stop.load(Ordering::SeqCst) {
         // 1) 消费看门狗优雅重启标记（存在即触发一次重启）。
@@ -329,6 +315,11 @@ fn run_supervisor(
         };
 
         if exited || marker_restart {
+            // 应用退出中：不得再 spawn（与 on_window_event 的 kill 存在竞态窗口，
+            // 此前置位检查杜绝"窗口已销毁又拉起新后端"的双 spawn）。
+            if stop.load(Ordering::SeqCst) {
+                break;
+            }
             // 3) 回收旧句柄 → 重新拉起 → 等端口就绪 → 重注入令牌。
             {
                 if let Ok(mut guard) = child_slot.lock() {
@@ -345,7 +336,7 @@ fn run_supervisor(
                 &stop,
             );
             if ready {
-                inject_ipc_token(&handle); // 后端重启用新令牌，重注入 WebView
+                inject_ipc_token(&handle, &app_root); // 后端重启用新令牌，重注入 WebView
             }
         }
 
@@ -375,15 +366,8 @@ fn run_supervisor(
 /// 诚实边界：令牌防"其他本机进程误调 / 网页 CSRF 式调用"，本机回环为明文
 /// 传输，令牌不解决传输加密（需 TLS 时后续挂本机证书，不在本次范围）。
 /// 文件权限为尽力而为（Windows 下依赖用户数据目录继承的 ACL）。
-fn inject_ipc_token(handle: &tauri::AppHandle) {
-    let dir = match exe_dir() {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("[ScanDetection] IPC 令牌注入失败（无法定位安装目录）: {e}");
-            return;
-        }
-    };
-    let path = resolve_app_root(&dir).join("data").join("ipc_token");
+fn inject_ipc_token(handle: &tauri::AppHandle, app_root: &std::path::Path) {
+    let path = app_root.join("data").join("ipc_token");
     // 令牌落盘与端口就绪存在毫秒级竞态：短重试兜底（正常一次即中）。
     let mut token: Option<String> = None;
     for _ in 0..5 {
@@ -398,8 +382,10 @@ fn inject_ipc_token(handle: &tauri::AppHandle) {
     let token = match token {
         Some(t) => t,
         None => {
+            // 高危告警：后端 ipc.enforce=true 时前端将因缺令牌持续 401、
+            // 全部业务请求不可用——运维须立即查看后端日志。
             eprintln!(
-                "[ScanDetection] 读取 IPC 令牌失败: {:?}（后端 ipc.enforce=false 时无需令牌）",
+                "[ScanDetection] 高危：读取 IPC 令牌失败: {:?}（若 ipc.enforce=true，前端将持续 401；请查后端日志）",
                 path
             );
             return;

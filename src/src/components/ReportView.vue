@@ -9,10 +9,12 @@
  * - 判定依据/黑度等：ReportOut 不包含，前端不构造展示。
  */
 import { computed, ref } from "vue";
+import { toErrorMessage } from "../utils/errorMessage";
 import ResultBanner from "./ResultBanner.vue";
 import ReviewPanel from "./ReviewPanel.vue";
 import DispositionPanel from "./DispositionPanel.vue";
 import { activeExport, getReportDetections, reportPdfUrl, verifyReport } from "../services/api";
+import { DEFECT_CLASS_LABELS } from "../types/api";
 import type {
   ActiveExportOut,
   ReportDetectionsOut,
@@ -20,8 +22,8 @@ import type {
   VerifyOut,
 } from "../types/api";
 
-/** 缺陷类别中文标签（镜像 backend/domain/dto.py DefectClass 0..5）。 */
-const DEFECT_LABELS = ["气孔", "夹渣", "未焊透", "未熔合", "裂纹", "咬边"] as const;
+/** 缺陷类别中文标签（统一常量，types/api.ts 为唯一事实源）。 */
+const DEFECT_LABELS = DEFECT_CLASS_LABELS;
 
 interface ExportRow {
   id: string;
@@ -85,7 +87,7 @@ async function openExport(): Promise<void> {
       override: -1,
     }));
   } catch (e) {
-    detsErr.value = e instanceof Error ? e.message : String(e);
+    detsErr.value = toErrorMessage(e);
   } finally {
     loadingDets.value = false;
   }
@@ -111,7 +113,7 @@ async function confirmExport(): Promise<void> {
       class_overrides: {},
     });
   } catch (e) {
-    exportErr.value = e instanceof Error ? e.message : String(e);
+    exportErr.value = toErrorMessage(e);
   } finally {
     exporting.value = false;
   }
@@ -139,7 +141,7 @@ async function onVerify(): Promise<void> {
   try {
     verifyResult.value = await verifyReport(props.result.report_id);
   } catch (e) {
-    verifyError.value = e instanceof Error ? e.message : String(e);
+    verifyError.value = toErrorMessage(e);
   } finally {
     verifying.value = false;
   }
@@ -181,7 +183,7 @@ async function onVerify(): Promise<void> {
       </div>
       <div class="plate">
         <a
-          :href="result.pdf_url"
+          :href="reportPdfUrl(props.result.report_id)"
           target="_blank"
           rel="noopener"
           style="display: block; text-decoration: none; color: inherit"

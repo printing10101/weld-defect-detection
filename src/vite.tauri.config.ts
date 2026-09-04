@@ -8,5 +8,6 @@ process.env.VITE_API_BASE = process.env.VITE_API_BASE ?? "http://127.0.0.1:18773
 export default defineConfig({
   ...sharedVue,
   // 生产构建不产出 sourcemap，避免通过桌面包泄露前端源码（§E6）。
-  build: { emptyOutDir: false, sourcemap: false },
+  // emptyOutDir：两种构建共用 dist，打包前清空防陈旧 hash 资产混装入包。
+  build: { emptyOutDir: true, sourcemap: false },
 });

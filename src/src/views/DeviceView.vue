@@ -5,6 +5,7 @@
  * 数据全部来自真实后端 /devices 系列接口。
  */
 import { onMounted, ref } from "vue";
+import { toErrorMessage } from "../utils/errorMessage";
 import { addCalibration, getDevice, listDevices, registerDevice } from "../services/api";
 import type { CalibrationOut, DeviceDetailOut, DeviceOut } from "../types/api";
 
@@ -31,7 +32,7 @@ async function refreshList(): Promise<void> {
   try {
     devices.value = await listDevices();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    error.value = toErrorMessage(e);
   }
 }
 
@@ -43,7 +44,7 @@ async function selectDevice(id: string): Promise<void> {
     detail.value = await getDevice(id);
   } catch (e) {
     detail.value = null;
-    error.value = e instanceof Error ? e.message : String(e);
+    error.value = toErrorMessage(e);
   }
 }
 
@@ -68,7 +69,7 @@ async function doRegister(): Promise<void> {
     await refreshList();
     await selectDevice(dev.device_id);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    error.value = toErrorMessage(e);
   }
 }
 
@@ -108,7 +109,7 @@ async function doCalibrate(): Promise<void> {
     await refreshList();
     info.value = "标定已记录。";
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    error.value = toErrorMessage(e);
   }
 }
 
