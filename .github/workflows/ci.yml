@@ -35,7 +35,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          # 与本地开发一致（pnpm 10+ 才支持 pnpm-workspace.yaml 中的
+          # onlyBuiltDependencies 构建脚本白名单配置段）
+          version: 11
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -44,6 +46,8 @@ jobs:
       - run: cd src && pnpm install --frozen-lockfile
       - run: cd src && pnpm typecheck
       - run: cd src && pnpm lint
+      # 单测门禁：router/stores/composables 的 vitest spec
+      - run: cd src && pnpm test:run
       - run: cd src && pnpm build
 
   # 真实检测器冒烟（必过）：仅装 onnxruntime（轻量，避开 torch/ultralytics），
