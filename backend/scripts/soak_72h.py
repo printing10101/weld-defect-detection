@@ -34,6 +34,19 @@ from backend.scripts.recovery_drill import _INSTALL_ROOT  # 复用安装根锚�
 
 _LEAK_DEFAULT_MB_PER_ROUND = 0.5
 
+# 长跑采样向量的保留上限（S-07 加固）：72h 高频轮次下，round_elapsed / rss_curve
+# 若无界 append 会由 Python float 对象自身撑到数 GB，造成"工具先内存泄漏、RSS 斜率
+# 虚高、误报 FAIL"的假信号。超上限时按"取偶数序号"成对压缩（长度折半，趋势形状
+# 近似保留），保证泡水测量的只是检测器的真实资源稳定性，而非脚本自身记账膨胀。
+_SOAK_SAMPLE_CAP = 20000
+
+
+def _bounded_append(vec: list[float], val: float, cap: int = _SOAK_SAMPLE_CAP) -> None:
+    """追加一个采样点；超过上限时压缩为最长折半（丢弃奇数下标，保持整体趋势）。"""
+    vec.append(val)
+    if len(vec) > cap:
+        del vec[1::2]
+
 
 def synthesize_film(w: int = 512, h: int = 512, seed: int = 0) -> np.ndarray:
     """合成一张含类缺陷暗斑的 8bit 灰度底片（确定性，长跑输入稳定）。"""
@@ -118,10 +131,10 @@ def run_soak(
             failures += 1
             errors.append(f"round {rounds_done}: {type(exc).__name__}: {exc}"[:200])
         rounds_done += 1
-        round_elapsed.append(round(time.perf_counter() - rt0, 4))
+        _bounded_append(round_elapsed, round(time.perf_counter() - rt0, 4))
         rss_mb, source = sample()
         if rss_mb >= 0:
-            rss_curve.append(round(rss_mb, 1))
+            _bounded_append(rss_curve, round(rss_mb, 1))
         if interval_sec > 0:
             time.sleep(interval_sec)
 

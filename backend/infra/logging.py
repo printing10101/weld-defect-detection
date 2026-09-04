@@ -13,9 +13,16 @@ from __future__ import annotations
 
 import json
 import logging
+import logging.handlers
+import os
 import sys
 import time
 from typing import Any
+
+# 日志文件轮转（2026：持久化到用户数据目录 + RotatingFileHandler，杜绝 100h
+# 长跑下 %TEMP%/ScanDetection/backend.log 无界增长撑爆磁盘/拖累 I/O）。
+_LOGFILE_MAX_BYTES = 5 * 1024 * 1024  # 单文件 5 MB
+_LOGFILE_BACKUP_COUNT = 20  # 保留最近 20 个轮转文件（合计上限 ~105 MB）
 
 
 class JsonFormatter(logging.Formatter):
@@ -72,11 +79,41 @@ class JsonFormatter(logging.Formatter):
             return super().format(record)
 
 
+def _writable_log_base_dir() -> str | None:
+    """返回可写的日志目录；无法创建/不可写返回 None。
+
+    桌面安装可能落在 Program Files（只读），故日志不随安装目录放置，
+    优先 %LOCALAPPDATA%/ScanDetection/logs（用户可写），LOCALAPPDATA 缺失
+    时回退系统临时目录下的 ScanDetection/logs。
+    """
+    candidates: list[str] = []
+    la = os.environ.get("LOCALAPPDATA")
+    if la:
+        candidates.append(os.path.join(la, "ScanDetection", "logs"))
+    tmp = os.environ.get("TEMP") or os.environ.get("TMP")
+    if tmp:
+        candidates.append(os.path.join(tmp, "ScanDetection", "logs"))
+    for base in candidates:
+        try:
+            os.makedirs(base, exist_ok=True)
+        except OSError:
+            continue
+        if os.access(base, os.W_OK):
+            return base
+    return None
+
+
 def configure_logging(log_format: str = "text") -> None:
     """按配置装配根/应用级日志（INFO，统一格式）。
 
     force=True 保证本配置优先生效（避免第三方库早期 basicConfig 覆盖）。
     关键路径（模型加载/推理/判定/审计）据此可观测。
+
+    输出两路，兼顾持久化与紧急兜底，均不构成无界增长：
+    - 主路：RotatingFileHandler 写入 <用户数据目录>/ScanDetection/logs/backend.log，
+      超 5MB 轮转、保留 20 份（上限 ~105MB）；
+    - 兜底：ERROR 级 stderr（由 Tauri 壳收入 %TEMP%/ScanDetection/backend.log），
+      只承载严重异常，频次低，避免逐条业务日志无界写入临时文件。
     """
     level = logging.INFO
     root = logging.getLogger()
@@ -85,17 +122,39 @@ def configure_logging(log_format: str = "text") -> None:
     for h in list(root.handlers):
         root.removeHandler(h)
 
-    handler = logging.StreamHandler(sys.stderr)
     if log_format == "json":
-        handler.setFormatter(JsonFormatter())
+        fmt = JsonFormatter()
     else:
-        handler.setFormatter(
-            logging.Formatter(
-                "%(asctime)s %(levelname)s [%(name)s] %(message)s",
-                datefmt="%Y-%m-%dT%H:%M:%S",
-            )
+        fmt = logging.Formatter(
+            "%(asctime)s %(levelname)s [%(name)s] %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%S",
         )
-    handler.setLevel(level)
-    root.addHandler(handler)
+
+    base = _writable_log_base_dir()
+    if base is not None:
+        fh = logging.handlers.RotatingFileHandler(
+            os.path.join(base, "backend.log"),
+            maxBytes=_LOGFILE_MAX_BYTES,
+            backupCount=_LOGFILE_BACKUP_COUNT,
+            encoding="utf-8",
+        )
+        fh.setFormatter(fmt)
+        fh.setLevel(level)
+        root.addHandler(fh)
+        logging.getLogger("scandetection.logging").info(
+            "logs written to %s", os.path.join(base, "backend.log")
+        )
+    else:
+        logging.getLogger("scandetection.logging").warning(
+            "no writable log dir; fall back to stderr only"
+        )
+
+    # 紧急兜底：ERROR 级走 stderr（崩溃/严重异常仍可在临时日志查到）。
+    sh = logging.StreamHandler(sys.stderr)
+    sh.setFormatter(fmt)
+    sh.setLevel(logging.ERROR)
+    root.addHandler(sh)
     # 允许业务日志在 INFO 可见（子 logger 默认继承 root 的级别）。
     logging.addLevelName(logging.WARNING, "WARNING")
+    # 削减 uvicorn 逐请求访问日志噪音（桌面场景意义小且会持续膨胀日志）。
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)

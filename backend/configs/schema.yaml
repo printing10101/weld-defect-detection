@@ -174,6 +174,8 @@ batch:
   workers: int                    # 批量并行 worker 数（§12.1）
   max_per_batch: int              # 单批最大图数
   per_image_estimate_sec: float   # 单图预估耗时（预计时间展示用）
+  max_retained_batches: int       # 内存保留终结批次上限（防长跑内存无界增长）
+  max_retained_snapshot_files: int  # 磁盘快照保留上限（防 data/batch 磁盘无界增长）
 backup:                           # S-12 备份增强
   interval_hours: float           # 自动备份间隔（小时）；0=关闭定期调度
   include_images: bool            # 备份是否纳入影像目录（逐文件 SM3 校验）
@@ -183,6 +185,11 @@ watchdog:                         # S-09 内存监控与自愈
   rss_warn_mb: float              # RSS 告警阈值（MB）
   rss_restart_mb: float           # RSS 重启标记阈值（MB）
   graceful_restart: bool          # 超重启阈值是否写 data/restart_required 标记文件
+disk_space:                       # S-20 磁盘水位告警
+  enabled: bool                   # 后台线程周期统计 data 分区剩余空间（默认开）
+  interval_sec: float             # 采样周期（秒）
+  warn_ratio_pct: float           # 剩余空间比例阈值（%）
+  warn_min_bytes: int             # 剩余空间绝对阈值（字节）
 modelgate:                        # E-14 更新即重评投产门禁
   enabled: bool                   # true=activate 先 Golden 评估 → candidate → sysadmin 审批投产
   min_map: float                  # Golden mAP@0.5 下限（0=宽松）

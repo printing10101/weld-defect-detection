@@ -65,6 +65,15 @@ async def lifespan(app: FastAPI):
     # 业务端点首个请求会经 get_registry 阻塞等待装配完成（语义与原先一致）。
     _configure_logging()
 
+    # 孤儿兜底：若由 Tauri 壳启动（env 给了父 PID），监控父进程消失即自杀退出，
+    # 避免壳被强杀/崩溃时遗留孤儿后端长期占用端口与内存。
+    try:
+        from backend.infra.orphan_guard import start_orphan_guard_if_spawned
+
+        start_orphan_guard_if_spawned()
+    except Exception as exc:  # noqa: BLE001 - 兜底武装失败不阻断启动
+        _LOG.warning("orphan-guard arm failed: %s", exc)
+
     # 边界安全启动自检（C-15/C-16/C-17）：全部为配置驱动的轻量动作，
     # 失败不应阻断启动（日志显式留痕，见各模块）。
     try:
@@ -147,6 +156,28 @@ async def lifespan(app: FastAPI):
                 )
         except Exception as exc:  # noqa: BLE001 - 看门狗失败不阻断装配
             _LOG.warning("memory watchdog start failed: %s", exc)
+        # S-20 磁盘水位看门狗（默认开）：data 分区剩余空间低水位告警+审计。
+        try:
+            dc = reg.config.disk_space
+            if dc.enabled:
+                from backend.infra.disk_space import DiskWatchdog
+
+                reg.disk_watchdog = DiskWatchdog(
+                    interval_sec=dc.interval_sec,
+                    warn_ratio_pct=dc.warn_ratio_pct,
+                    warn_min_bytes=dc.warn_min_bytes,
+                    data_dir=resolve_config_path(reg.config.paths.data_dir),
+                    raise_alert=reg.security_store.raise_alert,
+                    append_audit=reg.repository.append_audit,
+                )
+                reg.disk_watchdog.start()
+                _LOG.info(
+                    "disk watchdog started (ratio<%.1f%% or free<%d bytes)",
+                    dc.warn_ratio_pct,
+                    dc.warn_min_bytes,
+                )
+        except Exception as exc:  # noqa: BLE001 - 看门狗失败不阻断装配
+            _LOG.warning("disk watchdog start failed: %s", exc)
         # S-12a 定期备份（默认 0=关）：backup.interval_hours>0 时后台定时备份。
         try:
             interval = reg.config.backup.interval_hours
@@ -176,6 +207,8 @@ async def lifespan(app: FastAPI):
             # S-09/S-12a：看门狗与备份调度线程一并优雅退出。
             if getattr(reg, "watchdog", None) is not None:
                 reg.watchdog.stop()
+            if getattr(reg, "disk_watchdog", None) is not None:
+                reg.disk_watchdog.stop()
             if getattr(reg, "backup_scheduler", None) is not None:
                 reg.backup_scheduler.stop()
     except Exception as exc:  # noqa: BLE001 - 关停失败不应掩盖其它退出逻辑

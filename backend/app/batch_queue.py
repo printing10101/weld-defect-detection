@@ -90,12 +90,16 @@ class BatchManager:
         workers: int,
         per_image_estimate_sec: float,
         batch_dir: str | Path,
+        max_retained_batches: int = 50,
+        max_retained_snapshot_files: int = 200,
     ) -> None:
         self._pipeline_factory = pipeline_factory
         self._workers = max(1, workers)
         self._per_image_estimate_sec = max(0.1, per_image_estimate_sec)
         self._batch_dir = Path(batch_dir)
         self._batch_dir.mkdir(parents=True, exist_ok=True)
+        self._max_retained = max(1, int(max_retained_batches))
+        self._max_snapshot_files = max(1, int(max_retained_snapshot_files))
         self._pool = ThreadPoolExecutor(max_workers=self._workers, thread_name_prefix="batch")
         self._closed = False
         self._lock = threading.Lock()
@@ -135,6 +139,7 @@ class BatchManager:
         }
         with self._lock:
             self._batches[batch_id] = batch
+        self._maybe_evict_excess()  # S-*：新增批次后收敛内存保留上限
         self._persist(batch)
         for item, task in zip(items, tasks):
             self._pool.submit(self._run_one, batch_id, task.task_id, item)
@@ -322,6 +327,72 @@ class BatchManager:
                 except OSError as exc:
                     _LOG.warning("batch staging cleanup failed %s: %s", path, exc)
 
+    def _maybe_evict_excess(self) -> None:
+        """内存保留上限（S-*）：驱逐最旧的"已终结且无失败/取消任务"批次。
+
+        只驱逐**已完成且没有任何重试价值**的批次出内存（这类批次纯属历史，
+        磁盘快照 data/batch/{id}.json 仍保留，不删用户数据）；running 批与含
+        failed/cancelled（可 retry）批一律保留，避免破坏断点续跑。任何微量
+        内存释放都有意义——该动作把 100h 长跑下 `self._batches` 的上限钉死。
+        """
+        if self._max_retained <= 0:
+            return
+        with self._lock:
+            if len(self._batches) <= self._max_retained:
+                return
+            retryable = {"failed", "cancelled"}
+            evictable = [
+                bid
+                for bid, b in self._batches.items()
+                if b.get("status") == "finished"
+                and not any(t.get("status") in retryable for t in b.get("tasks", []))
+            ]
+            # 按 created_at 升序，优先驱逐最旧。
+            evictable.sort(key=lambda bid: self._batches[bid].get("created_at") or "")
+            excess = len(self._batches) - self._max_retained
+            for bid in evictable[:excess]:
+                self._batches.pop(bid, None)
+
+    def _maybe_prune_snapshots(self) -> None:
+        """磁盘快照保留上限（S-21 防磁盘随批次无界增长）。
+
+        与内存保留（max_retained_batches）同源策略但作用于 data/batch/*.json 文件：
+        - 只删除"已完成且无失败/取消可重试任务"的批次快照文件（纯历史，删除安全）；
+        - running / 含 failed/cancelled（可 retry）批次的快照恒保留，避免破坏断点续跑；
+        - 先读目录文件倒序（最近修改在前），超限则优先剪最旧的安全文件。
+        删除失败仅告警（不影响批次内存态），避免误删有 retry 价值的用户数据。
+        """
+        try:
+            files = sorted(
+                self._batch_dir.glob("*.json"),
+                key=lambda p: p.stat().st_mtime,  # 最旧在前
+            )
+        except OSError:
+            return
+        if len(files) <= self._max_snapshot_files:
+            return
+        with self._lock:
+            retryable = {"failed", "cancelled"}
+
+            def _is_safe(path: str) -> bool:
+                # 已不在内存（被 _maybe_evict_excess 驱逐）的批次 = 已完成且无 retry 价值，
+                # 是纯历史文件，可安全剪枝；仍在内存的须逐条校验不能破坏断点续跑。
+                batch = self._batches.get(path)
+                if batch is None:
+                    return True
+                return (
+                    batch.get("status") == "finished"
+                    and not any(t.get("status") in retryable for t in batch.get("tasks", []))
+                )
+
+            safe = [p for p in files if _is_safe(p.stem)]
+        excess = len(files) - self._max_snapshot_files
+        for p in safe[:excess]:
+            try:
+                p.unlink()
+            except OSError as exc:
+                _LOG.warning("batch snapshot prune failed %s: %s", p.name, exc)
+
     def _persist(self, batch: dict) -> None:
         """状态快照落盘（断点续跑：重启后可查历史与未完成标记）。"""
         try:
@@ -329,6 +400,8 @@ class BatchManager:
             path.write_text(json.dumps(batch, ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError:  # 持久化失败不阻断批量（内存态仍完整）
             _LOG.warning("batch snapshot persist failed: %s", batch["batch_id"])
+        finally:
+            self._maybe_prune_snapshots()  # S-21：每次落盘后收敛磁盘快照，防 100h 长跑无界增长
 
     def _load_existing(self) -> None:
         """启动时恢复历史批次快照（断点续跑的可查部分）。
@@ -360,3 +433,5 @@ class BatchManager:
                         "%Y-%m-%dT%H:%M:%S"
                     )
                 self._persist(batch)
+        # S-*：恢复历史快照后同样收敛内存，避免积压的历史批次一次性占满内存。
+        self._maybe_evict_excess()

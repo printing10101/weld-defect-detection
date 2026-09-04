@@ -502,6 +502,11 @@ class BatchCfg(BaseModel):
     workers: int = 2  # 并行 worker 数（IO/推理并行度；过大会加重 CPU/内存）
     max_per_batch: int = 100  # 单批最大图数（防一次性打爆资源）
     per_image_estimate_sec: float = 8.0  # 单图预估耗时（进度条/预计时间展示用）
+    max_retained_batches: int = 50  # 内存保留终结批次上限（S-*：防 100h 长跑内存随批次无界增长；
+    # 超过后只驱逐"已完成且无失败可重试任务"的最旧批次出内存）
+    max_retained_snapshot_files: int = 200  # 磁盘快照保留上限（S-21 防磁盘随批次无界增长）：
+    # data/batch/*.json 超过该值后，只剪枝"已完成且无失败可重试任务"的最旧快照文件；
+    # 保留有 retry 价值（failed/cancelled 可断点续跑）的批次，running/新建批次恒保留。
 
 
 class BackupCfg(BaseModel):
@@ -534,6 +539,22 @@ class WatchdogCfg(BaseModel):
     rss_warn_mb: float = 2048.0
     rss_restart_mb: float = 4096.0
     graceful_restart: bool = False
+
+
+class DiskSpaceCfg(BaseModel):
+    """磁盘水位看门狗（S-20）：后台线程周期统计 data 分区剩余空间，低水位告警。
+
+    enabled        : 默认 true（生产开启磁盘层兜底，防磁盘写满导致 DB/WAL/报告故障）。
+    interval_sec   : 采样周期（秒），低频（默认 300s）避免无谓 I/O。
+    warn_ratio_pct : 剩余空间比例阈值（%），低于即告警。
+    warn_min_bytes : 剩余空间绝对阈值（字节），低于即告警（默认 1 GiB）。
+                     任一触发即告警；同一次连续低水位只告警一次。
+    """
+
+    enabled: bool = True
+    interval_sec: float = 300.0
+    warn_ratio_pct: float = 10.0
+    warn_min_bytes: int = 1073741824  # 1 GiB
 
 
 class ModelGateCfg(BaseModel):
@@ -581,6 +602,7 @@ class AppConfig(BaseSettings):
     batch: BatchCfg = BatchCfg()
     backup: BackupCfg = BackupCfg()
     watchdog: WatchdogCfg = WatchdogCfg()
+    disk_space: DiskSpaceCfg = DiskSpaceCfg()
     # 注意字段名 modelgate（非 model_gate）：E-14 专项测试/部署用环境变量
     # SCAN_MODELGATE__ENABLED=true 开启完整门禁链（env 解析按小写段匹配）。
     modelgate: ModelGateCfg = ModelGateCfg()
