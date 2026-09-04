@@ -246,11 +246,9 @@ def unauthenticated_api_routes(app, auth_dep) -> list[str]:
         if any(path.startswith(p) for p in _API_EXEMPT_PREFIXES):
             continue
         deps = _dep_callables(getattr(route, "dependencies", None))
-        deps += (
-            [d.call for d in getattr(route, "dependant", None).dependencies]
-            if getattr(route, "dependant", None)
-            else []
-        )
+        dependant = getattr(route, "dependant", None)
+        if dependant is not None:
+            deps += [d.call for d in dependant.dependencies]
         authed = any(
             d is auth_dep
             or (

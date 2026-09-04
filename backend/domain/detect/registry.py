@@ -110,7 +110,8 @@ def get_detector(
     else:
         det = spec.cls()
     # S-04：仅对支持 providers 的实现（YoloDetector）注入；接口契约不变。
+    # S-04：providers 是 YoloDetector 的运行期可注入参数、非协议契约。
     if providers is not None and hasattr(det, "providers"):
-        det.providers = list(providers)
+        det.providers = list(providers)  # type: ignore[union-attr]
     det.load(model_uri or "", backend)
     return det

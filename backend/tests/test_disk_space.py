@@ -12,6 +12,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 import pytest
 
 from backend.infra.config import DiskSpaceCfg, load_config
@@ -21,14 +24,14 @@ _GB = 1024 * 1024 * 1024
 _TOTAL = 512 * _GB  # 512 GiB 模拟分区别太大
 
 
-def _fake_sink() -> tuple[list[dict], list[dict]]:
+def _fake_sink() -> tuple[list[dict], list[dict], Callable[..., Any], Callable[..., Any]]:
     alerts: list[dict] = []
     audits: list[dict] = []
 
-    def raise_alert(*, kind, message, level="warn", detail=None):
+    def raise_alert(*, kind, message, level="warn", detail=None):  # type: ignore[no-untyped-def]
         alerts.append({"kind": kind, "level": level, "detail": detail})
 
-    def append_audit(*, actor, action, object_type, object_id, before=None, after=None, note=None):
+    def append_audit(*, actor, action, object_type, object_id, before=None, after=None, note=None):  # type: ignore[no-untyped-def]
         audits.append({"action": action, "detail": after})
 
     return alerts, audits, raise_alert, append_audit

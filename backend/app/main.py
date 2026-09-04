@@ -115,11 +115,10 @@ async def lifespan(app: FastAPI):
             _LOG.info("schema migrations applied (version=%s)", version)
         except Exception as exc:  # noqa: BLE001 - 迁移失败不应阻止启动；create_all 兜底
             _LOG.warning("schema migration skipped (create_all fallback): %s", exc)
-        get_registry()
+        reg = get_registry()
         # C-15：sync.kind 非 local（http/cloud）= 配置层显式选择了"数据出本机"，
         # 启动即落 high 级安全告警留痕（offline_mode=False 的持久证据链）。
         try:
-            reg = get_registry()
             if reg.config.sync.kind != "local":
                 reg.security_store.raise_alert(
                     kind="sync_nonlocal",
@@ -227,11 +226,11 @@ async def lifespan(app: FastAPI):
         if reg is not None:
             reg.batch_manager.shutdown()
             # S-09/S-12a：看门狗与备份调度线程一并优雅退出。
-            if getattr(reg, "watchdog", None) is not None:
+            if reg.watchdog is not None:
                 reg.watchdog.stop()
-            if getattr(reg, "disk_watchdog", None) is not None:
+            if reg.disk_watchdog is not None:
                 reg.disk_watchdog.stop()
-            if getattr(reg, "backup_scheduler", None) is not None:
+            if reg.backup_scheduler is not None:
                 reg.backup_scheduler.stop()
     except Exception as exc:  # noqa: BLE001 - 关停失败不应掩盖其它退出逻辑
         _LOG.warning("batch_manager shutdown skipped: %s", exc)
@@ -329,7 +328,7 @@ def create_app() -> FastAPI:
         app.add_middleware(
             IpcTokenMiddleware,
             enforce=True,
-            data_dir=resolve_config_path(cfg.paths.data_dir),
+            data_dir=str(resolve_config_path(cfg.paths.data_dir)),
         )
 
     # 可观测性：进程内指标中间件（最外层，采集所有 HTTP 请求计数/耗时）。

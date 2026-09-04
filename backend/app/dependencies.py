@@ -11,6 +11,7 @@ import os
 import threading
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fastapi import Header, Request
 
@@ -28,6 +29,11 @@ from backend.infra.model_registry import ModelEntry, ModelRegistry
 from backend.infra.model_store import LocalModelStore
 from backend.infra.repository import InspectionRepository
 from backend.infra.standards.tables_source import FileTableSource
+
+if TYPE_CHECKING:
+    from backend.infra.backup import BackupScheduler
+    from backend.infra.disk_space import DiskWatchdog
+    from backend.infra.watchdog import MemoryWatchdog
 
 _LOG = logging.getLogger("scandetection.dependencies")
 
@@ -135,7 +141,8 @@ class ResilientDetector:
         return dets
 
     def infer_tta(self, image, conf, iou, class_conf=None, scales=(0.8, 1.0, 1.25)):
-        return self._inner.infer_tta(image, conf, iou, class_conf, scales)
+        # infer_tta 是 YoloDetector 的增强能力、非 DefectDetector 协议契约
+        return self._inner.infer_tta(image, conf, iou, class_conf, scales)  # type: ignore[attr-defined]
 
 
 class Registry:
@@ -199,11 +206,13 @@ class Registry:
 
         self.device_store = DeviceStore(_resolve_path(self.config.paths.db_path))
         # S-09 内存看门狗：默认 None（lifespan 按 config.watchdog.enabled 装配启动）。
-        self.watchdog = None
+        self.watchdog: MemoryWatchdog | None = None
         # S-20 磁盘水位看门狗：默认 None（lifespan 按 config.disk_space.enabled 装配启动）。
-        self.disk_watchdog = None
+        self.disk_watchdog: DiskWatchdog | None = None
         # S-12 定期备份调度器：默认 None（lifespan 按 config.backup.interval_hours 装配）。
-        self.backup_scheduler = None
+        self.backup_scheduler: BackupScheduler | None = None
+        # 登录服务实例（app.auth 在首次登录流程挂载，见 auth.get_auth_service）
+        self._auth_service: object | None = None
 
     def eval_report(self, model_id: str) -> dict | None:
         """读取某模型的评估报告。"""
@@ -588,14 +597,12 @@ class Registry:
                 },
                 # S-09 内存看门狗状态（未启用时 enabled=false 显式呈现）。
                 "watchdog": (
-                    self.watchdog.snapshot()
-                    if getattr(self, "watchdog", None) is not None
-                    else {"enabled": False}
+                    self.watchdog.snapshot() if self.watchdog is not None else {"enabled": False}
                 ),
                 # S-20 磁盘水位看门狗状态（未启用时 enabled=false 显式呈现）。
                 "disk_space": (
                     self.disk_watchdog.snapshot()
-                    if getattr(self, "disk_watchdog", None) is not None
+                    if self.disk_watchdog is not None
                     else {"enabled": False}
                 ),
             }

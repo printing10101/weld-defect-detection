@@ -234,6 +234,7 @@ def test_secadmin_cannot_approve_own_request():
             assert approve.status_code == 409
             assert approve.json()["detail"]["code"] == "SELF_APPROVAL"
             # 状态必须仍是 pending（未产生审批事实）
-            assert reg.export_store.get(request_id)["status"] == "pending"
+            row = reg.export_store.get(request_id)
+            assert row is not None and row["status"] == "pending"
     finally:
         reg.config.export.require_approval = original

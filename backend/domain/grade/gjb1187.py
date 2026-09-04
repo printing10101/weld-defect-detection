@@ -48,7 +48,7 @@ class Gjb1187Grader(StandardGrader):
         for d in defects or []:
             if d.class_id.name in ZERO_TOLERANCE_CLASSES:
                 out["zero_tolerance"].append(d)
-            elif d.shape.value == "round":
+            elif d.shape is not None and d.shape.value == "round":
                 out["round"].append(d)
             else:
                 out["linear"].append(d)
