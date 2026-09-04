@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from backend.app.batch_queue import BatchItem
 from backend.app.dependencies import Registry, get_operator_name, get_registry
+from backend.infra.config import resolve_config_path
 
 router = APIRouter(tags=["batch"])
 
@@ -120,7 +121,7 @@ def submit_batch(
             )
 
     # 批次专属暂存目录：任务完成后由 BatchManager 统一清理（P1-3）
-    batch_dir = Path(reg.config.paths.tmp_dir) / f"batch_{uuid.uuid4().hex}"
+    batch_dir = resolve_config_path(reg.config.paths.tmp_dir) / f"batch_{uuid.uuid4().hex}"
     batch_dir.mkdir(parents=True, exist_ok=True)
 
     # actor = 提交批次的操作员（X-Operator-Name）；signer 缺省回填为操作员。

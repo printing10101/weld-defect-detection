@@ -697,7 +697,7 @@ class InspectionPipeline:
         }
 
     def _persist_image(self, src: Path, image_id: str, suffix: str) -> Path:
-        images_dir = Path(self._reg.config.paths.images_dir)
+        images_dir = Path(resolve_config_path(self._reg.config.paths.images_dir))
         images_dir.mkdir(parents=True, exist_ok=True)
         dest = images_dir / f"{image_id}{suffix}"
         # 静态加密：encrypt=True（默认）时影像副本以 SDC2 国密信封落盘，

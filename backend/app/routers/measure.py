@@ -18,6 +18,29 @@ from backend.domain.measure.image_quality import measure_duplex_wire, measure_sn
 router = APIRouter(tags=["measure"])
 
 
+def _checked_bytes(image: UploadFile) -> bytes:
+    """读取上传内容并强制大小限额（与 _common.staged_upload 同口径）。
+
+    此前 image.file.read() 无上限整读，200MB 限额可被绕过（内存 DoS 面）。
+    """
+    from backend.infra.config import load_config
+
+    max_bytes = load_config().upload.max_bytes
+    size = image.size
+    if size is not None and size > max_bytes:
+        raise HTTPException(
+            413,
+            detail={"code": "FILE_TOO_LARGE", "message": f"文件超过大小上限 {max_bytes} 字节"},
+        )
+    content = image.file.read()
+    if len(content) > max_bytes:
+        raise HTTPException(
+            413,
+            detail={"code": "FILE_TOO_LARGE", "message": f"文件超过大小上限 {max_bytes} 字节"},
+        )
+    return content
+
+
 def _decode(gray_depth: bool, content: bytes) -> np.ndarray:
     """字节流 → 灰度数组（np.fromfile 解码，规避 Windows 非 ASCII 路径问题）。"""
     arr = np.frombuffer(content, dtype=np.uint8)
@@ -56,7 +79,7 @@ def snr_endpoint(
     roi: Annotated[str | None, Form()] = None,
 ) -> dict:
     """SNRn 测量。srb_mm 建议用双丝测量结果；缺省用像素尺寸保守估计（偏严）。"""
-    content = image.file.read()
+    content = _checked_bytes(image)
     img = _decode(gray_depth=True, content=content)
     win = _parse_roi(roi, img.shape)
     if win is not None:
@@ -78,7 +101,7 @@ def duplex_wire_endpoint(
     roi: Annotated[str | None, Form()] = None,
 ) -> dict:
     """双丝像质计空间分辨率：ROI 对准双丝组，wire_axis_deg 为丝方向角（度）。"""
-    content = image.file.read()
+    content = _checked_bytes(image)
     img = _decode(gray_depth=True, content=content)
     win = _parse_roi(roi, img.shape)
     if win is not None:

@@ -711,7 +711,7 @@ def validate_config_against_schema(raw: dict) -> list[str]:
 
 # 安装根目录锚点：backend/infra/config.py -> parents[2] = 安装根目录
 # （与 dependencies._INSTALL_ROOT / model_store._INSTALL_ROOT 同源，用于相对路径配置落盘）
-_INSTALL_ROOT = Path(__file__).resolve().parents[2]
+from backend.infra.paths import INSTALL_ROOT as _INSTALL_ROOT
 
 
 def resolve_config_path(p: str) -> Path:

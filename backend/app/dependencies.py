@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 from pathlib import Path
@@ -24,9 +23,10 @@ from backend.domain.interfaces import DefectDetector, Reporter, StandardGrader
 from backend.domain.preprocess.pipeline import OpencvPreprocessor
 from backend.domain.standards.tables.loader import load_standard_tables, set_default_table_source
 from backend.domain.sync import LocalAdapter
-from backend.infra.config import AppConfig, ensure_runtime_dirs, load_config
+from backend.infra.config import AppConfig, ensure_runtime_dirs, load_config, resolve_config_path
 from backend.infra.model_registry import ModelEntry, ModelRegistry
 from backend.infra.model_store import LocalModelStore
+from backend.infra.paths import resolve_model_uri as _resolve_model_uri
 from backend.infra.repository import InspectionRepository
 from backend.infra.standards.tables_source import FileTableSource
 
@@ -37,43 +37,14 @@ if TYPE_CHECKING:
 
 _LOG = logging.getLogger("scandetection.dependencies")
 
-# 安装根目录锚点：backend/app/dependencies.py -> parents[2] = 安装根目录
-_INSTALL_ROOT = Path(__file__).resolve().parents[2]
-# backend 包根目录锚点：parents[1] = backend/。
-# Tauri 打包时模型随 ``backend`` 资源一同分发，落在 <安装目录>/backend/models/weights/，
-# 而非安装根目录下的 models/weights；解析时回退到此处，避免找不到权重而静默降级。
-_BACKEND_ROOT = Path(__file__).resolve().parents[1]
-
-
-def _resolve_model_uri(uri: str) -> str:
-    """将配置中的相对模型路径解析为绝对路径。
-
-    依次尝试以下锚点（任一存在即采用），保证 dev 与打包两种布局都能命中权重：
-      1. 安装根目录（dev/repo 布局：``<root>/models/weights/...``）
-      2. backend 包根目录（Tauri 打包布局：``<root>/backend/models/weights/...``，
-         模型随 backend 资源分发，而非安装根目录下的 models/weights）
-    否则回退相对当前工作目录（启动脚本以安装根目录为 CWD 的场景），
-    最后保持原样以便报出原始路径错误。
-    """
-    if os.path.isabs(uri):
-        return uri
-    for anchor in (_INSTALL_ROOT, _BACKEND_ROOT):
-        candidate = anchor / uri
-        if candidate.exists():
-            return str(candidate)
-    if os.path.exists(uri):
-        return uri
-    return uri
-
 
 def _resolve_path(p: str) -> str:
-    """将配置中的相对路径解析为绝对路径（锚定安装根目录，避免受 CWD 影响）。"""
-    if os.path.isabs(p):
-        return p
-    root_candidate = _INSTALL_ROOT / p
-    if root_candidate.exists():
-        return str(root_candidate)
-    return p
+    """将配置中的相对路径解析为绝对路径（恒锚定安装根，不受 CWD 影响）。
+
+    历史"存在才锚定"语义已废除：相对路径一律解析为 ``<安装根>/<p>``——
+    旧语义在 CWD≠安装根（打包启动）时会把新建路径落到错误位置。
+    """
+    return str(resolve_config_path(p))
 
 
 class ResilientDetector:
