@@ -54,8 +54,12 @@ def client(tmp_path: Path, monkeypatch, eval_result) -> TestClient:
         return p
 
     app.dependency_overrides[_auth.get_principal] = _fake_principal
+    # 隔离：评价产物/人员记录用环境变量指向 tmp（生产代码已废除 CWD 相对解析，
+    # chdir 隔离不再有效——这正是本次路径统一要消除的语义）
     eval_dir = tmp_path / "data" / "eval"
     eval_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("SCAN_STD_EVAL__EVAL_DIR", str(eval_dir))
+    monkeypatch.setenv("SCAN_STD_EVAL__PERSONNEL_PATH", str(eval_dir / "std_personnel.json"))
     eval_json = eval_dir / "std_eval.json"
     eval_json.write_text(
         json.dumps(
@@ -71,7 +75,6 @@ def client(tmp_path: Path, monkeypatch, eval_result) -> TestClient:
         ),
         encoding="utf-8",
     )
-    monkeypatch.chdir(tmp_path)
     return TestClient(app)
 
 
@@ -126,7 +129,7 @@ def test_record_includes_labeling_consensus(client: TestClient, tmp_path: Path) 
     r = client.post(
         "/std-eval/record",
         json={
-            "eval_result_path": "data/eval/std_eval.json",
+            "eval_result_path": str(tmp_path / "data" / "eval" / "std_eval.json"),
             "system_name": "s",
             "system_version": "v",
             "developer": "d",
@@ -146,10 +149,13 @@ def test_record_includes_labeling_consensus(client: TestClient, tmp_path: Path) 
     assert saved["labeling_consensus"]["accepted"] == 1
 
 
-def test_record_without_consensus_has_no_block(client: TestClient) -> None:
+def test_record_without_consensus_has_no_block(client: TestClient, tmp_path) -> None:
     r = client.post(
         "/std-eval/record",
-        json={"eval_result_path": "data/eval/std_eval.json", "system_name": "s"},
+        json={
+            "eval_result_path": str(tmp_path / "data" / "eval" / "std_eval.json"),
+            "system_name": "s",
+        },
     )
     assert r.status_code == 200
     assert "labeling_consensus" not in r.json()

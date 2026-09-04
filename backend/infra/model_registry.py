@@ -20,7 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # backend/infra/model_registry.py -> parents[2] = 安装根目录（项目根 / 部署包根）
-_INSTALL_ROOT = Path(__file__).resolve().parents[2]
+from backend.infra.paths import INSTALL_ROOT as _INSTALL_ROOT
+
 _SUFFIXES = (".onnx", ".pt", ".pth")
 
 

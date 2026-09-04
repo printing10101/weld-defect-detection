@@ -67,9 +67,3 @@ def ensure_token(data_dir: str | Path) -> str:
         if _holder is not None and _holder[0] == key:
             return _holder[1]
     return issue_token(data_dir)
-
-
-def current_token() -> str | None:
-    """当前进程令牌（未签发 → None）。"""
-    with _holder_lock:
-        return _holder[1] if _holder is not None else None

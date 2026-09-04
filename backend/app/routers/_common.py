@@ -14,26 +14,11 @@ from pathlib import Path
 from typing import NoReturn
 
 from fastapi import HTTPException, UploadFile
-from fastapi.responses import JSONResponse
 
 from backend.infra.config import AppConfig
 from backend.infra.fs import secure_temp_dir
 
 _CHUNK = 1 << 20  # 1 MiB 分块读取，避免整文件驻留内存
-
-
-def not_implemented(stage: str) -> JSONResponse:
-    """骨架期占位：返回 501 并标注计划实现里程碑。"""
-    return JSONResponse(
-        {
-            "error": {
-                "code": "NOT_IMPLEMENTED",
-                "message": f"planned in {stage}",
-                "detail": None,
-            }
-        },
-        status_code=501,
-    )
 
 
 def _reject(status: int, code: str, message: str) -> NoReturn:

@@ -19,38 +19,15 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 _LOG = logging.getLogger("scandetection.batch")
-
-
-@contextmanager
-def _native_delete_scope():
-    """临时用 Windows 原生删除替换 os.unlink/os.remove，退出即还原。
-
-    绕 safe-delete shim（仅删本批次暂存目录），但限定作用域、不再进程级
-    永久覆盖，避免污染审计/仓储等其它删除路径。非 Windows 下不替换。
-    """
-    try:
-        import nt  # Windows 原生删除
-    except ImportError:
-        yield
-        return
-    saved_unlink, saved_remove = os.unlink, os.remove
-    os.unlink = getattr(nt, "unlink", os.unlink)
-    os.remove = getattr(nt, "remove", os.remove)
-    try:
-        yield
-    finally:
-        os.unlink, os.remove = saved_unlink, saved_remove
 
 
 @dataclass
@@ -304,7 +281,6 @@ class BatchManager:
         （原图供 retry 重跑），仅当全部任务成功/已处理完才整体清理。
         只删本批次自身记录的 cleanup_dirs（提交时登记的批次专属目录），
         越界路径一律跳过；删除失败仅告警（快照已持久化，不阻断）。
-        注：用原生删除绕 safe-delete shim（只删自己生成的暂存文件，无外部风险）。
         """
         retryable = {"failed", "cancelled"}
         if any(t.get("status") in retryable for t in batch.get("tasks", [])):
@@ -313,19 +289,18 @@ class BatchManager:
                 batch["batch_id"],
             )
             return
-        with _native_delete_scope():
-            import shutil as _sh
+        import shutil as _sh
 
-            for raw in batch.get("cleanup_dirs", []):
-                path = Path(raw)
-                # 安全护栏：仅允许删除本批次登记的目录，且必须是目录
-                if not path.is_dir():
-                    continue
-                try:
-                    _sh.rmtree(str(path), ignore_errors=True)
-                    _LOG.info("batch staging cleaned: %s", path)
-                except OSError as exc:
-                    _LOG.warning("batch staging cleanup failed %s: %s", path, exc)
+        for raw in batch.get("cleanup_dirs", []):
+            path = Path(raw)
+            # 安全护栏：仅允许删除本批次登记的目录，且必须是目录
+            if not path.is_dir():
+                continue
+            try:
+                _sh.rmtree(str(path), ignore_errors=True)
+                _LOG.info("batch staging cleaned: %s", path)
+            except OSError as exc:
+                _LOG.warning("batch staging cleanup failed %s: %s", path, exc)
 
     def _maybe_evict_excess(self) -> None:
         """内存保留上限（S-*）：驱逐最旧的"已终结且无失败/取消任务"批次。

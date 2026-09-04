@@ -205,3 +205,36 @@ def _to_uint8(arr: np.ndarray) -> np.ndarray:
     else:
         arr = np.zeros_like(arr, dtype=np.float32)
     return arr.astype(np.uint8)
+
+
+def read_gray(image_path: str) -> np.ndarray | None:
+    """以 unicode 安全方式读取灰度图（cv2.imread 在中文路径上会失败）。
+
+    静态加密兼容：影像副本可能为国密密文（SM4，魔数 b"SDC2"）或历史
+    AES-256-GCM 密文（b"SDC1"），检测到任一魔数则解密后再解码；明文旧
+    数据直接解码。密钥缺失/解密失败时返回 None（调用方降级，不抛 500）。
+
+    分层说明：原为 pdf_reporter 私有函数 _read_gray，records/report 等
+    路由跨层 import 私有符号，故提升为 image_loader 公有 API。
+    """
+    try:
+        with open(image_path, "rb") as fh:
+            buf = fh.read()
+    except OSError:
+        return None
+    if not buf:
+        return None
+    # C-01 国密化：新副本 SDC2（SM4-CTR+HMAC-SM3），存量副本 SDC1（AES-GCM）
+    if buf.startswith((b"SDC2", b"SDC1")):
+        try:
+            from backend.infra.crypto import AesCrypto, CryptoKeyError
+
+            try:
+                cipher = AesCrypto()
+            except CryptoKeyError:
+                return None
+            buf = cipher.decrypt(buf)
+        except Exception:  # noqa: BLE001  # 解密失败（密钥不符/密文损坏）→ 读图降级
+            return None
+    arr = np.frombuffer(buf, dtype=np.uint8)
+    return cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)

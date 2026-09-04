@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from backend.app.dependencies import Registry, get_registry
 from backend.infra.diconde import parse_diconde_file
-from backend.infra.reporting.pdf_reporter import _read_gray
+from backend.infra.image_loader import read_gray as _read_gray
 
 router = APIRouter(tags=["records"])
 

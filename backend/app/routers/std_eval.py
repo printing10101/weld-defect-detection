@@ -15,7 +15,6 @@ from __future__ import annotations
 import csv
 import io
 import json
-import os
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -75,14 +74,11 @@ class RecordIn(BaseModel):
 
 
 def _personnel_path() -> Path:
-    p = load_config().std_eval.personnel_path
-    return Path(p if os.path.isabs(p) else Path.cwd() / p)
+    return resolve_config_path(load_config().std_eval.personnel_path)
 
 
 def _load_eval_result(rel_path: str) -> dict[str, Any]:
-    p = Path(rel_path)
-    if not p.is_absolute():
-        p = Path.cwd() / rel_path
+    p = resolve_config_path(rel_path)
     if not p.is_file():
         raise HTTPException(
             404,
@@ -135,9 +131,7 @@ def create_record(body: RecordIn) -> dict[str, Any]:
         people=people,
         consensus=body.consensus or payload.get("consensus"),
     )
-    out_dir = Path(cfg.eval_dir)
-    if not out_dir.is_absolute():
-        out_dir = Path.cwd() / out_dir
+    out_dir = resolve_config_path(cfg.eval_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{body.record_name}.json"
     out.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -155,9 +149,7 @@ def get_record_pdf(
     """附录A 记录表 PDF 导出（C-14 受控：需导出审批/令牌）。"""
     ensure_export_allowed(f"std_eval:record_pdf:{record_name}", request, principal, reg)
     cfg = load_config().std_eval
-    out_dir = Path(cfg.eval_dir)
-    if not out_dir.is_absolute():
-        out_dir = Path.cwd() / out_dir
+    out_dir = resolve_config_path(cfg.eval_dir)
     record_path = out_dir / f"{record_name}.json"
     if not record_path.is_file():
         raise HTTPException(404, f"评价记录不存在: {record_name}（先 POST /std-eval/record）")
@@ -239,15 +231,11 @@ class EvidenceIn(BaseModel):
 @router.post("/std-eval/evidence/{record_id}")
 def create_evidence(record_id: str, body: EvidenceIn) -> dict[str, Any]:
     """生成"标注原图 vs 系统识别图"对照证据图与 manifest（落 eval_dir/evidence）。"""
-    film = Path(body.film_path)
-    if not film.is_absolute():
-        film = Path.cwd() / film
+    film = resolve_config_path(body.film_path)
     if not film.is_file():
         raise HTTPException(404, f"底片不存在: {body.film_path}")
     cfg = load_config().std_eval
-    out_dir = Path(cfg.eval_dir)
-    if not out_dir.is_absolute():
-        out_dir = Path.cwd() / out_dir
+    out_dir = resolve_config_path(cfg.eval_dir)
     try:
         manifest = build_evidence(
             record_id=record_id,
@@ -291,15 +279,20 @@ def export_false_reports(
     request: Request,
     reg: Annotated[Registry, Depends(get_registry)],
     principal: Annotated[Principal, Depends(get_principal)],
-    eval_result_path: str = "data/eval/std_eval.json",
+    eval_result_path: str | None = None,
     fmt: str = "json",
 ) -> Response:
     """导出误报底片清单（id+路径+误报框数；run_std_eval 产出）。fmt=json|csv。
 
     C-14 受控导出：需导出审批/令牌；C-10 密级管控：清单附加 secret_level 列，
     且含秘密/机密（≥2）底片时直接拒绝导出（高密级底片信息不出系统）。
+    缺省取配置 eval_dir 下的 std_eval.json（相对路径恒锚定安装根，不受 CWD 影响）。
     """
     ensure_export_allowed("std_eval:false_reports", request, principal, reg)
+    if eval_result_path is None:
+        eval_result_path = str(
+            resolve_config_path(load_config().std_eval.eval_dir) / "std_eval.json"
+        )
     payload = _load_eval_result(eval_result_path)
     films = []
     for f in payload.get("false_report_films", []):
