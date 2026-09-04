@@ -23,8 +23,9 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 _LOG = logging.getLogger("scandetection.watchdog")
 
@@ -39,7 +40,7 @@ def sample_rss_mb() -> tuple[float, str]:
         return float(psutil.Process().memory_info().rss) / (1024 * 1024), "psutil"
     except ImportError:
         pass
-    except Exception:  # noqa: BLE001 - psutil 异常走回退
+    except Exception:  # noqa: BLE001, S110 - psutil 异常走回退
         pass
     if os.name == "nt":
         try:
@@ -77,7 +78,7 @@ def sample_rss_mb() -> tuple[float, str]:
             handle = kernel32.GetCurrentProcess()
             if psapi.GetProcessMemoryInfo(handle, ctypes.byref(pmc), pmc.cb):
                 return float(pmc.WorkingSetSize) / (1024 * 1024), "ctypes-psapi"
-        except Exception:  # noqa: BLE001 - 尽力采样，失败不致命
+        except Exception:  # noqa: BLE001, S110 - 尽力采样，失败不致命
             pass
     else:
         try:
@@ -88,7 +89,7 @@ def sample_rss_mb() -> tuple[float, str]:
             if sys_platform() == "darwin":
                 return peak / (1024 * 1024), "resource-peak"
             return peak / 1024.0, "resource-peak"
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110 - 尽力采样，失败不致命
             pass
     return -1.0, "unavailable"
 

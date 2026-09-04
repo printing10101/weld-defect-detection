@@ -147,7 +147,7 @@ def _imread_fallback(p: Path) -> np.ndarray | None:
     for decoder in (_decode_imageio, _decode_pillow):
         try:
             arr = decoder(p)
-        except Exception:  # noqa: BLE001 — 单个解码器失败继续尝试下一个
+        except Exception:  # noqa: BLE001, S112 — 单个解码器失败继续尝试下一个
             continue
         if arr is None:
             continue

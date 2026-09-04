@@ -246,9 +246,7 @@ def _check_report_signature(rep: dict, recomputed: str) -> SignatureCheckOut:
             public_key=sidecar.get("public_key"),
             reason="invalid_sidecar",
         )
-    ok = _sm2_verify(
-        sidecar["public_key"], sidecar["signature"], fingerprint.encode("utf-8")
-    )
+    ok = _sm2_verify(sidecar["public_key"], sidecar["signature"], fingerprint.encode("utf-8"))
     if ok and fingerprint != recomputed:
         # 拼包防护：签名本身有效，但签的对象不是当前内容指纹
         return SignatureCheckOut(

@@ -318,7 +318,9 @@ class ExportRequestRecord(Base):
     __tablename__ = "export_requests"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    subject: Mapped[str] = mapped_column(String(128), index=True)  # report:{id} | std_eval:false_reports ...
+    subject: Mapped[str] = mapped_column(
+        String(128), index=True
+    )  # report:{id} | std_eval:false_reports ...
     reason: Mapped[str | None] = mapped_column(Text, default=None)
     requested_by: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(

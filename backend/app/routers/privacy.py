@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
@@ -28,9 +28,7 @@ class PrivacyAuditIn(BaseModel):
 @router.post("/audit")
 async def run_privacy_audit(
     reg: Annotated[Registry, Depends(get_registry)],
-    principal: Annotated[
-        Principal, Depends(require_role("sysadmin", "secadmin", "auditor"))
-    ],
+    principal: Annotated[Principal, Depends(require_role("sysadmin", "secadmin", "auditor"))],
     body: PrivacyAuditIn | None = None,
 ) -> dict[str, Any]:
     """运行脱敏残留扫描（缺省目录=影像库），生成 JSON+PDF 报告并留痕。"""

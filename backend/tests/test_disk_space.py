@@ -12,13 +12,10 @@
 
 from __future__ import annotations
 
-import threading
-
 import pytest
 
-from backend.infra import disk_space
-from backend.infra.disk_space import DiskWatchdog, sample_disk_usage
 from backend.infra.config import DiskSpaceCfg, load_config
+from backend.infra.disk_space import DiskWatchdog, sample_disk_usage
 
 _GB = 1024 * 1024 * 1024
 _TOTAL = 512 * _GB  # 512 GiB 模拟分区别太大
@@ -83,8 +80,8 @@ def test_low_absolute_bytes_triggers_alert():
         data_dir="data",
         sampler=lambda: (int(0.2 * _GB), _TOTAL),
     )
-    wd._raise_alert = lambda **kw: alerts.append(kw)  # noqa: SLF001
-    wd._append_audit = lambda **kw: audits.append(kw)  # noqa: SLF001
+    wd._raise_alert = lambda **kw: alerts.append(kw)
+    wd._append_audit = lambda **kw: audits.append(kw)
     wd.check_once()
     assert len(alerts) == 1 and alerts[0]["kind"] == "disk_space_low"
 
@@ -98,10 +95,10 @@ def test_continuous_low_alert_once_then_recoverable():
     assert wd.snapshot()["breach_count"] == 3
 
     # 模拟回升：换回高水位采样器后再次低水位应可重新告警。
-    wd._sampler = lambda: (200 * _GB, _TOTAL)  # noqa: SLF001 - 测试注入
+    wd._sampler = lambda: (200 * _GB, _TOTAL)
     wd.check_once()  # 回落
     alerts.clear()
-    wd._sampler = lambda: (30 * _GB, _TOTAL)  # noqa: SLF001
+    wd._sampler = lambda: (30 * _GB, _TOTAL)
     wd.check_once()  # 再次低水位
     assert len(alerts) == 1
 
@@ -123,7 +120,7 @@ def test_sample_failure_no_alert_no_crash():
 
 
 def test_start_stop_lifecycle_and_snapshot_enabled(tmp_path):
-    wd, alerts, _ = _make_wd(free=30 * _GB)
+    wd, _alerts, _ = _make_wd(free=30 * _GB)
     assert wd.snapshot()["enabled"] is False
     wd.start()
     assert wd.snapshot()["enabled"] is True

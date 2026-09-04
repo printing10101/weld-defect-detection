@@ -146,7 +146,9 @@ class PdfReporter:
         self._out.mkdir(parents=True, exist_ok=True)
         self._font = _register_font()
 
-    def build(self, image_id: str, template: str = "standard", gray=None, witness: str | None = None) -> str:
+    def build(
+        self, image_id: str, template: str = "standard", gray=None, witness: str | None = None
+    ) -> str:
         """生成 PDF/A-1b 报告，返回绝对路径。image_id 不存在抛 ValueError。
 
          数字签名：按报告关键字段计算内容指纹（SHA-256），写入 PDF 页脚
@@ -492,6 +494,8 @@ def classification_label(secret_level: int) -> str:
     """密级数值 → 页面横标文本（C-10）；非密（0）返回空串（不绘制横标）。"""
     level = int(secret_level or 0)
     return _SECRET_LEVEL_NAMES.get(level, "") if level > 0 else ""
+
+
 _QUALITY_DOC_NO = "SD-RT-R01-1.00"  # 质量文件编号（版式占位）
 _RT_LEVEL = "RT-Ⅱ"  # 评片/审核人员资格级别（版式占位）
 _ROMAN = {"I": "Ⅰ", "II": "Ⅱ", "III": "Ⅲ", "IV": "Ⅳ"}
@@ -552,9 +556,7 @@ class _ReportCanvas(pdfcanvas.Canvas):
             self.saveState()
             self.setFont(self._chrome_font, 12)
             self.setFillColor(colors.red)
-            self.drawCentredString(
-                _PAGE_W / 2.0, _PAGE_H - 16, f"密级：{self._classification}"
-            )
+            self.drawCentredString(_PAGE_W / 2.0, _PAGE_H - 16, f"密级：{self._classification}")
             self.restoreState()
         if page < _CONTENT_START_PAGE:
             return
@@ -568,9 +570,7 @@ class _ReportCanvas(pdfcanvas.Canvas):
         self.drawCentredString(_PAGE_W / 2.0, 22, f"第{n}页 共{n_total}页")
         if self._classification and self._basis:
             self.setFont(self._chrome_font, 8)
-            self.drawCentredString(
-                _PAGE_W / 2.0, 12, f"定密依据：{self._basis[:80]}"
-            )
+            self.drawCentredString(_PAGE_W / 2.0, 12, f"定密依据：{self._basis[:80]}")
         self.restoreState()
 
 

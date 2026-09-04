@@ -57,7 +57,13 @@ def test_self_check_structure_and_files():
         resp = c.post("/api/v1/compliance/self-check")
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert set(body["categories"]) == {"身份鉴别", "访问控制", "安全审计", "边界防护", "信息流转控制"}
+    assert set(body["categories"]) == {
+        "身份鉴别",
+        "访问控制",
+        "安全审计",
+        "边界防护",
+        "信息流转控制",
+    }
     results = set()
     for items in body["categories"].values():
         assert len(items) >= 3, "每类至少 3 项真实检查"
@@ -114,7 +120,16 @@ def test_crypto_materials_content_and_files():
     assert resp.status_code == 200, resp.text
     body = resp.json()
     md = body["markdown"]
-    for token in ("SM4-CTR", "HMAC-SM3", "SM2", "SM3", "AES-256-GCM", "合规差距声明", "密钥管理", "密码调用链"):
+    for token in (
+        "SM4-CTR",
+        "HMAC-SM3",
+        "SM2",
+        "SM3",
+        "AES-256-GCM",
+        "合规差距声明",
+        "密钥管理",
+        "密码调用链",
+    ):
         assert token in md, f"缺少章节/算法: {token}"
     assert "SCAN_CRYPTO_KEY" in md and "Pkcs11Provider" in md
     assert _files_exist({k: v for k, v in body["files"].items() if k in ("markdown", "pdf")})

@@ -54,9 +54,7 @@ def test_network_status_endpoint():
     assert body["offline_mode"] is True  # 测试环境 sync=local
     assert body["sync_kind"] == "local"
     assert isinstance(body["egress_guard_enabled"], bool)
-    assert body["egress_blocked_events"] == reg.security_store.count_alerts(
-        kind="egress_blocked"
-    )
+    assert body["egress_blocked_events"] == reg.security_store.count_alerts(kind="egress_blocked")
 
 
 def test_network_status_counts_grow_on_block():

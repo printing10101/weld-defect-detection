@@ -154,14 +154,14 @@ def _address_host(address: object) -> tuple[str, int | None] | None:
     return None  # 字节路径（AF_UNIX）等本机 IPC，不属外联
 
 
-def _guarded_socket_connect(sock_self, address):  # noqa: ANN001 - 保持被替换方法签名
+def _guarded_socket_connect(sock_self, address):
     parsed = _address_host(address)
     if parsed is not None and _guard is not None:
         _guard.check(parsed[0], parsed[1], context="socket")
     return _ORIG_SOCKET_CONNECT(sock_self, address)
 
 
-def _guarded_opener_open(opener_self, fullurl, data=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT):  # noqa: ANN001
+def _guarded_opener_open(opener_self, fullurl, data=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT):
     try:
         host = urlsplit(str(getattr(fullurl, "full_url", fullurl))).hostname
     except ValueError:

@@ -45,7 +45,7 @@ def _write_token_file(path: Path, token: str) -> None:
         # POSIX：仅属主可读写；Windows 上此调用被忽略，依赖数据目录继承的
         # 用户级 ACL（其他普通用户默认不可读）——尽力而为，不做强承诺。
         path.chmod(0o600)
-    except OSError as exc:  # noqa: PERF203 - 权限收紧失败不阻断启动
+    except OSError as exc:
         _LOG.warning("IPC 令牌文件权限收紧失败（尽力而为）: %s", exc)
 
 

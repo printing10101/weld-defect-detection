@@ -38,7 +38,9 @@ class SecretLevelOut(BaseModel):
 
 
 @router.get("/levels")
-def levels(_: Annotated[Principal, Depends(require_role("sysadmin", "secadmin", "auditor"))]) -> dict:
+def levels(
+    _: Annotated[Principal, Depends(require_role("sysadmin", "secadmin", "auditor"))],
+) -> dict:
     """密级枚举与语义（C-10）。"""
     return {"levels": [{"level": k, "name": v} for k, v in SECRET_LEVEL_NAMES.items()]}
 
@@ -50,7 +52,9 @@ def get_secret_level(
 ) -> SecretLevelOut:
     image = reg.repository.get_image(image_id)
     if image is None:
-        raise HTTPException(404, detail={"code": "NOT_FOUND", "message": f"image not found: {image_id}"})
+        raise HTTPException(
+            404, detail={"code": "NOT_FOUND", "message": f"image not found: {image_id}"}
+        )
     return SecretLevelOut(
         image_id=image_id,
         secret_level=int(image.get("secret_level") or 0),

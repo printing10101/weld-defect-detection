@@ -120,9 +120,11 @@ class ResilientDetector:
             if self.consecutive_failures >= self._threshold and self._auto_rollback:
                 self.consecutive_failures = 0
                 self.rollback_count += 1
-                from datetime import datetime
+                from datetime import UTC, datetime
 
-                self.last_rollback_at = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+                self.last_rollback_at = (
+                    datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M:%S")
+                )
                 try:
                     self._on_threshold()
                 except Exception as exc:  # noqa: BLE001 - 回退失败不掩盖原始推理异常
@@ -277,9 +279,7 @@ class Registry:
         if dc.kind == "baseline_blob" or dc.baseline_enabled:
             self.detector_kind = "baseline_blob"
             self.detector_degraded = False
-            return self._wrap_resilient(
-                get_detector("baseline_blob", blob_cfg=self._blob_cfg(dc))
-            )
+            return self._wrap_resilient(get_detector("baseline_blob", blob_cfg=self._blob_cfg(dc)))
         # 训练模型检测器（默认）。权重缺失/加载失败按策略处理。
         uri = _resolve_model_uri(self.config.model.default_uri)
         try:
@@ -299,9 +299,7 @@ class Registry:
             _LOG.error("M4b 权重加载失败，已回退 M4a 基线（评级不可用于正式判定）：%s", exc)
             self.detector_kind = "baseline_blob"
             self.detector_degraded = True
-            return self._wrap_resilient(
-                get_detector("baseline_blob", blob_cfg=self._blob_cfg(dc))
-            )
+            return self._wrap_resilient(get_detector("baseline_blob", blob_cfg=self._blob_cfg(dc)))
 
     def _wrap_resilient(self, det: DefectDetector) -> DefectDetector:
         """S-17：以 ResilientDetector 包装检测器，接通告警/审计/回退回调。"""

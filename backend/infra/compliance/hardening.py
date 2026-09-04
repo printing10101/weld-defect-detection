@@ -248,9 +248,11 @@ def unauthenticated_api_routes(app) -> list[str]:
         if any(path.startswith(p) for p in _API_EXEMPT_PREFIXES):
             continue
         deps = _dep_callables(getattr(route, "dependencies", None))
-        deps += [d.call for d in getattr(route, "dependant", None).dependencies] if getattr(
-            route, "dependant", None
-        ) else []
+        deps += (
+            [d.call for d in getattr(route, "dependant", None).dependencies]
+            if getattr(route, "dependant", None)
+            else []
+        )
         authed = any(
             getattr(d, "__module__", "") == "backend.app.auth"
             and (d is get_principal or getattr(d, "__name__", "") == "_dep")
@@ -258,7 +260,9 @@ def unauthenticated_api_routes(app) -> list[str]:
         )
         if not authed:
             methods = getattr(route, "methods", None) or {"GET"}
-            out.append(f"{','.join(sorted(m for m in methods if m not in ('HEAD', 'OPTIONS')))} {path}")
+            out.append(
+                f"{','.join(sorted(m for m in methods if m not in ('HEAD', 'OPTIONS')))} {path}"
+            )
     return out
 
 
@@ -336,7 +340,11 @@ def _check_file_permissions(reg) -> list[dict[str, str]]:
     data_dir = resolve_config_path(reg.config.paths.data_dir)
     db_path = resolve_config_path(reg.config.paths.db_path)
     token_path = data_dir / "ipc_token"
-    targets = [("数据目录", data_dir, True), ("数据库文件", db_path, False), ("IPC 令牌文件", token_path, False)]
+    targets = [
+        ("数据目录", data_dir, True),
+        ("数据库文件", db_path, False),
+        ("IPC 令牌文件", token_path, False),
+    ]
     for label, path, is_dir in targets:
         if not path.exists():
             items.append(
@@ -367,7 +375,11 @@ def _check_file_permissions(reg) -> list[dict[str, str]]:
         group_other_write = bool(mode & (stat.S_IWGRP | stat.S_IWOTH))
         sev, result = ("medium", "fail") if group_other_write else ("low", "pass")
         rec = None if not group_other_write else "收紧权限：移除组/其他用户的写权限（icacls/chmod）"
-        if label == "IPC 令牌文件" and not group_other_write and (mode & (stat.S_IRGRP | stat.S_IROTH)):
+        if (
+            label == "IPC 令牌文件"
+            and not group_other_write
+            and (mode & (stat.S_IRGRP | stat.S_IROTH))
+        ):
             sev, result = "medium", "warning"
             rec = "令牌文件可被本机其他用户读取，收紧为仅当前用户可读"
         items.append(
@@ -401,7 +413,11 @@ def run_hardening_check(reg, app) -> dict[str, Any]:
     for f in findings:
         key = f"{f['severity']}_{f['result']}"
         counts[key] = counts.get(key, 0) + 1
-    overall = "fail" if high_failed else ("warning" if any(f["result"] != "pass" for f in findings) else "pass")
+    overall = (
+        "fail"
+        if high_failed
+        else ("warning" if any(f["result"] != "pass" for f in findings) else "pass")
+    )
     return {
         "generated_at": _now_str(),
         "overall": overall,

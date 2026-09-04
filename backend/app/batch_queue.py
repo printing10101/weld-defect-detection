@@ -380,9 +380,8 @@ class BatchManager:
                 batch = self._batches.get(path)
                 if batch is None:
                     return True
-                return (
-                    batch.get("status") == "finished"
-                    and not any(t.get("status") in retryable for t in batch.get("tasks", []))
+                return batch.get("status") == "finished" and not any(
+                    t.get("status") in retryable for t in batch.get("tasks", [])
                 )
 
             safe = [p for p in files if _is_safe(p.stem)]

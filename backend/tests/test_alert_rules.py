@@ -173,7 +173,9 @@ def test_unread_count_and_ack_flow():
     entries, _ = reg.security_store.list_security_audit(action="alert_ack", limit=10)
     assert any(e["object_id"] == alert_id for e in entries)
     # auditor 亦可 ack（另一条新告警）
-    alert2 = reg.security_store.raise_alert(kind="unauthorized_access", level="warn", message="auditor ack")
+    alert2 = reg.security_store.raise_alert(
+        kind="unauthorized_access", level="warn", message="auditor ack"
+    )
     with principal_role("auditor", username="审计员"), TestClient(app) as c:
         assert c.post(f"/api/v1/alerts/{alert2['alert_id']}/ack").status_code == 200
     # 不存在的告警 404

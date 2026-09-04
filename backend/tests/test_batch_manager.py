@@ -243,7 +243,7 @@ def _seed_finished_snapshots(
             ],
             "created_at": "2026-01-01T00:00:00",
         }
-        with bm._lock:  # noqa: SLF001 - 测试写入
+        with bm._lock:
             bm._batches[bid] = batch
         bm._persist(batch)
         ids.append(bid)
@@ -264,7 +264,7 @@ def test_batch_manager_prunes_old_finished_snapshots(tmp_path: Path) -> None:
     try:
         _seed_finished_snapshots(bm, batch_dir, 6)
         files = sorted(p.name for p in batch_dir.glob("*.json"))
-        assert len(files) == bm._max_snapshot_files == 3  # noqa: SLF001
+        assert len(files) == bm._max_snapshot_files == 3
         # 最旧三个被剪，保留 b0003/b0004/b0005
         assert files == ["b0003.json", "b0004.json", "b0005.json"]
     finally:
@@ -302,12 +302,12 @@ def test_batch_manager_prune_keeps_retryable_snapshots(tmp_path: Path) -> None:
                 ],
                 "created_at": "2026-01-01T00:00:00",
             }
-            with bm._lock:  # noqa: SLF001
+            with bm._lock:
                 bm._batches[bid] = batch
             bm._persist(batch)
         # 保留上限 = 2；r0 含 failed（可重试）必须保留 → 只保留 r0 + 最新的一个安全批次
         names = sorted(p.name for p in batch_dir.glob("*.json"))
         assert "r0.json" in names
-        assert len(names) == bm._max_snapshot_files  # noqa: SLF001
+        assert len(names) == bm._max_snapshot_files
     finally:
         bm.shutdown()

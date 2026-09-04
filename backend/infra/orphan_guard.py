@@ -83,6 +83,7 @@ def _window_probe_snap(pid: int) -> bool:
         if not snap or snap == -1:
             return True  # 快照失败保守判存活
         try:
+
             class _PROCESSENTRY32W(ctypes.Structure):
                 _fields_ = [
                     ("dwSize", wintypes.DWORD),
@@ -138,7 +139,7 @@ def _guard_loop(parent_pid: int, interval_sec: float) -> None:
                 parent_pid,
             )
             # 日志已由 handler 逐条 flush；此处显式退出，即时释放端口/内存。
-            os._exit(0)  # noqa: SLF001 - 无宿主可优雅关停，直接终止进程
+            os._exit(0)
         time.sleep(interval_sec)
 
 
