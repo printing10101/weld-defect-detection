@@ -113,7 +113,7 @@ def test_rejected_film_is_archived_with_ledger_and_audit(tmp_path: Path) -> None
         with pytest.raises(IQIFailError):
             pipe.run_inspection(img, pixel_spacing_mm=0.1, base_metal_thickness_mm=20)
 
-        # 1. 影像副本归档到 rejects 目录（测试环境无密钥 → 明文降级 + 告警）
+        # 1. 影像副本归档到 rejects 目录（经本地密钥文件加密 → SDC2 密文留档）
         rejects_dir = Path(resolve_config_path(reg.config.gate.rejects_dir))
         archived = list(rejects_dir.iterdir())
         assert archived, "被拦截底片应归档留档"
@@ -173,8 +173,6 @@ def test_8bit_degrade_pass_emits_warning(tmp_path: Path) -> None:
     arr[mask] = 55
     img = tmp_path / "film.png"
     imsave(str(img), arr)
-    out = pipe.run_inspection(
-        img, pixel_spacing_mm=0.1, base_metal_thickness_mm=20, force=True
-    )
+    out = pipe.run_inspection(img, pixel_spacing_mm=0.1, base_metal_thickness_mm=20, force=True)
     assert any("降级放行" in w for w in out["warnings"]), "8bit 降级放行必须告警留痕"
     assert any("无法确定扫描分辨率" in w for w in out["warnings"])

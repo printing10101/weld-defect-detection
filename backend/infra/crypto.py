@@ -18,8 +18,12 @@ GF(2^128) 乘法表，gmssl 未实现；故以 SM4-CTR + HMAC-SM3（encrypt-then
 - SDC1（旧，AES-256-GCM）：保留解密路径用于历史数据；新写入一律 SDC2。
 
 密钥分层（软件 provider）：
-- 主密钥：环境变量 SCAN_CRYPTO_KEY（base64/hex 编码 32 字节）。与历史 AES
-  信封共用同一主密钥，保证存量 SDC1 密文仍可解；
+- 主密钥来源（优先级从高到低）：
+  1) 环境变量 SCAN_CRYPTO_KEY（base64/hex 编码 32 字节）——加固部署模式；
+  2) 本地持久密钥文件（SCAN_CRYPTO_KEY_FILE 指定，默认 CWD 相对
+     data/.crypto_key）——桌面单机默认模式：首启生成一次并复用，密文
+     生命周期与该文件绑定（文件在则密文永久可解；文件丢失即不可解，
+     部署须知见下）。与历史 AES 信封共用同一主密钥，保证存量 SDC1 密文仍可解；
 - 数据密钥：主密钥经 SM3 域分离 KDF 派生——
     SM4 密钥 = SM3("sd-kdf-sm4" || master) 前 16 字节（SM4-128）；
     MAC 密钥 = SM3("sd-kdf-mac" || master)（32 字节）；
@@ -33,9 +37,13 @@ GF(2^128) 乘法表，gmssl 未实现；故以 SM4-CTR + HMAC-SM3（encrypt-then
 4KB 约 26ms），SM2 签名约 10ms/次。适合影像副本、报告等落盘数据的一次性
 静态加密；大文件或高并发场景请对接商密密码卡/加速卡（Pkcs11Provider）。
 
-**不提供"找不到密钥就随机生成"的行为**：随机临时密钥会让密文在进程重启后
-永久不可解，属于静默的数据丢失。密钥缺失一律抛 CryptoKeyError，由部署方
-显式用 generate_key 生成并妥善保管。
+**仍不提供"随机临时密钥"**：进程内随机、重启即丢的密钥会让密文永久不可解，
+属于静默的数据丢失。默认模式的本地密钥文件是**持久**的（首启生成一次、
+之后复用），静态加密开箱即生效；对保密性有更高要求的部署应设
+SCAN_CRYPTO_KEY（或对接 Pkcs11Provider）。部署须知：data/.crypto_key 必须
+随 data 目录一并备份、严禁入库/外传；该文件与密文二选一皆不可单独存活。
+密钥完全不可用（env 缺失且密钥文件不可读/不可写）时一律抛 CryptoKeyError，
+由调用方决定拒绝落盘——绝不静默降级明文。
 """
 
 from __future__ import annotations
@@ -43,7 +51,9 @@ from __future__ import annotations
 import base64
 import binascii
 import hmac as _hmac
+import logging
 import os
+from pathlib import Path
 from typing import Protocol
 
 from cryptography.exceptions import InvalidTag
@@ -51,14 +61,18 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from gmssl import func, sm2, sm3
 from gmssl.sm4 import SM4_ENCRYPT, CryptSM4
 
+_LOG = logging.getLogger(__name__)
+
 _KEY_BYTES = 32  # 主密钥长度（与历史 AES-256 信封共用）
 _NONCE_BYTES = 16  # SDC2 CTR 计数器（128bit）
 _MAC_BYTES = 32  # HMAC-SM3 输出长度
 _MAGIC_SM = b"SDC2"  # ScanDetection Crypto v2：国密 SM4-CTR + HMAC-SM3
 _MAGIC_AES = b"SDC1"  # ScanDetection Crypto v1：AES-256-GCM（历史信封）
 _ENV_KEY = "SCAN_CRYPTO_KEY"
+_ENV_KEY_FILE = "SCAN_CRYPTO_KEY_FILE"  # 本地持久密钥文件路径（可选覆盖）
 _ENV_PROVIDER = "SCAN_CRYPTO_PROVIDER"  # soft-sm（默认）| pkcs11
 _ENV_SM2_KEY = "SCAN_SM2_PRIVATE_KEY"  # 可选：显式 SM2 私钥（64 hex）
+_LOCAL_KEY_FILE_REL = Path("data") / ".crypto_key"  # 默认密钥文件（CWD 相对）
 _KDF_SM4 = b"sd-kdf-sm4"
 _KDF_MAC = b"sd-kdf-mac"
 _KDF_SM2 = b"sd-kdf-sm2"
@@ -84,6 +98,57 @@ def _decode_key(raw: str) -> bytes:
         if len(key) == _KEY_BYTES:
             return key
     raise CryptoKeyError(f"{_ENV_KEY} 必须是 base64 或 hex 编码的 {_KEY_BYTES} 字节密钥")
+
+
+def local_key_file() -> Path:
+    """本地持久主密钥文件路径：SCAN_CRYPTO_KEY_FILE 优先，否则 CWD 相对
+    data/.crypto_key（打包版 CWD 即安装根，见 main.rs 的 current_dir 设置）。"""
+    env = os.environ.get(_ENV_KEY_FILE, "").strip()
+    if env:
+        return Path(env)
+    return _LOCAL_KEY_FILE_REL
+
+
+def _load_or_create_local_key() -> bytes:
+    """读取本地持久密钥文件；缺失则生成一次并写入（0600 尽力而为）。
+
+    与"随机临时密钥"的本质区别：文件持久，密文生命周期与其绑定——
+    文件在，密文永久可解；文件丢失 = 数据不可解（须随 data 一并备份，
+    模块 docstring 有部署须知）。生成/读取事件都留日志，部署方可见。
+    并发首启用 O_EXCL 保证单次生成，竞争失败方回读已写入的文件。
+    """
+    path = local_key_file()
+    if path.is_file():
+        try:
+            key = _decode_key(path.read_text(encoding="utf-8"))
+        except (OSError, CryptoKeyError) as exc:
+            raise CryptoKeyError(f"本地密钥文件不可读或内容非法 {path}: {exc}") from None
+        _LOG.info("静态加密：已加载本地主密钥文件 %s", path)
+        return key
+    key = os.urandom(_KEY_BYTES)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(base64.b64encode(key) + b"\n")
+    except FileExistsError:
+        # 并发首启：另一进程已写入密钥文件，回读保证双方一致。
+        # 注意 Windows 上父路径是文件时 mkdir 同样抛 FileExistsError——
+        # 此时密钥文件并不存在，属路径不可用，须报错而非递归回读。
+        if path.is_file():
+            return _load_or_create_local_key()
+        raise CryptoKeyError(f"本地密钥文件路径不可用 {path}") from None
+    except OSError as exc:
+        raise CryptoKeyError(f"本地密钥文件不可写 {path}: {exc}") from None
+    try:
+        os.chmod(path, 0o600)  # Windows ACL 不做强承诺（同 ipc_token 的尽力而为口径）
+    except OSError:
+        pass
+    _LOG.warning(
+        "静态加密：已首启生成主密钥文件 %s（须随 data 目录备份；丢失将导致既有密文不可解）",
+        path,
+    )
+    return key
 
 
 # ---------------------------------------------------------------------------
@@ -169,12 +234,13 @@ class SoftSmProvider:
     def __init__(self, master_key: bytes | None = None) -> None:
         if master_key is None:
             env = os.environ.get(_ENV_KEY)
-            if not env:
-                raise CryptoKeyError(
-                    f"未提供密钥：请设置环境变量 {_ENV_KEY}"
-                    f"（可用 SoftSmProvider.generate_key() 生成）"
-                )
-            master_key = _decode_key(env)
+            if env:
+                master_key = _decode_key(env)
+            else:
+                # 默认部署模式：本地持久密钥文件（首启生成、之后复用）。
+                # env 与密钥文件均不可用时仍抛 CryptoKeyError——由调用方
+                # 决定拒绝落盘，绝不静默降级明文（见模块 docstring）。
+                master_key = _load_or_create_local_key()
         if len(master_key) != _KEY_BYTES:
             raise CryptoKeyError(f"密钥长度必须为 {_KEY_BYTES} 字节，实得 {len(master_key)}")
         self._master = bytes(master_key)
@@ -202,9 +268,7 @@ class SoftSmProvider:
         d_hex = f"{d_int:064x}"
         # 公钥 Q = d·G。gmssl 未公开点乘 API，此处使用其内部 _kg（曲线表即
         # sm2p256v1 标准参数）；正确性由测试中 SM2 签名/验签往返锚定。
-        pub = sm2.CryptSM2(private_key=d_hex, public_key="")._kg(
-            d_int, sm2.default_ecc_table["g"]
-        )
+        pub = sm2.CryptSM2(private_key=d_hex, public_key="")._kg(d_int, sm2.default_ecc_table["g"])
         self._sm2_pub = pub
         self._sm2 = sm2.CryptSM2(private_key=d_hex, public_key=pub)
 
@@ -327,9 +391,7 @@ class Pkcs11Provider:
         slot: str | None = None,
         pin: str | None = None,
     ) -> None:
-        self._library_path = (
-            library_path or os.environ.get(self._LIB_ENV, "").strip()
-        )
+        self._library_path = library_path or os.environ.get(self._LIB_ENV, "").strip()
         self._slot = slot or os.environ.get(self._SLOT_ENV, "").strip() or None
         self._pin = pin or os.environ.get(self._PIN_ENV, "").strip() or None
         if not self._library_path:
@@ -355,9 +417,7 @@ class Pkcs11Provider:
             try:
                 self._lib = pkcs11.lib(self._library_path)
             except Exception as exc:
-                raise CryptoKeyError(
-                    f"PKCS#11 库加载失败：{self._library_path}（{exc}）"
-                ) from exc
+                raise CryptoKeyError(f"PKCS#11 库加载失败：{self._library_path}（{exc}）") from exc
         token = None
         for slot in self._lib.get_slots():
             info = slot.get_token()
@@ -492,9 +552,7 @@ def sm2_generate_keypair() -> tuple[str, str]:
 def sm2_public_from_private(d_hex: str) -> str:
     """由私钥计算 SM2 公钥（Q = d·G，128 hex x||y）。"""
     d_int = int(d_hex, 16)
-    pub = sm2.CryptSM2(private_key=d_hex, public_key="")._kg(
-        d_int, sm2.default_ecc_table["g"]
-    )
+    pub = sm2.CryptSM2(private_key=d_hex, public_key="")._kg(d_int, sm2.default_ecc_table["g"])
     return pub
 
 

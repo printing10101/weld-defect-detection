@@ -219,8 +219,15 @@ def test_report_sm2_signature_swapped_fingerprint_detected(tmp_path, monkeypatch
 
 
 def test_report_sm2_signature_missing_is_legacy(tmp_path, monkeypatch) -> None:
-    """未配置密钥（无 sidecar）→ signature.valid=null，指纹校验不受影响。"""
-    monkeypatch.delenv("SCAN_CRYPTO_KEY", raising=False)
+    """历史件口径（报告无签名 sidecar）→ signature.valid=null，指纹校验不受影响。
+
+    注：不可再用"未配置密钥"制造该场景——静态加密 fail-closed 后，密钥
+    完全不可用会直接阻断出片（见 test_persist_refuses_plaintext_when_key_unavailable）。
+    这里直接短路签名函数，模拟存量无签名报告。
+    """
+    import backend.infra.reporting.pdf_reporter as reporter_mod
+
+    monkeypatch.setattr(reporter_mod, "report_signature", lambda _fp: None)
     path = _make_film(tmp_path)
     with TestClient(app) as client:
         report = _post_report(client, path)

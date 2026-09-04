@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from fastapi import Request  # noqa: TCH002 - 须在模块级：get_type_hints 解析 override 注解需要
+from fastapi import Request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -69,6 +69,9 @@ def _test_env(auth_table: Path) -> None:
     os.environ.setdefault("SCAN_GATE__ALLOW_8BIT", "true")
     # 留档目录同步隔离（默认 data/rejects 相对安装根目录，会写进项目 data/）
     os.environ.setdefault("SCAN_GATE__REJECTS_DIR", str(_TMP_ROOT / "rejects"))
+    # 静态加密本地密钥文件同步隔离（默认 CWD 相对 data/.crypto_key，会写进
+    # 项目 data/ 且跨测试共享密钥状态）；各测试可用 monkeypatch 覆盖做专项。
+    os.environ.setdefault("SCAN_CRYPTO_KEY_FILE", str(_TMP_ROOT / "crypto_key"))
     # C-14 导出管控默认按生产开启（require_approval=true）；既有 28 个测试
     # 文件直接 TestClient(app) 且以 sysadmin 注入身份，为避免整组测试被
     # 审批门禁误杀，这里放宽为 false；真实审批流由 test_export_control
