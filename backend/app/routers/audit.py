@@ -10,16 +10,15 @@ GET /api/v1/audit/export（C-20）：把主链 + 安全链全量导出为只追�
 
 from __future__ import annotations
 
-import json
-from collections.abc import Iterator
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel
 
 from backend.app.auth import Principal, require_role
 from backend.app.dependencies import Registry, get_registry
+from backend.infra.audit_export import build_audit_export
 
 router = APIRouter(tags=["audit"])
 
@@ -193,94 +192,6 @@ def audit_operations(
     )
 
 
-# ---------------------------------------------------------------------------
-# 审计归档导出（C-20）：主链 + 安全链全量只追加 JSONL 归档。
-# ---------------------------------------------------------------------------
-
-# list_audit/list_security_audit 单页上限 500；全量导出按 offset 翻页取整链。
-_EXPORT_PAGE = 500
-
-
-def _iter_full_chain(list_fn, total: int) -> Iterator[dict[str, Any]]:
-    """按页取完整审计链（列表接口按 seq 降序，这里还原为 seq 升序输出）。"""
-    fetched: list[dict[str, Any]] = []
-    offset = 0
-    while offset < total:
-        page, _ = list_fn(limit=_EXPORT_PAGE, offset=offset)
-        if not page:
-            break
-        fetched.extend(page)
-        offset += len(page)
-    fetched.reverse()  # 降序 → 升序（归档件按链序只追加）
-    yield from fetched
-
-
-def build_audit_export(reg: Registry, actor: str) -> tuple[str, dict[str, Any]]:
-    """构造审计归档 JSONL（C-20）。
-
-    行格式（每行一个 JSON 对象，只追加语义、按链序排列）：
-    - 首行 header：导出元数据（时间/操作者/两条链的整链校验结论/总条数）；
-    - 记录行：{"type":"record","chain":"main"|"security","seq":n,
-      "record":{...},"chain_valid":<该链整链校验结论>}；
-    - 末行 footer：两条链的条数与校验结论汇总（供归档校验程序核对）。
-    返回 (jsonl 文本, footer dict)。
-    """
-    main_valid = reg.repository.verify_chain()
-    sec_valid = reg.security_store.verify_security_chain()
-    main_entries, main_total = reg.repository.list_audit(limit=_EXPORT_PAGE, offset=0)
-    del main_entries
-    sec_entries, sec_total = reg.security_store.list_security_audit(limit=_EXPORT_PAGE, offset=0)
-    del sec_entries
-
-    now = datetime.now(UTC).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
-    lines: list[str] = [
-        json.dumps(
-            {
-                "type": "export_header",
-                "format": "scandetection-audit-export/1",
-                "exported_at": now,
-                "exported_by": actor,
-                "main_chain_total": main_total,
-                "security_chain_total": sec_total,
-                "main_chain_valid": main_valid,
-                "security_chain_valid": sec_valid,
-            },
-            ensure_ascii=False,
-        )
-    ]
-    for chain, entries, valid in (
-        ("main", _iter_full_chain(reg.repository.list_audit, main_total), main_valid),
-        (
-            "security",
-            _iter_full_chain(reg.security_store.list_security_audit, sec_total),
-            sec_valid,
-        ),
-    ):
-        for e in entries:
-            lines.append(
-                json.dumps(
-                    {
-                        "type": "record",
-                        "chain": chain,
-                        "seq": e["seq"],
-                        "record": e,
-                        "chain_valid": valid,
-                    },
-                    ensure_ascii=False,
-                )
-            )
-    footer = {
-        "type": "export_footer",
-        "main_chain_total": main_total,
-        "security_chain_total": sec_total,
-        "main_chain_valid": main_valid,
-        "security_chain_valid": sec_valid,
-        "exported_at": now,
-    }
-    lines.append(json.dumps(footer, ensure_ascii=False))
-    return "\n".join(lines) + "\n", footer
-
-
 @router.get("/audit/export")
 def audit_export(
     principal: Annotated[Principal, Depends(require_role("auditor"))],
@@ -293,7 +204,7 @@ def audit_export(
     C-19/C-21）。链校验状态是导出时刻的真实快照——导出后链上新增的记录
     不在本归档件中（只追加语义）。
     """
-    body, footer = build_audit_export(reg, principal.username)
+    body, footer = build_audit_export(reg.repository, reg.security_store, principal.username)
     reg.repository.append_audit(
         actor=principal.username,
         action="audit_export",

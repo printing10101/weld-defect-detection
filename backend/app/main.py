@@ -88,7 +88,7 @@ async def lifespan(app: FastAPI):
             ensure_token(resolve_config_path(boot_cfg.paths.data_dir))
         # C-15：离线模式自检结论（静态配置检查，启动日志留痕；非 local 在
         # registry 就绪后补告警入库，见 _init_registry）
-        from backend.app.routers.system import offline_conclusion
+        from backend.infra.offline import offline_conclusion
 
         conclusion = offline_conclusion(boot_cfg)
         if conclusion["offline_mode"]:
@@ -132,6 +132,31 @@ async def lifespan(app: FastAPI):
                 )
         except Exception as exc:  # noqa: BLE001 - 告警失败不阻断装配
             _LOG.warning("sync_nonlocal 告警落库失败: %s", exc)
+        # C-16 egress 阻断记录器：registry 就绪后注入（此前的阻断仅日志留痕；
+        # 注入范式与 watchdog 的 raise_alert/append_audit 一致）。
+        try:
+            from backend.infra.egress_guard import set_block_recorder
+
+            def _record_egress_block(host: str, port: int | None, context: str) -> None:
+                reg.security_store.raise_alert(
+                    kind="egress_blocked",
+                    level="high",
+                    message=f"检测到非白名单外联尝试并已拦截: {host}:{port}",
+                    detail={"host": host, "port": port, "context": context},
+                )
+                reg.repository.append_audit(
+                    actor="system",
+                    action="egress_blocked",
+                    object_type="network",
+                    object_id=f"{host}:{port}" if port else host,
+                    before=None,
+                    after={"host": host, "port": port, "context": context, "blocked": True},
+                    note="C-16 外联防护拦截",
+                )
+
+            set_block_recorder(_record_egress_block)
+        except Exception as exc:  # noqa: BLE001 - 接线失败不阻断装配
+            _LOG.warning("egress block recorder wiring failed: %s", exc)
         # S-09 内存看门狗（默认关）：config.watchdog.enabled=true 时启动后台采样。
         try:
             wc = reg.config.watchdog

@@ -231,7 +231,7 @@ def _dep_callables(deps) -> list:
     return out
 
 
-def unauthenticated_api_routes(app) -> list[str]:
+def unauthenticated_api_routes(app, auth_dep) -> list[str]:
     """枚举无鉴权依赖的 API 路由（C-25 未授权接口扫描）。
 
     判定：路由级依赖（include_router dependencies）或端点签名依赖中出现
@@ -239,8 +239,6 @@ def unauthenticated_api_routes(app) -> list[str]:
     已管控；health/metrics/auth（登录入口本身）豁免。返回 "METHOD path" 列表，
     **应为空集**。
     """
-    from backend.app.auth import get_principal
-
     out: list[str] = []
     for path, route in _iter_effective_api_routes(app):
         if not path.startswith("/api/v1"):
@@ -254,8 +252,11 @@ def unauthenticated_api_routes(app) -> list[str]:
             else []
         )
         authed = any(
-            getattr(d, "__module__", "") == "backend.app.auth"
-            and (d is get_principal or getattr(d, "__name__", "") == "_dep")
+            d is auth_dep
+            or (
+                getattr(d, "__module__", "") == getattr(auth_dep, "__module__", "")
+                and getattr(d, "__name__", "") == "_dep"
+            )
             for d in deps
         )
         if not authed:
@@ -266,8 +267,8 @@ def unauthenticated_api_routes(app) -> list[str]:
     return out
 
 
-def _check_endpoints(app) -> list[dict[str, str]]:
-    unauthed = unauthenticated_api_routes(app)
+def _check_endpoints(app, auth_dep) -> list[dict[str, str]]:
+    unauthed = unauthenticated_api_routes(app, auth_dep)
     if unauthed:
         return [
             _finding(
@@ -399,12 +400,12 @@ def _check_file_permissions(reg) -> list[dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 
-def run_hardening_check(reg, app) -> dict[str, Any]:
+def run_hardening_check(reg, app, auth_dep) -> dict[str, Any]:
     """执行安全加固自检，返回报告 dict。"""
     findings = (
         _check_default_credential(reg)
         + _check_ports(reg)
-        + _check_endpoints(app)
+        + _check_endpoints(app, auth_dep)
         + _check_transport(reg)
         + _check_file_permissions(reg)
     )

@@ -285,10 +285,10 @@ def _check_audit(reg) -> list[dict[str, str]]:
             )
         )
     # 归档导出可用：真实构造一次 JSONL 归档（不落盘、不入审计——入审计由端点负责）
-    from backend.app.routers.audit import build_audit_export
+    from backend.infra.audit_export import build_audit_export
 
     try:
-        body, footer = build_audit_export(reg, "selfcheck")
+        body, footer = build_audit_export(reg.repository, reg.security_store, "selfcheck")
         n_lines = len(body.strip().splitlines()) - 2  # 去 header 与 footer 两行
         expect = footer["main_chain_total"] + footer["security_chain_total"]
         ok = n_lines == expect
@@ -396,7 +396,7 @@ def _check_boundary(reg) -> list[dict[str, str]]:
                 f"cors_origins={origins}（无通配符，全部为本机/Tauri 来源）",
             )
         )
-    from backend.app.routers.system import offline_conclusion
+    from backend.infra.offline import offline_conclusion
 
     conclusion = offline_conclusion(cfg)
     offline_ok = bool(conclusion["offline_mode"])

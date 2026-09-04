@@ -17,7 +17,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend.app.auth import Principal, require_role
+from backend.app.auth import Principal, get_principal, require_role
 from backend.app.dependencies import Registry, get_registry
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
@@ -172,7 +172,7 @@ def hardening_check(
     from backend.app.main import app as current_app
     from backend.infra.compliance.hardening import run_hardening_check, write_hardening_report
 
-    report = run_hardening_check(reg, current_app)
+    report = run_hardening_check(reg, current_app, get_principal)
     files = write_hardening_report(report, _compliance_dir(reg))
     _audit_action(
         reg,
