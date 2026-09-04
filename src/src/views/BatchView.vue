@@ -5,6 +5,7 @@
  */
 import { onMounted, onUnmounted, ref, watch } from "vue";
 import BatchProgress from "../components/BatchProgress.vue";
+import ConfirmDialog from "../components/ConfirmDialog.vue";
 import { cancelBatch, getBatchStatus, listBatches, retryBatch, submitBatch } from "../services/api";
 import type { BatchStatusOut, BatchSummaryOut } from "../types/api";
 
@@ -190,7 +191,16 @@ function retryConnection(): void {
   if (activeBatchId.value) startPolling(activeBatchId.value);
 }
 
-async function onCancel(): Promise<void> {
+// 取消批次须二次确认（用户差错防御）：确认后才真正调用取消接口
+const cancelConfirmOpen = ref(false);
+
+function onCancel(): void {
+  if (!activeBatchId.value) return;
+  cancelConfirmOpen.value = true;
+}
+
+async function onCancelConfirmed(): Promise<void> {
+  cancelConfirmOpen.value = false;
   if (!activeBatchId.value) return;
   try {
     await cancelBatch(activeBatchId.value);
@@ -489,6 +499,15 @@ onUnmounted(() => {
       </div>
     </div>
   </div>
+  <ConfirmDialog
+    :open="cancelConfirmOpen"
+    title="取消批次确认"
+    message="取消后该批次未处理的影像将停止处理，已完成结果保留；失败/取消的任务之后可重试。确定取消？"
+    confirm-text="取消批次"
+    danger
+    @confirm="onCancelConfirmed"
+    @cancel="cancelConfirmOpen = false"
+  />
 </template>
 
 <style scoped>

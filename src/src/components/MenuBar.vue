@@ -101,7 +101,7 @@ onBeforeUnmount(() => document.removeEventListener("click", onDocClick));
         class="mark"
         aria-hidden="true"
       />
-      <span class="name">射线评片智能检测系统</span>
+      <span class="name">射线焊缝缺陷智能检测系统</span>
     </div>
 
     <div
