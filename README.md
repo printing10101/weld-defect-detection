@@ -74,6 +74,14 @@ cd src && npx vue-tsc --noEmit && npm run test:run
 
 CI（`.github/workflows/ci.yml`）在每次推送时执行上述检查。
 
+## 文档
+
+- [用户手册](docs/用户手册.md) — 面向评片/管理人员的操作说明（GB/T 25000.51 用户文档集）
+- [安装与卸载指南](docs/安装与卸载指南.md) — 运行环境要求、安装/升级/卸载
+- [部署基线](docs/deployment-baseline.md) — 三员账号引导与运行基线
+- [国产化适配矩阵](docs/国产化适配矩阵.md) — 已验证/待真机适配状态
+- API 契约：`docs/api/openapi.json`（`python scripts/gen_openapi.py` 重新生成）
+
 ## 已知限制
 
 1. **标准数值表**：`nb47013.yaml` 数值转录自公开解读资料（`authorized_copy=false`），
