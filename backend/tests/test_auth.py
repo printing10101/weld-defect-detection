@@ -59,9 +59,7 @@ def _login(client: TestClient, username: str, private_key: str):
 def _create_account(client: TestClient, role: str) -> tuple[str, str]:
     """以 sysadmin 覆盖身份创建账号并签发软证书，返回 (username, private_key)。"""
     username = f"u_{uuid.uuid4().hex[:10]}"
-    resp = client.post(
-        "/api/v1/auth/accounts", json={"username": username, "role": role}
-    )
+    resp = client.post("/api/v1/auth/accounts", json={"username": username, "role": role})
     assert resp.status_code == 200, resp.text
     kp = client.post(f"/api/v1/auth/accounts/{resp.json()['account_id']}/keypair")
     assert kp.status_code == 200, kp.text
@@ -268,9 +266,7 @@ def test_security_chain_readable_by_auditor_only():
         with real_auth_client() as c:
             aud_token = _login(c, aud_user, aud_key).json()["token"]
             sec_token = _login(c, sec_user, sec_key).json()["token"]
-            ok = c.get(
-                "/api/v1/audit/security", headers={"Authorization": f"Bearer {aud_token}"}
-            )
+            ok = c.get("/api/v1/audit/security", headers={"Authorization": f"Bearer {aud_token}"})
             assert ok.status_code == 200
             assert ok.json()["chain_valid"] is True
             denied = c.get(
@@ -325,7 +321,6 @@ def test_disabled_account_sessions_revoked():
         account_id = next(a["account_id"] for a in accounts if a["username"] == username)
     with real_auth_client() as c:
         token = _login(c, username, priv).json()["token"]
-        headers = {"Authorization": f"Bearer {token}"}
     with _admin_client() as c:
         resp = c.post(f"/api/v1/auth/accounts/{account_id}/status", json={"status": "disabled"})
         assert resp.status_code == 200
@@ -393,9 +388,7 @@ def test_role_matrix_on_sensitive_ops():
             aud_token = _login(c, aud_user, aud_key).json()["token"]
             # 账号管理：保密员/审计员 → 403
             for tok in (sec_token, aud_token):
-                resp = c.get(
-                    "/api/v1/auth/accounts", headers={"Authorization": f"Bearer {tok}"}
-                )
+                resp = c.get("/api/v1/auth/accounts", headers={"Authorization": f"Bearer {tok}"})
                 assert resp.status_code == 403
             # 密级变更：审计员 → 403（角色判定先于资源存在性 404）
             resp = c.post(

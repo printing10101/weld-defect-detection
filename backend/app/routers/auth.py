@@ -250,7 +250,9 @@ def set_account_status(
 ) -> AccountOut:
     """启用/停用账号（停用同时吊销全部会话；入安全审计链）。"""
     try:
-        return AccountOut(**_account_fields(svc.set_status(account_id, body.status, actor=principal.username)))
+        return AccountOut(
+            **_account_fields(svc.set_status(account_id, body.status, actor=principal.username))
+        )
     except AuthError as exc:
         raise _http(exc) from None
     except KeyError as exc:
@@ -327,7 +329,9 @@ def resolve_alert(
 ) -> AlertOut:
     """处置告警（仅安全保密管理员；处置动作入安全审计链）。"""
     try:
-        out = reg.security_store.resolve_alert(alert_id, resolved_by=principal.username, note=body.note)
+        out = reg.security_store.resolve_alert(
+            alert_id, resolved_by=principal.username, note=body.note
+        )
     except KeyError as exc:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": str(exc)}) from None
     reg.security_store.append_security_audit(

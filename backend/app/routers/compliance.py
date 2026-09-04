@@ -98,7 +98,9 @@ def self_check(
         after={"overall": report["overall"], "files": files},
         note="C-23 分级保护自查",
     )
-    return SelfCheckOut(files=files, **{k: v for k, v in report.items() if k in SelfCheckOut.model_fields})
+    return SelfCheckOut(
+        files=files, **{k: v for k, v in report.items() if k in SelfCheckOut.model_fields}
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +181,9 @@ def hardening_check(
         after={"overall": report["overall"], "high": len(report["high_findings"]), "files": files},
         note="C-25 安全加固自检",
     )
-    return HardeningOut(files=files, **{k: v for k, v in report.items() if k in HardeningOut.model_fields})
+    return HardeningOut(
+        files=files, **{k: v for k, v in report.items() if k in HardeningOut.model_fields}
+    )
 
 
 # ---------------------------------------------------------------------------

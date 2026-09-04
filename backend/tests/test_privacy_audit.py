@@ -95,7 +95,7 @@ def test_audit_kind_classification(kind: str, tmp_path: Path) -> None:
     if kind == "exif":
         _jpg_with_exif(tmp_path / "a.jpg")
     else:
-        pydicom = pytest.importorskip("pydicom")
+        pytest.importorskip("pydicom")
         from pydicom.dataset import Dataset
         from pydicom.uid import generate_uid
 

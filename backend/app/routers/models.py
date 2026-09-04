@@ -140,9 +140,7 @@ async def activate_model(
     return ActivateResponse(ok=True, active=entry.id)
 
 
-async def _activate_with_gate(
-    model_id: str, reg: Registry, operator: str
-) -> ActivateResponse:
+async def _activate_with_gate(model_id: str, reg: Registry, operator: str) -> ActivateResponse:
     """E-14 门禁激活链：先 Golden 评估 → 达标进 candidate（待审批）/未达标拒绝。
 
     评估在当前请求内同步完成（投产门禁必须"先评估后允许提交"，异步会留下
@@ -180,7 +178,7 @@ async def _activate_with_gate(
                 message=f"模型 {model_id} 投产门禁评估未通过，已拒绝激活",
                 detail={"reason": record["reason"], "metrics": record["metrics"]},
             )
-        except Exception:  # noqa: BLE001 - 告警失败不掩盖 422
+        except Exception:  # noqa: BLE001, S110 - 告警失败不掩盖 422
             pass
         reg.repository.append_audit(
             actor=operator,

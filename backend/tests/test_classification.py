@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
-import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
 
@@ -60,25 +59,22 @@ def test_classification_label_mapping():
 
 def test_set_and_get_secret_level_secadmin():
     image_id = _make_image()
-    with principal_role("secadmin"):
-        with TestClient(app) as c:
-            resp = c.post(
-                f"/api/v1/classification/image/{image_id}",
-                json={"secret_level": 2, "classification_basis": "某某密级目录第3条"},
-            )
-            assert resp.status_code == 200, resp.text
-            assert resp.json()["secret_level_name"] == "秘密"
-            got = c.get(f"/api/v1/classification/image/{image_id}")
-            assert got.status_code == 200
-            assert got.json()["secret_level"] == 2
-            assert got.json()["classification_basis"] == "某某密级目录第3条"
+    with principal_role("secadmin"), TestClient(app) as c:
+        resp = c.post(
+            f"/api/v1/classification/image/{image_id}",
+            json={"secret_level": 2, "classification_basis": "某某密级目录第3条"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["secret_level_name"] == "秘密"
+        got = c.get(f"/api/v1/classification/image/{image_id}")
+        assert got.status_code == 200
+        assert got.json()["secret_level"] == 2
+        assert got.json()["classification_basis"] == "某某密级目录第3条"
     # 密级变更入主审计链 + 独立安全审计链（C-19 双链）
     reg = get_registry()
     entries, _ = reg.repository.list_audit(action="secret_level_change", limit=10)
     assert any(e["object_id"] == image_id for e in entries)
-    sec_entries, _ = reg.security_store.list_security_audit(
-        action="secret_level_change", limit=10
-    )
+    sec_entries, _ = reg.security_store.list_security_audit(action="secret_level_change", limit=10)
     assert any(e["object_id"] == image_id for e in sec_entries)
 
 
@@ -86,36 +82,33 @@ def test_set_secret_level_requires_secadmin():
     """C-06 权限矩阵：密级变更仅安全保密管理员（系统管理员/审计员 403）。"""
     image_id = _make_image()
     for role in ("sysadmin", "auditor"):
-        with principal_role(role):
-            with TestClient(app) as c:
-                resp = c.post(
-                    f"/api/v1/classification/image/{image_id}",
-                    json={"secret_level": 1, "classification_basis": "测试"},
-                )
-                assert resp.status_code == 403, role
+        with principal_role(role), TestClient(app) as c:
+            resp = c.post(
+                f"/api/v1/classification/image/{image_id}",
+                json={"secret_level": 1, "classification_basis": "测试"},
+            )
+            assert resp.status_code == 403, role
 
 
 def test_set_secret_level_requires_basis():
     """变更密级必须登记定密依据（缺依据 422）。"""
     image_id = _make_image()
-    with principal_role("secadmin"):
-        with TestClient(app) as c:
-            resp = c.post(
-                f"/api/v1/classification/image/{image_id}",
-                json={"secret_level": 1, "classification_basis": "  "},
-            )
-            assert resp.status_code == 422
+    with principal_role("secadmin"), TestClient(app) as c:
+        resp = c.post(
+            f"/api/v1/classification/image/{image_id}",
+            json={"secret_level": 1, "classification_basis": "  "},
+        )
+        assert resp.status_code == 422
 
 
 def test_set_secret_level_invalid_value():
     image_id = _make_image()
-    with principal_role("secadmin"):
-        with TestClient(app) as c:
-            resp = c.post(
-                f"/api/v1/classification/image/{image_id}",
-                json={"secret_level": 5, "classification_basis": "测试"},
-            )
-            assert resp.status_code == 422  # pydantic ge/le 拦截
+    with principal_role("secadmin"), TestClient(app) as c:
+        resp = c.post(
+            f"/api/v1/classification/image/{image_id}",
+            json={"secret_level": 5, "classification_basis": "测试"},
+        )
+        assert resp.status_code == 422  # pydantic ge/le 拦截
 
 
 def test_report_pdf_embeds_classification():
@@ -124,13 +117,12 @@ def test_report_pdf_embeds_classification():
 
     image_id = _make_image()
     reg = get_registry()
-    with principal_role("secadmin"):
-        with TestClient(app) as c:
-            resp = c.post(
-                f"/api/v1/classification/image/{image_id}",
-                json={"secret_level": 3, "classification_basis": "机密依据条款"},
-            )
-            assert resp.status_code == 200
+    with principal_role("secadmin"), TestClient(app) as c:
+        resp = c.post(
+            f"/api/v1/classification/image/{image_id}",
+            json={"secret_level": 3, "classification_basis": "机密依据条款"},
+        )
+        assert resp.status_code == 200
     image = reg.repository.get_image(image_id)
     content = build_report_content(image, [], image.get("report"))
     assert content.secret_level == 3

@@ -86,9 +86,7 @@ def build_v02() -> dict[str, Any]:
     for r in rows:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
     gaps = [
-        {"item": r["item"], "status": r["status_raw"]}
-        for r in rows
-        if r["status"] != "verified"
+        {"item": r["item"], "status": r["status_raw"]} for r in rows if r["status"] != "verified"
     ]
     matrix_exists = _MATRIX_MD.is_file()
     return {
@@ -200,9 +198,7 @@ def build_v03(reg) -> dict[str, Any]:
             " 以 CI 全量通过为准。"
         ),
         "missing": missing,
-        "note": (
-            "本报告只聚合实测记录；缺失的证据项列于 missing，无记录的项不表述为通过。"
-        ),
+        "note": ("本报告只聚合实测记录；缺失的证据项列于 missing，无记录的项不表述为通过。"),
     }
 
 
@@ -247,8 +243,8 @@ def build_v04(reg) -> dict[str, Any]:
         "std_eval_found": std_eval is not None,
         "std_record_found": latest_record is not None,
         "missing": [
-            *( [] if std_eval else ["std_eval.json（run_std_eval CLI 产出缺失）"] ),
-            *( [] if latest_record else ["附录A 记录表（POST /std-eval/record 产出缺失）"] ),
+            *([] if std_eval else ["std_eval.json（run_std_eval CLI 产出缺失）"]),
+            *([] if latest_record else ["附录A 记录表（POST /std-eval/record 产出缺失）"]),
         ],
         "note": "指标/分级/风险以 data/eval 评价产物与审计链留痕为准；缺失项如实列出。",
     }

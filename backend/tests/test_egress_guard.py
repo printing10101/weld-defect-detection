@@ -64,9 +64,8 @@ def test_block_writes_alert_and_audit():
     """阻断事件落库：安全告警（high）+ 主审计链 egress_blocked。"""
     reg = get_registry()
     before_alerts = reg.security_store.count_alerts(kind="egress_blocked")
-    with _guard_enabled():
-        with pytest.raises(EgressBlockedError):
-            get_guard().check(EXTERNAL_IP, 8080, context="unit-test")
+    with _guard_enabled(), pytest.raises(EgressBlockedError):
+        get_guard().check(EXTERNAL_IP, 8080, context="unit-test")
     after_alerts = reg.security_store.count_alerts(kind="egress_blocked")
     assert after_alerts == before_alerts + 1
     entries, _total = reg.repository.list_audit(action="egress_blocked", limit=5)
@@ -118,7 +117,9 @@ def test_urllib_opener_blocked(monkeypatch):
     with _guard_enabled():
         executed: list[object] = []
         monkeypatch.setattr(
-            egress_guard, "_ORIG_OPENER_OPEN", lambda self, url, data=None, timeout=None: executed.append(url)
+            egress_guard,
+            "_ORIG_OPENER_OPEN",
+            lambda self, url, data=None, timeout=None: executed.append(url),
         )
         import urllib.request
 

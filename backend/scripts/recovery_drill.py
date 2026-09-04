@@ -25,7 +25,7 @@ import shutil
 import tempfile
 import time
 import zipfile
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from backend.infra.backup import create_backup, restore_backup, verify_backup
@@ -61,7 +61,7 @@ def run_drill(out_dir: str | Path, *, work_root: str | Path | None = None) -> di
     started = time.perf_counter()
     record: dict = {
         "drill": "recovery_drill",
-        "started_at": datetime.now().isoformat(timespec="seconds"),
+        "started_at": datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds"),
         "steps": [],
         "conclusion": "",
     }
@@ -130,7 +130,7 @@ def run_drill(out_dir: str | Path, *, work_root: str | Path | None = None) -> di
         if tmp_ctx is not None:
             tmp_ctx.__exit__(None, None, None)
         record["total_elapsed_sec"] = round(time.perf_counter() - started, 4)
-        record["finished_at"] = datetime.now().isoformat(timespec="seconds")
+        record["finished_at"] = datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
         record["conclusion"] = "FAIL" if failure else "PASS"
         if failure:
             record["error"] = failure

@@ -158,9 +158,7 @@ def _active_sessions(reg) -> list[dict[str, Any]]:
     from backend.infra.db import SessionRecord
 
     with Session(reg.security_store._engine) as session:
-        rows = list(
-            session.scalars(select(SessionRecord).where(SessionRecord.revoked.is_(False)))
-        )
+        rows = list(session.scalars(select(SessionRecord).where(SessionRecord.revoked.is_(False))))
         return [{"account_id": r.account_id, "token_hash": r.token_hash} for r in rows]
 
 
@@ -422,7 +420,9 @@ def _check_infoflow(reg) -> list[dict[str, str]]:
 
     items: list[dict[str, str]] = []
     try:
-        report = audit_directory_phi(resolve_config_path(reg.config.paths.images_dir), max_files=2000)
+        report = audit_directory_phi(
+            resolve_config_path(reg.config.paths.images_dir), max_files=2000
+        )
         if report["scanned"] == 0:
             items.append(
                 _item(
@@ -470,8 +470,7 @@ def _check_infoflow(reg) -> list[dict[str, str]]:
                 "涉密载体台账在用",
                 "分级保护要求：涉密载体登记、流转、销毁全生命周期台账管理",
                 "pass",
-                f"载体台账共 {len(carriers)} 条登记"
-                f"（状态分布: {_count_by(carriers, 'status')}）",
+                f"载体台账共 {len(carriers)} 条登记（状态分布: {_count_by(carriers, 'status')}）",
             )
         )
     else:
@@ -577,8 +576,10 @@ def selfcheck_pdf(report: dict[str, Any], out_path: str | Path) -> Path:
         ("总体结论", str(report.get("overall", "—")).upper()),
         (
             "项数统计",
-            (f"pass={report['summary']['pass']} / warning={report['summary']['warning']}"
-            f" / fail={report['summary']['fail']}"),
+            (
+                f"pass={report['summary']['pass']} / warning={report['summary']['warning']}"
+                f" / fail={report['summary']['fail']}"
+            ),
         ),
     ]
     sections = []

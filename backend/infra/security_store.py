@@ -111,9 +111,7 @@ class SecurityStore:
 
     def count_accounts(self) -> int:
         with Session(self._engine) as session:
-            return int(
-                session.scalar(select(func.count()).select_from(AccountRecord)) or 0
-            )
+            return int(session.scalar(select(func.count()).select_from(AccountRecord)) or 0)
 
     def set_account_key(self, account_id: str, sm2_public_key: str) -> None:
         """登记/更换账号 SM2 公钥（软证书登记或 UKey 公钥导出）。"""
@@ -276,7 +274,9 @@ class SecurityStore:
         level: str = "warn",
         detail: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        rec = AlertRecord(id=uuid.uuid4().hex, kind=kind, level=level, message=message, detail=detail)
+        rec = AlertRecord(
+            id=uuid.uuid4().hex, kind=kind, level=level, message=message, detail=detail
+        )
         with Session(self._engine) as session, session.begin():
             session.add(rec)
             session.flush()
@@ -299,13 +299,12 @@ class SecurityStore:
             if status:
                 conds.append(AlertRecord.status == status)
             return int(
-                session.scalar(
-                    select(func.count()).select_from(AlertRecord).where(*conds)
-                )
-                or 0
+                session.scalar(select(func.count()).select_from(AlertRecord).where(*conds)) or 0
             )
 
-    def resolve_alert(self, alert_id: str, *, resolved_by: str, note: str | None = None) -> dict[str, Any]:
+    def resolve_alert(
+        self, alert_id: str, *, resolved_by: str, note: str | None = None
+    ) -> dict[str, Any]:
         with Session(self._engine) as session, session.begin():
             rec = session.get(AlertRecord, alert_id)
             if rec is None:
@@ -365,9 +364,7 @@ class SecurityStore:
         )
         with self._chain_lock, Session(self._engine) as session, session.begin():
             last = session.scalars(
-                select(SecurityAuditRecord)
-                .order_by(SecurityAuditRecord.seq.desc())
-                .limit(1)
+                select(SecurityAuditRecord).order_by(SecurityAuditRecord.seq.desc()).limit(1)
             ).first()
             prev_hash = last.hash if last is not None else "0" * 64
             rec = SecurityAuditRecord(
@@ -403,9 +400,7 @@ class SecurityStore:
             conds.append(SecurityAuditRecord.action == action)
         with Session(self._engine) as session:
             total = int(
-                session.scalar(
-                    select(func.count()).select_from(SecurityAuditRecord).where(*conds)
-                )
+                session.scalar(select(func.count()).select_from(SecurityAuditRecord).where(*conds))
                 or 0
             )
             rows = list(

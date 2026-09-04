@@ -83,7 +83,7 @@ def _exif_tags(path: Path) -> list[str]:
                 return []
             from PIL.ExifTags import TAGS
 
-            return [TAGS.get(k, str(k)) for k in exif.keys()]
+            return [TAGS.get(k, str(k)) for k in exif]
     except Exception:  # noqa: BLE001 - 非图/损坏 → 无 EXIF 可言
         return []
 
@@ -144,9 +144,7 @@ def build_phi_audit_pdf(report: dict[str, Any], out_path: str | Path) -> Path:
     ]
     for f in report.get("findings", [])[:100]:
         residues = ", ".join(map(str, f.get("residues") or []))
-        flow.append(
-            Paragraph(f"· {f.get('file')}（{f.get('kind')}）：{residues}", body)
-        )
+        flow.append(Paragraph(f"· {f.get('file')}（{f.get('kind')}）：{residues}", body))
     if report.get("errors"):
         flow.append(Spacer(1, 3 * mm))
         flow.append(Paragraph("扫描异常文件：", body))

@@ -143,10 +143,14 @@ def _gap_table() -> list[list[str]]:
     return [
         [
             "high",
-            ("静态加密与签名为纯软件实现（gmssl 3.2.2），未经商用密码产品认证"
-            "（GM/T 0028 密码模块安全要求检测认证）"),
-            ("对接经认证的商密密码卡/加密机/UKey（Pkcs11Provider 预留），"
-            "并交由密评机构对软件实现做评估认定"),
+            (
+                "静态加密与签名为纯软件实现（gmssl 3.2.2），未经商用密码产品认证"
+                "（GM/T 0028 密码模块安全要求检测认证）"
+            ),
+            (
+                "对接经认证的商密密码卡/加密机/UKey（Pkcs11Provider 预留），"
+                "并交由密评机构对软件实现做评估认定"
+            ),
         ],
         [
             "high",
@@ -204,16 +208,22 @@ def build_crypto_materials() -> dict[str, Any]:
         "",
         "## 二、密钥管理",
         "",
-        ("- **分层结构**：主密钥（SCAN_CRYPTO_KEY，base64/hex 32 字节）→ 数据密钥经"
-        " SM3 域分离 KDF 派生：SM4 密钥 = SM3(\"sd-kdf-sm4\"||master) 前 16 字节；"
-        " HMAC 密钥 = SM3(\"sd-kdf-mac\"||master)；SM2 私钥 = "
-        "int(SM3(\"sd-kdf-sm2\"||master)) mod n（可用 SCAN_SM2_PRIVATE_KEY 显式覆盖）。"),
+        (
+            "- **分层结构**：主密钥（SCAN_CRYPTO_KEY，base64/hex 32 字节）→ 数据密钥经"
+            ' SM3 域分离 KDF 派生：SM4 密钥 = SM3("sd-kdf-sm4"||master) 前 16 字节；'
+            ' HMAC 密钥 = SM3("sd-kdf-mac"||master)；SM2 私钥 = '
+            'int(SM3("sd-kdf-sm2"||master)) mod n（可用 SCAN_SM2_PRIVATE_KEY 显式覆盖）。'
+        ),
         "- **域分离**：三种数据密钥使用不同标签派生，互不相关，防跨用途重用。",
-        ("- **硬件模块对接边界**：SCAN_CRYPTO_PROVIDER=pkcs11 时切换 Pkcs11Provider，"
-        "密钥在硬件内生成并托管（CKA_TOKEN/CKA_SENSITIVE，禁止导出），软件侧仅持句柄，"
-        "主密钥不参与派生；该路径**未真机验证**（需厂商动态库与联调）。"),
-        ("- **诚实边界**：本环境为软件实现，主密钥经环境变量注入，无硬件保护；"
-        "不提供\"找不到密钥就随机生成\"的行为（密钥缺失显式报错）。"),
+        (
+            "- **硬件模块对接边界**：SCAN_CRYPTO_PROVIDER=pkcs11 时切换 Pkcs11Provider，"
+            "密钥在硬件内生成并托管（CKA_TOKEN/CKA_SENSITIVE，禁止导出），软件侧仅持句柄，"
+            "主密钥不参与派生；该路径**未真机验证**（需厂商动态库与联调）。"
+        ),
+        (
+            "- **诚实边界**：本环境为软件实现，主密钥经环境变量注入，无硬件保护；"
+            '不提供"找不到密钥就随机生成"的行为（密钥缺失显式报错）。'
+        ),
         "",
         "## 三、密码调用链",
         "",
@@ -235,8 +245,10 @@ def build_crypto_materials() -> dict[str, Any]:
         "",
         "---",
         "",
-        ("声明：本材料自动生成于系统运行时，provider 内省结果见算法清单末行；"
-        "以上差距为开发方自评，最终符合性结论以密评机构认定为准。"),
+        (
+            "声明：本材料自动生成于系统运行时，provider 内省结果见算法清单末行；"
+            "以上差距为开发方自评，最终符合性结论以密评机构认定为准。"
+        ),
         "",
     ]
     markdown = "\n".join(md)
@@ -259,8 +271,10 @@ def crypto_materials_pdf(data: dict[str, Any], out_path: str | Path) -> Path:
         ("系统", "ScanDetection 射线检测系统（单机涉密部署）"),
         (
             "provider 内省",
-            (f"{inv.get('provider') or '未装配'}（hash_algo={inv.get('hash_algo', '—')}，"
-            f"SM2 公钥在位={inv.get('has_public_key', '—')}）"),
+            (
+                f"{inv.get('provider') or '未装配'}（hash_algo={inv.get('hash_algo', '—')}，"
+                f"SM2 公钥在位={inv.get('has_public_key', '—')}）"
+            ),
         ),
     ]
     sections = [
@@ -274,13 +288,19 @@ def crypto_materials_pdf(data: dict[str, Any], out_path: str | Path) -> Path:
         {
             "heading": "二、密钥管理",
             "paragraphs": [
-                ("分层结构：主密钥 SCAN_CRYPTO_KEY（32 字节，环境变量注入）→ 数据密钥经 "
-                "SM3 域分离 KDF 派生（sd-kdf-sm4 / sd-kdf-mac / sd-kdf-sm2 三标签互不相关）；"
-                "SM2 私钥可经 SCAN_SM2_PRIVATE_KEY 显式覆盖。"),
-                ("硬件边界：SCAN_CRYPTO_PROVIDER=pkcs11 切换 Pkcs11Provider，密钥硬件托管"
-                "（CKA_TOKEN/CKA_SENSITIVE），软件侧仅持句柄；该路径未真机验证。"),
-                ("诚实边界：本环境为软件实现，主密钥无硬件保护；密钥缺失显式报错，"
-                "不存在\"随机生成临时密钥\"的静默数据丢失路径。"),
+                (
+                    "分层结构：主密钥 SCAN_CRYPTO_KEY（32 字节，环境变量注入）→ 数据密钥经 "
+                    "SM3 域分离 KDF 派生（sd-kdf-sm4 / sd-kdf-mac / sd-kdf-sm2 三标签互不相关）；"
+                    "SM2 私钥可经 SCAN_SM2_PRIVATE_KEY 显式覆盖。"
+                ),
+                (
+                    "硬件边界：SCAN_CRYPTO_PROVIDER=pkcs11 切换 Pkcs11Provider，密钥硬件托管"
+                    "（CKA_TOKEN/CKA_SENSITIVE），软件侧仅持句柄；该路径未真机验证。"
+                ),
+                (
+                    "诚实边界：本环境为软件实现，主密钥无硬件保护；密钥缺失显式报错，"
+                    '不存在"随机生成临时密钥"的静默数据丢失路径。'
+                ),
             ],
         },
         {
@@ -300,8 +320,10 @@ def crypto_materials_pdf(data: dict[str, Any], out_path: str | Path) -> Path:
         {
             "heading": "声明",
             "paragraphs": [
-                ("本材料由系统自动生成，算法清单来自 crypto provider 运行时内省；"
-                "差距为开发方自评，最终符合性结论以密评机构认定为准。"),
+                (
+                    "本材料由系统自动生成，算法清单来自 crypto provider 运行时内省；"
+                    "差距为开发方自评，最终符合性结论以密评机构认定为准。"
+                ),
             ],
         },
     ]

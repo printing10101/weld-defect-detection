@@ -18,7 +18,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from backend.app.auth import AuthError
-
 from backend.app.dependencies import get_registry
 from backend.app.routers import (
     active,
@@ -184,9 +183,7 @@ async def lifespan(app: FastAPI):
             if interval and interval > 0:
                 from backend.infra.backup import BackupScheduler
 
-                reg.backup_scheduler = BackupScheduler(
-                    interval, lambda: _scheduled_backup(reg)
-                )
+                reg.backup_scheduler = BackupScheduler(interval, lambda: _scheduled_backup(reg))
                 reg.backup_scheduler.start()
                 _LOG.info("backup scheduler started (interval=%.2fh)", interval)
         except Exception as exc:  # noqa: BLE001 - 调度失败不阻断装配

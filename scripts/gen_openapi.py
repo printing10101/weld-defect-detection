@@ -17,7 +17,7 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
-from backend.app.main import app  # noqa: E402
+from backend.app.main import app
 
 
 def main() -> None:

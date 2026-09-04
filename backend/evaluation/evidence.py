@@ -103,9 +103,7 @@ def build_evidence(
         "generated_at": datetime.now().isoformat(timespec="seconds"),  # noqa: DTZ005
     }
     manifest_file = out / "manifest.json"
-    manifest_file.write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    manifest_file.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return manifest
 
 

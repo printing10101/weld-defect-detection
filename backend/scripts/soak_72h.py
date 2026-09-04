@@ -25,7 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -89,7 +89,7 @@ def run_soak(
     rounds 优先于 hours（给冒烟/测试用）；两者都给时以先到者为准。
     sampler/detector 可注入（测试确定性）。
     """
-    started_wall = datetime.now().isoformat(timespec="seconds")
+    started_wall = datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
     t0 = time.perf_counter()
 
     if detector is None:
@@ -132,7 +132,7 @@ def run_soak(
             errors.append(f"round {rounds_done}: {type(exc).__name__}: {exc}"[:200])
         rounds_done += 1
         _bounded_append(round_elapsed, round(time.perf_counter() - rt0, 4))
-        rss_mb, source = sample()
+        rss_mb, _source = sample()
         if rss_mb >= 0:
             _bounded_append(rss_curve, round(rss_mb, 1))
         if interval_sec > 0:
@@ -144,7 +144,7 @@ def run_soak(
     report: dict = {
         "drill": "soak",
         "started_at": started_wall,
-        "finished_at": datetime.now().isoformat(timespec="seconds"),
+        "finished_at": datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds"),
         "elapsed_sec": round(time.perf_counter() - t0, 2),
         "planned_hours": hours,
         "rounds": rounds_done,
@@ -181,8 +181,12 @@ def main() -> int:
     ap.add_argument("--rounds", type=int, default=None, help="固定轮次（优先于 hours，测试用）")
     ap.add_argument("--batch-size", type=int, default=8, help="每轮评片张数")
     ap.add_argument("--interval", type=float, default=0.0, help="轮间休息秒数（降负载）")
-    ap.add_argument("--leak-slope", type=float, default=_LEAK_DEFAULT_MB_PER_ROUND,
-                    help="泄漏判定斜率阈值（MB/轮）")
+    ap.add_argument(
+        "--leak-slope",
+        type=float,
+        default=_LEAK_DEFAULT_MB_PER_ROUND,
+        help="泄漏判定斜率阈值（MB/轮）",
+    )
     ap.add_argument("--baseline", action="store_true", help="强制基线检测器（不依赖训练权重）")
     ap.add_argument("--out", default="data/compliance", help="soak 报告输出目录")
     args = ap.parse_args()
@@ -199,7 +203,7 @@ def main() -> int:
     if not out_dir.is_absolute():
         out_dir = _INSTALL_ROOT / args.out
     out_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).replace(tzinfo=None).strftime("%Y%m%d_%H%M%S")
     out_path = out_dir / f"soak_{ts}.json"
     out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(

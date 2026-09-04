@@ -205,15 +205,14 @@ class AuthService:
     def _sign_with_client_key(private_key: str, nonce: str) -> str:
         """用客户端提交的私钥代签挑战；格式非法 → 401（不泄露格式细节）。"""
         key = private_key.strip().lower().replace(" ", "")
-        if key.startswith("0x"):
-            key = key[2:]
+        key = key.removeprefix("0x")
         if len(key) != 64:
             raise AuthError(
                 422, "INVALID_KEY_FORMAT", "私钥须为 64 位 hex（可由管理员签发的证书文件获得）"
             )
         try:
             return sm2_sign_with_private(key, nonce.encode())
-        except Exception as exc:  # noqa: BLE001 - 任何签名异常都归一为凭据错误
+        except Exception as exc:
             raise AuthError(401, "BAD_CREDENTIALS", "凭据验签失败") from exc
 
     def _on_account_locked(self, account: dict[str, Any]) -> None:
@@ -366,15 +365,16 @@ def get_principal(
     now = datetime.now(UTC).replace(tzinfo=None)
     # 绝对有效期（自签发起算的硬上限，防"永不断活"的滑动会话）
     created = sess.get("_created_dt")
-    if created is not None:
-        if (now - created).total_seconds() > reg.config.auth.session_ttl_min * 60:
-            reg.security_store.revoke_session(sess["token_hash"])
-            raise AuthError(401, "SESSION_EXPIRED", "会话已过期，请重新登录")
+    if (
+        created is not None
+        and (now - created).total_seconds() > reg.config.auth.session_ttl_min * 60
+    ):
+        reg.security_store.revoke_session(sess["token_hash"])
+        raise AuthError(401, "SESSION_EXPIRED", "会话已过期，请重新登录")
     last_seen = sess.get("_last_seen_dt")
-    if last_seen is not None:
-        if (now - last_seen).total_seconds() > idle_sec:
-            reg.security_store.revoke_session(sess["token_hash"])
-            raise AuthError(401, "SESSION_EXPIRED", "会话已空闲超时，请重新登录")
+    if last_seen is not None and (now - last_seen).total_seconds() > idle_sec:
+        reg.security_store.revoke_session(sess["token_hash"])
+        raise AuthError(401, "SESSION_EXPIRED", "会话已空闲超时，请重新登录")
     account = reg.security_store.get_account(sess["account_id"])
     if account is None or account["status"] != "active":
         raise AuthError(401, "SESSION_INVALID", "账号不可用，会话失效")

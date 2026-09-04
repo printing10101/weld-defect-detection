@@ -68,8 +68,6 @@ def ensure_migrations(db_path: str) -> str:
             target.split("://")[0],
         )
         return "skipped-non-sqlite"
-    from alembic import command
-    from alembic.config import Config
 
     with DDL_LOCK:
         return _ensure_migrations_locked(target)

@@ -10,10 +10,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.infra.db import Base, CarrierRecord, ExportRequestRecord, create_db_engine
@@ -77,9 +77,7 @@ class CarrierStore:
             rec = session.get(CarrierRecord, carrier_id)
             return self._to_dict(rec) if rec else None
 
-    def list(
-        self, *, status: str | None = None, kind: str | None = None
-    ) -> list[dict[str, Any]]:
+    def list(self, *, status: str | None = None, kind: str | None = None) -> list[dict[str, Any]]:
         with Session(self._engine) as session:
             stmt = select(CarrierRecord).order_by(CarrierRecord.created_at.desc())
             if status:
@@ -135,7 +133,9 @@ class CarrierStore:
             note=note,
         )
 
-    def give_back(self, carrier_id: str, *, operator: str, note: str | None = None) -> dict[str, Any]:
+    def give_back(
+        self, carrier_id: str, *, operator: str, note: str | None = None
+    ) -> dict[str, Any]:
         """归还（借出 → 已归还）。"""
         return self._transition(
             carrier_id,
@@ -205,7 +205,9 @@ class ExportStore:
         with DDL_LOCK:  # 与迁移线程串行化，避免并发建表撞表
             Base.metadata.create_all(self._engine)
 
-    def create_request(self, *, subject: str, requested_by: str, reason: str | None = None) -> dict[str, Any]:
+    def create_request(
+        self, *, subject: str, requested_by: str, reason: str | None = None
+    ) -> dict[str, Any]:
         if not subject.strip():
             raise ValueError("subject is required")
         rid = _new_id()
@@ -222,14 +224,16 @@ class ExportStore:
 
     def list(self, *, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
         with Session(self._engine) as session:
-            stmt = select(ExportRequestRecord).order_by(ExportRequestRecord.created_at.desc()).limit(limit)
+            stmt = (
+                select(ExportRequestRecord)
+                .order_by(ExportRequestRecord.created_at.desc())
+                .limit(limit)
+            )
             if status:
                 stmt = stmt.where(ExportRequestRecord.status == status)
             return [self._to_dict(r) for r in session.scalars(stmt)]
 
-    def decide(
-        self, request_id: str, *, decided_by: str, approved: bool
-    ) -> dict[str, Any]:
+    def decide(self, request_id: str, *, decided_by: str, approved: bool) -> dict[str, Any]:
         """保密员批准/拒绝（仅 pending 态可决策）。"""
         status = "approved" if approved else "rejected"
         with Session(self._engine) as session, session.begin():

@@ -33,8 +33,8 @@ def enforced_app(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("SCAN_IPC__ENFORCE", "true")
     monkeypatch.setenv("SCAN_PATHS__DATA_DIR", str(tmp_path / "data"))
     from backend.app import auth as _auth
-    from backend.app.main import create_app
     from backend.app.main import app as _module_app
+    from backend.app.main import create_app
     from backend.infra.config import resolve_config_path
 
     app = create_app()
@@ -103,8 +103,8 @@ def test_enforce_off_allows_all(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("SCAN_IPC__ENFORCE", "false")
     monkeypatch.setenv("SCAN_PATHS__DATA_DIR", str(tmp_path / "data"))
     from backend.app import auth as _auth
-    from backend.app.main import create_app
     from backend.app.main import app as _module_app
+    from backend.app.main import create_app
 
     app = create_app()
     saved_override = _module_app.dependency_overrides.get(_auth.get_principal)

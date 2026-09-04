@@ -25,9 +25,7 @@ def _role_override(role: str):
     saved = app.dependency_overrides.get(auth_mod.get_principal)
 
     def _fake(request: Request):
-        principal = auth_mod.Principal(
-            account_id="role-test", username=f"测试{role}", role=role
-        )
+        principal = auth_mod.Principal(account_id="role-test", username=f"测试{role}", role=role)
         request.state.principal = principal
         return principal
 

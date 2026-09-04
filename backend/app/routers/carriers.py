@@ -58,7 +58,9 @@ class DestroyRequestIn(NoteIn):
     destroy_method: str = Field(min_length=1, max_length=64)  # 碎纸/消磁/焚烧...
 
 
-def _audit(reg: Registry, principal: Principal, action: str, carrier: dict, note: str | None) -> None:
+def _audit(
+    reg: Registry, principal: Principal, action: str, carrier: dict, note: str | None
+) -> None:
     """载体动作留痕：主链全记；登记/销毁类关键动作另入安全审计链（C-19）。"""
     reg.repository.append_audit(
         actor=principal.username,
