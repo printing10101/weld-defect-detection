@@ -145,8 +145,8 @@ def create_record(body: RecordIn) -> dict[str, Any]:
     return record
 
 
-@router.post("/std-eval/record/pdf")
-def create_record_pdf(
+@router.get("/std-eval/record/pdf")
+def get_record_pdf(
     request: Request,
     reg: Annotated[Registry, Depends(get_registry)],
     principal: Annotated[Principal, Depends(get_principal)],
@@ -320,9 +320,7 @@ def export_false_reports(
         )
     if fmt == "csv":
         buf = io.StringIO()
-        writer = csv.DictWriter(
-            buf, fieldnames=["id", "path", "n_false_reports", "secret_level"]
-        )
+        writer = csv.DictWriter(buf, fieldnames=["id", "path", "n_false_reports", "secret_level"])
         writer.writeheader()
         writer.writerows(films)
         return Response(
