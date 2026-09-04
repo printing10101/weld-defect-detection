@@ -17,6 +17,7 @@ use std::io;
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -27,10 +28,82 @@ const BACKEND_PORT: u16 = 18773;
 /// 可超过 60s，放宽到 180s 避免误报“后端未响应”。
 const BACKEND_STARTUP_TIMEOUT_SECS: u64 = 180;
 
-/// 后端子进程句柄的共享槽位：随应用生命周期持有，窗口销毁时显式回收，
-/// 避免 `mem::forget` 造成的孤儿进程（应用退出后 uvicorn 仍常驻占用端口）。
+/// 构建指针字段（供监督器与停止标志复用）。
 struct BackendState {
     child: Arc<Mutex<Option<Child>>>,
+}
+
+const SUPERVISOR_CHECK_INTERVAL_MS: u64 = 2000;
+
+fn main() {
+    let backend_state = BackendState {
+        child: Arc::new(Mutex::new(None)),
+    };
+    // 供后台监督线程与窗口事件钩子各自持有一份 Arc 克隆（引用计数，零额外开销）。
+    let launch_slot = backend_state.child.clone();
+    let event_slot = backend_state.child.clone();
+    // 停止标志：窗口销毁即置位，监督线程据此退出并回收后端子进程。
+    let stop = Arc::new(AtomicBool::new(false));
+    let supervisor_stop = stop.clone();
+    let event_stop = stop.clone();
+
+    tauri::Builder::default()
+        .manage(backend_state)
+        .setup(move |app| {
+            // 单一后台监督线程：负责首次启动 + 存活监控 + 崩溃自愈 + 优雅退出回收；
+            // 窗口不阻塞显示，前端通过轮询 /health 自动恢复。
+            let handle = app.handle().clone();
+            thread::spawn(move || {
+                let dir = match exe_dir() {
+                    Ok(d) => d,
+                    Err(e) => {
+                        eprintln!("[ScanDetection] cannot resolve exe dir: {e}");
+                        return;
+                    }
+                };
+                let app_root = resolve_app_root(&dir);
+                let python = pick_python(&app_root);
+
+                // 首启后端并等待就绪。
+                try_spawn_backend(&launch_slot, &app_root, &python);
+                let ready = wait_for_port_stoppable(
+                    "127.0.0.1",
+                    BACKEND_PORT,
+                    BACKEND_STARTUP_TIMEOUT_SECS,
+                    &supervisor_stop,
+                );
+                if ready {
+                    // C-17：后端就绪（端口可连 = lifespan 完成）后注入 IPC 一次性令牌。
+                    inject_ipc_token(&handle);
+                }
+
+                // 进入存活监控/自愈循环（含看门狗重启标记消费）。
+                let marker = app_root.join("data").join("restart_required");
+                run_supervisor(
+                    launch_slot,
+                    supervisor_stop,
+                    marker,
+                    SUPERVISOR_CHECK_INTERVAL_MS,
+                    handle,
+                );
+            });
+            Ok(())
+        })
+        .on_window_event(move |_window, event| {
+            // 主窗口销毁即代表应用退出：置位停止标志并回收后端子进程，
+            // 杜绝孤儿进程/端口占用（与监督线程回收双保险）。
+            if let tauri::WindowEvent::Destroyed = event {
+                event_stop.store(true, Ordering::SeqCst);
+                if let Ok(mut guard) = event_slot.lock() {
+                    if let Some(mut child) = guard.take() {
+                        let _ = child.kill();
+                        println!("[ScanDetection] backend process stopped");
+                    }
+                }
+            }
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }
 
 /// 返回当前可执行文件所在目录（安装布局下即“安装目录”）。
@@ -109,14 +182,9 @@ fn backend_log_stdio() -> Option<(Stdio, Stdio)> {
     Some((Stdio::from(out), Stdio::from(err)))
 }
 
-/// 在后台启动后端；返回前先阻塞等待端口就绪（最多 180s）。
-/// 子进程句柄写入 `child_slot`，由窗口关闭钩子负责回收。
-fn launch_backend(child_slot: Arc<Mutex<Option<Child>>>) -> io::Result<()> {
-    let dir = exe_dir()?;
-    let app_root = resolve_app_root(&dir);
-    let python = pick_python(&app_root);
-
-    let mut cmd = Command::new(&python);
+/// 构造 uvicorn 启动命令（stdout/stderr 归并到同一天日志文件）。
+fn build_uvicorn_command(app_root: &std::path::Path, python: &std::path::Path) -> Command {
+    let mut cmd = Command::new(python);
     cmd.arg("-m")
         .arg("uvicorn")
         .arg("backend.app.main:app")
@@ -124,7 +192,10 @@ fn launch_backend(child_slot: Arc<Mutex<Option<Child>>>) -> io::Result<()> {
         .arg("127.0.0.1")
         .arg("--port")
         .arg(BACKEND_PORT.to_string())
-        .current_dir(&app_root);
+        .current_dir(app_root);
+    // 孤儿兜底：把壳自身 PID 传给后端，后端据此监控父进程消失即自杀退出
+    //（覆盖壳被强杀/崩溃、窗口 Destroyed 事件不触发而遗留孤儿后端的场景）。
+    cmd.env("SCANDETECTION_PARENT_PID", std::process::id().to_string());
     match backend_log_stdio() {
         Some((out, err)) => {
             cmd.stdout(out).stderr(err);
@@ -139,44 +210,159 @@ fn launch_backend(child_slot: Arc<Mutex<Option<Child>>>) -> io::Result<()> {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000);
     }
-    let mut child = cmd.spawn()?;
-
-    // 记录句柄供退出时回收；不再 mem::forget（那会泄漏后端进程）。
-    if let Ok(mut slot) = child_slot.lock() {
-        *slot = Some(child);
-    } else {
-        // 锁已毒化（理论上不应发生）：放弃托管，先杀掉避免成为无人管理的孤儿进程。
-        let _ = child.kill();
-    }
-
-    println!(
-        "[ScanDetection] backend launched via {:?} (cwd={:?})",
-        python, app_root
-    );
-
-    // 等待端口就绪（uvicorn 在应用 lifespan 完成后才绑定端口，端口可连即模型已加载）。
-    wait_for_port("127.0.0.1", BACKEND_PORT, BACKEND_STARTUP_TIMEOUT_SECS);
-    Ok(())
+    cmd
 }
 
-/// 轮询 TCP 端口，直到可连接或超时。
-fn wait_for_port(host: &str, port: u16, timeout_secs: u64) {
+/// 组装命令并 spawn 后端子进程，句柄写入 `child_slot`。
+/// 成功返回 true；spawn 失败打日志返回 false（不 panic，交由监控循环下轮重试）。
+fn try_spawn_backend(
+    child_slot: &Arc<Mutex<Option<Child>>>,
+    app_root: &std::path::Path,
+    python: &std::path::Path,
+) -> bool {
+    match build_uvicorn_command(app_root, python).spawn() {
+        Ok(mut child) => {
+            match child_slot.lock() {
+                Ok(mut slot) => *slot = Some(child),
+                Err(_) => {
+                    // 锁已毒化（理论上不应发生）：放弃托管，先杀掉避免成为孤儿进程。
+                    let _ = child.kill();
+                    return false;
+                }
+            }
+            println!(
+                "[ScanDetection] backend launched via {:?} (cwd={:?})",
+                python, app_root
+            );
+            true
+        }
+        Err(e) => {
+            eprintln!("[ScanDetection] backend spawn failed: {e}");
+            false
+        }
+    }
+}
+
+/// 轮询 TCP 端口，直到可连接或超时（stop 置位时提前返回中断等待）。
+fn wait_for_port_stoppable(
+    host: &str,
+    port: u16,
+    timeout_secs: u64,
+    stop: &AtomicBool,
+) -> bool {
     let addr = format!("{}:{}", host, port);
     let deadline = Duration::from_secs(timeout_secs);
     let start = std::time::Instant::now();
     loop {
+        if stop.load(Ordering::SeqCst) {
+            return false; // 应用退出中，中止等待
+        }
         if TcpStream::connect(&addr).is_ok() {
             println!("[ScanDetection] backend ready on {}", addr);
-            return;
+            return true;
         }
         if start.elapsed() > deadline {
             eprintln!(
                 "[ScanDetection] 等待后端超时（{}s），前端可能暂时无法连接 API。",
                 timeout_secs
             );
-            return;
+            return false;
         }
         thread::sleep(Duration::from_millis(500));
+    }
+}
+
+/// 后端存活监控与自愈（S-09 配套：Tauri 壳侧崩溃重启）。
+///
+/// 在应用生命周期内循环：
+/// 1. 消费看门狗标记文件 `data/restart_required`（后端内存超阈值写的优雅重启请求）；
+/// 2. 用 `try_wait` 轮询后端子进程——若已退出（崩溃/被杀/人为终止）则自动重启，
+///    并重新注入新生成的一次性 IPC 令牌（后端重启会刷新令牌，需重注入避免 401）；
+/// 3. 按 `check_interval_ms` 周期循环，`stop` 置位（窗口销毁）时退出并回收子进程。
+///
+/// 说明：Tauri 进程在 main() 返回时随宿主退出，本线程会在该时机被打断；正常
+/// 关机路径由 on_window_event 直接 kill + 置位 stop 兜底，避免后端子进程残留。
+fn run_supervisor(
+    child_slot: Arc<Mutex<Option<Child>>>,
+    stop: Arc<AtomicBool>,
+    marker_path: PathBuf,
+    check_interval_ms: u64,
+    handle: tauri::AppHandle,
+) {
+    let dir = match exe_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("[ScanDetection] supervisor cannot resolve exe dir: {e}");
+            return;
+        }
+    };
+    let app_root = resolve_app_root(&dir);
+    let python = pick_python(&app_root);
+
+    let interval = Duration::from_millis(check_interval_ms.max(200));
+    while !stop.load(Ordering::SeqCst) {
+        // 1) 消费看门狗优雅重启标记（存在即触发一次重启）。
+        let marker_restart = if marker_path.exists() {
+            let _ = std::fs::remove_file(&marker_path); // 先删标记，防重复重启
+            eprintln!("[ScanDetection] watchdog restart marker present; restarting backend");
+            true
+        } else {
+            false
+        };
+
+        // 2) 检测后端子进程是否已退出。
+        let exited = {
+            match child_slot.lock() {
+                Ok(mut guard) => match guard.as_mut() {
+                    Some(c) => match c.try_wait() {
+                        Ok(Some(_)) => true, // 已退出（优雅或被收割）
+                        Ok(None) => false,   // 仍在运行
+                        Err(_) => true,      // 句柄异常，视作死亡
+                    },
+                    None => true, // 无子进程，需首启或重启
+                },
+                Err(_) => {
+                    eprintln!("[ScanDetection] supervisor lock poisoned; exiting");
+                    return;
+                }
+            }
+        };
+
+        if exited || marker_restart {
+            // 3) 回收旧句柄 → 重新拉起 → 等端口就绪 → 重注入令牌。
+            {
+                if let Ok(mut guard) = child_slot.lock() {
+                    if let Some(mut c) = guard.take() {
+                        let _ = c.kill();
+                    }
+                }
+            }
+            try_spawn_backend(&child_slot, &app_root, &python);
+            let ready = wait_for_port_stoppable(
+                "127.0.0.1",
+                BACKEND_PORT,
+                BACKEND_STARTUP_TIMEOUT_SECS,
+                &stop,
+            );
+            if ready {
+                inject_ipc_token(&handle); // 后端重启用新令牌，重注入 WebView
+            }
+        }
+
+        // 4) 分片睡眠：周期内也能及时响应 stop（应用退出）。
+        let mut remaining = interval;
+        while remaining > Duration::ZERO && !stop.load(Ordering::SeqCst) {
+            let step = remaining.min(Duration::from_millis(200));
+            thread::sleep(step);
+            remaining -= step;
+        }
+    }
+    // stop 置位：回收后端子进程（与 on_window_event 双保险）。
+    if let Ok(mut guard) = child_slot.lock() {
+        if let Some(mut c) = guard.take() {
+            let _ = c.kill();
+            println!("[ScanDetection] backend process stopped (supervisor)");
+        }
     }
 }
 
@@ -229,41 +415,4 @@ fn inject_ipc_token(handle: &tauri::AppHandle) {
     } else {
         eprintln!("[ScanDetection] 未找到主窗口，IPC 令牌未注入");
     }
-}
-
-fn main() {
-    let backend_state = BackendState {
-        child: Arc::new(Mutex::new(None)),
-    };
-    // 供后台启动线程与窗口事件钩子各自持有一份 Arc 克隆（引用计数，零额外开销）。
-    let launch_slot = backend_state.child.clone();
-    let event_slot = backend_state.child.clone();
-
-    tauri::Builder::default()
-        .manage(backend_state)
-        .setup(move |app| {
-            // 后台启动后端并等待就绪；窗口不阻塞，前端通过轮询 /health 自动恢复。
-            let handle = app.handle().clone();
-            thread::spawn(move || {
-                if let Err(e) = launch_backend(launch_slot) {
-                    eprintln!("[ScanDetection] launch_backend error: {e}");
-                }
-                // C-17：后端就绪（端口可连 = lifespan 完成）后注入 IPC 一次性令牌。
-                inject_ipc_token(&handle);
-            });
-            Ok(())
-        })
-        .on_window_event(move |_window, event| {
-            // 主窗口销毁即代表应用退出，回收后端子进程，杜绝孤儿进程/端口占用。
-            if let tauri::WindowEvent::Destroyed = event {
-                if let Ok(mut guard) = event_slot.lock() {
-                    if let Some(mut child) = guard.take() {
-                        let _ = child.kill();
-                        println!("[ScanDetection] backend process stopped");
-                    }
-                }
-            }
-        })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
 }
