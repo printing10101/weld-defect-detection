@@ -216,9 +216,9 @@ batch:
   per_image_estimate_sec: 8.0  # 单图预估耗时（进度/预计时间展示用）
   max_retained_batches: 50     # 内存保留终结批次上限（防长跑内存随批次无界增长）
   max_retained_snapshot_files: 200  # 磁盘快照保留上限（data/batch/*.json 超限后剪枝最旧"已完成且无重试价值"快照，防磁盘无界增长）
-backup:  # S-12 备份增强
-  interval_hours: 0.0   # 自动备份间隔（小时）；0=关闭定期调度（默认不影响测试）
-  include_images: false # 备份是否纳入影像目录（true 时逐文件 SM3 校验，归档变大）
+backup:  # S-12 备份增强（GB/T 25000.51 可靠性：数据可恢复）
+  interval_hours: 24.0  # 自动备份间隔（小时）；0=关闭定期调度。首轮等满一个间隔才执行，冷启动零负担
+  include_images: false # 备份是否纳入影像目录（true 时逐文件 SM3 校验，归档变大；SM4 加密后体积见 crypto 性能说明）
 watchdog:  # S-09 内存监控与自愈（生产开启：告警阈值偏低 + 超阈触发壳侧重启）
   enabled: true           # 后台线程周期采样 RSS，超阈值告警
   interval_sec: 30.0      # 采样周期（秒）
