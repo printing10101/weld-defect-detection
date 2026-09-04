@@ -4,6 +4,7 @@
  * （POST/PATCH/DELETE，DB50/T 1807 §6.1.4），变更后后端自动重评级。
  */
 import { ref } from "vue";
+import ConfirmDialog from "./ConfirmDialog.vue";
 import {
   addReviewDefect,
   deleteReviewDefect,
@@ -120,7 +121,17 @@ async function onEditClass(row: DefectRow, classId: number): Promise<void> {
   }
 }
 
-async function onDeleteDefect(row: DefectRow): Promise<void> {
+// 删除须二次确认（用户差错防御）：先选中目标 → 确认框 → 实际执行
+const deleteTarget = ref<DefectRow | null>(null);
+
+function onDeleteDefect(row: DefectRow): void {
+  deleteTarget.value = row;
+}
+
+async function onDeleteDefectConfirmed(): Promise<void> {
+  const row = deleteTarget.value;
+  deleteTarget.value = null;
+  if (!row) return;
   const r = guardReason();
   if (r === null) return;
   defectBusy.value = true;
@@ -420,6 +431,15 @@ async function onSubmit(): Promise<void> {
       </div>
     </div>
   </div>
+  <ConfirmDialog
+    :open="deleteTarget !== null"
+    title="删除缺陷确认"
+    message="将删除该缺陷记录并触发重新评级、重出报告；操作入审计链且不可撤销。确定删除？"
+    confirm-text="删除"
+    danger
+    @confirm="onDeleteDefectConfirmed"
+    @cancel="deleteTarget = null"
+  />
 </template>
 
 <style scoped>

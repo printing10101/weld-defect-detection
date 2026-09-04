@@ -175,7 +175,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         >
           <div class="logo" />
           <p class="app-name">
-            射线评片智能检测系统
+            射线焊缝缺陷智能检测系统
           </p>
           <p class="ver">
             版本 0.1.0 · 本地优先
