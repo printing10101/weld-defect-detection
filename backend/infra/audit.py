@@ -1,11 +1,8 @@
 """双链审计留痕的唯一封装（C-19）。
 
-历史包袱：主审计链 + 安全审计链的双写此前有 6 处独立实现
-（export/_decision_audit、compliance/_audit_action、carriers/_audit、
-audit 路由内联、classification 内联、auth._on_account_locked），
-object_type/before/after 口径不一，漏写一条链即审计缺口且无测试兜底。
-统一口径：**主链全量记录**；``security=True`` 时另入独立安全链
+口径：**主链全量记录**；``security=True`` 时另入独立安全链
 （防单链被整体覆盖），安全链可用 sec_* 参数覆盖差异字段。
+所有需要双链留痕的动作一律经由本函数，不得各自手写两条 append。
 """
 
 from __future__ import annotations

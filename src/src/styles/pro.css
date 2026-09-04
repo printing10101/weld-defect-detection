@@ -539,9 +539,6 @@ body {
   border-top: 1px solid var(--line-soft);
   padding-top: 10px;
 }
-.again {
-  margin-top: 12px;
-}
 
 /* ── 档案 ── */
 .search {

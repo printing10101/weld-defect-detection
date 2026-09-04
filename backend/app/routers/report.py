@@ -175,8 +175,8 @@ def report_pdf(
 def _image_dims(path: str | None) -> tuple[int, int]:
     """从原图副本读取宽高（像素）；缺失/损坏返回 (0, 0)。
 
-    经 image_loader.read_gray 读取——副本默认为国密密文（security.encrypt=true），
-    直接 cv2.imread 密文必然失败（曾致本函数恒返回 (0,0) 的静默失效）。
+    经 image_loader.read_gray 读取——副本默认为国密密文
+    （security.encrypt=true），直接 cv2.imread 密文必然失败。
     """
     if not path:
         return (0, 0)

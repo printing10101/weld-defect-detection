@@ -32,7 +32,7 @@ from pathlib import Path
 
 # Request 必须模块级可解析：脚本启用 PEP 563（延迟注解），FastAPI 解析
 # override 函数注解时在模块全局查找名字——函数内导入会解析失败，把 request
-# 误判为必需 query 参数（实测踩中：POST /report 422）。
+# 误判为必需 query 参数（症状：POST /report 422）。
 from fastapi import Request
 
 _INSTALL_ROOT = Path(__file__).resolve().parents[2]

@@ -24,10 +24,11 @@ from backend.domain.dto import BBox, DefectClass, DefectShape, Detection, ImageM
 from backend.domain.errors import GradingAmbiguousError, IQIFailError
 from backend.domain.film_region import FilmRegionCfg as DomainFilmRegionCfg
 from backend.domain.film_region import detect_film_region
-from backend.domain.iqi import IqiConfig, enrich_grade, verify_iqi
+from backend.domain.gate_adapters import iqi_cfg_from_settings, pseudo_cfg_from_settings
+from backend.domain.iqi import enrich_grade, verify_iqi
 from backend.domain.preprocess.metrics import QualityCfg as DomainQualityCfg
 from backend.domain.preprocess.metrics import assess_quality
-from backend.domain.pseudo_defect import PseudoDefectCfg, screen_pseudo_defects
+from backend.domain.pseudo_defect import screen_pseudo_defects
 from backend.domain.quantify import get_quantifier
 from backend.domain.recommend import recommend
 from backend.domain.review import ReviewDecision, ReviewRole, resolve_review
@@ -228,17 +229,7 @@ class InspectionPipeline:
             )
         )
         density_ok = bool(check_density(density, reg.config.density.low, reg.config.density.high))
-        iqi_cfg = IqiConfig(
-            type=reg.config.iqi.type,
-            wire_diameters_mm=tuple(reg.config.iqi.wire_diameters_mm),
-            required_wire_no=reg.config.iqi.required_wire_no,
-            hole_diameters_mm=tuple(reg.config.iqi.hole_diameters_mm),
-            required_hole_no=reg.config.iqi.required_hole_no,
-            min_contrast_ratio=reg.config.iqi.min_contrast_ratio,
-            auto_locate=reg.config.iqi.auto_locate,
-            locate_threshold=reg.config.iqi.locate_threshold,
-            sensitivity=tuple(reg.config.iqi.sensitivity),
-        )
+        iqi_cfg = iqi_cfg_from_settings(reg.config.iqi)
         # IQI 验证：用户给 ROI 时按原图坐标在全图上验证（ROI 已隔离像质计，
         # 且胶片裁剪可能把像质计切掉）；无 ROI 时在胶片区上自动定位。
         iqi_target = gray if iqi_roi is not None else eval_gray
@@ -246,23 +237,7 @@ class InspectionPipeline:
         # 用透照厚度 + 参考表补全 A/AB/B 等级（厚度缺失则 grade=None）。
         iqi = enrich_grade(iqi, base_metal_thickness_mm, iqi_cfg.sensitivity)
         # 伪缺陷筛查，仅严重项默认阻断。
-        # 将 infra 配置适配为 domain 类型（与 IqiConfig 同模式，隔离 pydantic）。
-        pd_cfg = reg.config.pseudo_defect
-        pd_domain = PseudoDefectCfg(
-            hough_threshold=pd_cfg.hough_threshold,
-            scratch_min_ratio=pd_cfg.scratch_min_ratio,
-            scratch_grating_min_lines=pd_cfg.scratch_grating_min_lines,
-            canny_lo=pd_cfg.canny_lo,
-            canny_hi=pd_cfg.canny_hi,
-            uniformity_low_freq=pd_cfg.uniformity_low_freq,
-            uniformity_max_ratio=pd_cfg.uniformity_max_ratio,
-            dust_tophat_k=pd_cfg.dust_tophat_k,
-            dust_min_area=pd_cfg.dust_min_area,
-            dust_max_count=pd_cfg.dust_max_count,
-            block_on_scratch=pd_cfg.block_on_scratch,
-            block_on_uniformity=pd_cfg.block_on_uniformity,
-            block_on_dust=pd_cfg.block_on_dust,
-        )
+        pd_domain = pseudo_cfg_from_settings(reg.config.pseudo_defect)
         pd = screen_pseudo_defects(eval_gray, pd_domain)
         # 质量度量门禁：在胶片区上评估（反映底片本身质量，排除翻拍边框/灯箱背景）。
         q_cfg = reg.config.quality
@@ -416,7 +391,7 @@ class InspectionPipeline:
         except GradingAmbiguousError as exc:
             joint_level = None
             per_grade = []
-            # 保留熔断原因，报告与审计需可追溯（原实现丢弃后无从解释为何无级别）
+            # 保留熔断原因：报告与审计需可追溯（丢弃将无从解释为何无级别）
             basis = [str(exc)] if str(exc) else ["判定信息不足，需人工复核"]
             need_review = True
             std_version = ""
@@ -656,8 +631,8 @@ class InspectionPipeline:
         if report_id:
             repo.update_report(report_id, pdf_path=pdf_path)
         else:
-            # 影像尚无报告行：原实现直接 uuid4 后 update_report，报告行不存在
-            # → KeyError 或凭空返回一个查不到的 report_id（下载必 404）。这里先建行。
+            # 影像尚无报告行：直接 uuid4 会凭空给出查不到的 report_id
+            # （下载必 404），须先建报告行再回填路径。
             report_id = uuid.uuid4().hex
             repo.create_report_row(report_id, image_id)
             repo.update_report(report_id, pdf_path=pdf_path)

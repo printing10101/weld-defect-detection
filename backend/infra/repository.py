@@ -617,8 +617,8 @@ class InspectionRepository:
     ) -> tuple[list[dict[str, Any]], int]:
         """审计日志检索，按时间降序。
 
-        返回 (当页条目, 匹配总数)。原实现只返回列表，调用方拿 len 当 total，
-        在超过 limit 时会低报总数，审计场景不可接受。
+        返回 (当页条目, 匹配总数)。总数必须按过滤条件全量计数——
+        拿当页条目数当 total 在超过 limit 时会低报，审计场景不可接受。
         actions: 多动作白名单过滤（C-18 运维操作回放用）；显式给单值 action
         时以单值优先。
         """
@@ -665,9 +665,7 @@ class InspectionRepository:
         失配，防篡改强度不受影响；代价是单条记录无法自证其算法（攻击者
         若能整链重写本就可重算任意算法，与改前一致）。
 
-        原实现用 list(session.scalars(...)) 一次性把整张审计表 materialize 成
-        ORM 对象，随表增长内存占用线性膨胀（O(N)），且每次 /audit 校验都会触发。
-        改为 yield_per 流式迭代：逐批（每批 1000 行）从游标取数，常驻内存 O(1)，
+        yield_per 流式迭代：逐批（每批 1000 行）从游标取数，常驻内存 O(1)，
         且一旦发现哈希断裂立即返回 False，无需遍历全表。
         """
         with Session(self._engine) as session:
@@ -829,7 +827,7 @@ def _parse_dt_end(raw: str) -> datetime:
 
     ""（纯日期）视为「含当天」→ 次日 00:00:00；
     "T12:00"（带时间）按字面取值，不再无脑 +1 天
-    （原实现对带时间的上界会多纳入整整一天的记录）。
+    （带时间的上界若也 +1 天会多纳入整整一天的记录）。
     """
     s = (raw or "").strip()
     dt = _parse_dt(s)

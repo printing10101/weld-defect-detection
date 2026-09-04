@@ -25,12 +25,7 @@ export const DEFECT_CLASS_LABELS: readonly string[] = [
   "咬边",
   "内凹",
 ];
-export type DefectClassId = (typeof DefectClass)[keyof typeof DefectClass];
-
 export type DefectShape = "round" | "linear";
-export type JointLevel = "I" | "II" | "III" | "IV";
-export type Modality = "CR" | "DR" | "DICOM" | "GENERIC";
-
 export interface BBox {
   x: number;
   y: number;
@@ -54,10 +49,6 @@ export interface HealthResponse {
   uri: string;
   backend: string;
   active_version: string | null;
-}
-
-export interface ApiError {
-  error: { code: string; message: string; detail: unknown };
 }
 
 /* ── 真实后端契约（镜像 backend/app/routers/report.py · records.py · review.py）── */
@@ -528,80 +519,3 @@ export interface BootstrapOut extends AccountOut {
   private_key: string | null;
 }
 
-/** POST /auth/accounts/{id}/keypair 响应（私钥一次性下发） */
-export interface KeyPairOut {
-  account_id: string;
-  public_key: string;
-  private_key: string;
-}
-
-/** 安全告警（GET /auth/alerts，C-19） */
-export interface AlertOut {
-  alert_id: string;
-  kind: string;
-  level: string;
-  message: string;
-  detail: unknown;
-  status: string;
-  resolved_by: string | null;
-  resolved_at: string | null;
-  note: string | null;
-  created_at: string | null;
-}
-
-/** 密级（C-10）：0=非密 1=内部 2=秘密 3=机密 */
-export interface SecretLevelOut {
-  image_id: string;
-  secret_level: 0 | 1 | 2 | 3;
-  secret_level_name: string;
-  classification_basis: string | null;
-}
-
-/** 涉密载体（C-12） */
-export interface CarrierOut {
-  carrier_id: string;
-  kind: "film" | "report" | "backup";
-  object_id: string | null;
-  secret_level: number;
-  owner: string | null;
-  status: "in_stock" | "borrowed" | "returned" | "pending_destroy" | "destroyed";
-  borrow_history: Array<{ action: string; operator: string | null; at: string | null; note: string | null }>;
-  destroy_method: string | null;
-  destroy_note: string | null;
-  destroy_requested_by: string | null;
-  destroy_confirmed_by: string | null;
-  destroyed_at: string | null;
-  created_at: string | null;
-}
-
-/** 导出审批（C-14） */
-export interface ExportRequestOut {
-  request_id: string;
-  subject: string;
-  reason: string | null;
-  requested_by: string;
-  status: "pending" | "approved" | "rejected" | "consumed";
-  decided_by: string | null;
-  decided_at: string | null;
-  token_expires_at: string | null;
-  used_at: string | null;
-  created_at: string | null;
-}
-
-/** POST /export/requests/{id}/token 响应（明文令牌仅此一次返回） */
-export interface ExportTokenOut {
-  token: string;
-  expires_in_sec: number;
-}
-
-/** 脱敏残留审计（C-13，POST /privacy/audit 响应） */
-export interface PrivacyAuditOut {
-  generated_at: string;
-  directory: string;
-  scanned: number;
-  n_findings: number;
-  clean: boolean;
-  findings: Array<{ file: string; kind: string; residues: string[] }>;
-  errors: Array<{ file: string; error: string }>;
-  report_files: { json: string; pdf: string };
-}

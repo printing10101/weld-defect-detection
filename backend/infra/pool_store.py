@@ -18,7 +18,7 @@ from backend.evaluation.harness import golden_set_fingerprint
 class FilePoolStore(PoolStore):
     """文件系统训练池存储（YOLO 标注 + manifest，对齐原 domain 内嵌 IO 语义）。
 
-    manifest 与 pool_dir 同级（data/active/pool_manifest.json），与原实现一致。
+    manifest 与 pool_dir 同级（data/active/pool_manifest.json）。
     """
 
     def __init__(self, pool_dir: str | Path) -> None:

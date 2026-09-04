@@ -1,8 +1,6 @@
 """C-15 纯离线自检结论——由静态配置得出"无外网依赖"判定。
 
-分层说明：原实现放在 app.routers.system，导致 infra.compliance.selfcheck
-反向 import app 层（import-linter 分层合约红）。判定只依赖 infra.config
-的 AppConfig，故下移至本模块；路由层与启动自检共用。
+判定只依赖 infra.config 的 AppConfig；启动自检与查询端点共用。
 """
 
 from __future__ import annotations

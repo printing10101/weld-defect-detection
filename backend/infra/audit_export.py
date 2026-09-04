@@ -6,9 +6,7 @@
   "record":{...},"chain_valid":<该链整链校验结论>}；
 - 末行 footer：两条链的条数与校验结论汇总（供归档校验程序核对）。
 
-分层说明：原实现放在 app.routers.audit，导致 infra.compliance.selfcheck
-反向 import app 层（import-linter 分层合约红）。构造归档件只依赖两个
-infra 仓储对象，故下移至本模块；路由层仅做鉴权/审计留痕编排。
+只依赖两个 infra 仓储对象；路由层负责鉴权与审计留痕编排。
 """
 
 from __future__ import annotations

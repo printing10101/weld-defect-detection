@@ -33,7 +33,7 @@ class LocalModelStore:
         uri = _resolve_model_uri(model_uri or self.default_uri)
         path = Path(uri)
         if path.is_file():
-            # 分块摘要：原实现 read_bytes 会把整份权重读进内存（大模型下是数百 MB 峰值）
+            # 分块摘要：整份读入会让大模型权重全量进内存（数百 MB 峰值）
             digest = hashlib.sha256()
             with path.open("rb") as fh:
                 for chunk in iter(lambda: fh.read(1 << 20), b""):

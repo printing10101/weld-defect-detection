@@ -54,7 +54,7 @@ def audit(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> AuditResponse:
-    # total 取匹配总数（原实现用 len(entries)，超过 limit 时低报，审计场景不可接受）
+    # total 取匹配总数：len(当页条目) 在超过 limit 时会低报，审计不可接受
     entries, total = reg.repository.list_audit(
         actor=actor,
         action=action,

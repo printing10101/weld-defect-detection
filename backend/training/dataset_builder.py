@@ -34,8 +34,8 @@ def _rmtree_native(path: Path) -> None:
 
     WorkBuddy 沙箱的 safe-delete 护栏会劫持 os.remove/Path.unlink/`shutil.rmtree`
     （回收站不可用时 FAIL_CLOSED；shim 的 rmtree 对非 os 临时目录走 trash，bulk 时
-    静默不删）。build_dataset 重复运行时旧 split 文件会**累积**（曾致 auto_v2
-    训练误用 6267 张历史数据）。Windows 下经子进程 cmd /c rmdir 绕开 shim；
+    静默不删）。build_dataset 重复运行前必须清空输出目录，否则旧 split
+    文件累积会被新一轮训练误用。Windows 下经子进程 cmd /c rmdir 绕开 shim；
     其余平台无 shim 注入，直接 shutil.rmtree。
     """
     if not path.exists():
@@ -217,8 +217,8 @@ def build_dataset(
     抽掉）：含罕见类（rare_classes，默认 DEFAULT_RARE_CLASSES）的图**优先入选**，
     占限流配额的 60%（按类别轮询保证每罕见类都有代表），剩余配额随机补气孔等常见类。
 
-    clean_output：写入前清空 out_root 的 train/val/test（防重复 build 累积旧文件，
-    曾致 auto_v2 误用 6267 张历史数据）。
+    clean_output：写入前清空 out_root 的 train/val/test（防重复 build
+    累积旧 split 被误用）。
     """
     out_root = Path(out_root or _OUT_ROOT)
     raw_root = _RAW_ROOT

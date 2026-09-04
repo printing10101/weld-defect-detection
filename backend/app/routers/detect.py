@@ -57,7 +57,7 @@ async def detect(
     pixel_spacing_mm: Annotated[float | None, Form()] = None,
     conf: Annotated[float | None, Form()] = None,
 ) -> DetectResponse:
-    # 置信度显式校验：原实现 `conf or 0.3` 会把合法的 conf=0.0 静默改成 0.3。
+    # 置信度显式校验：conf=0.0 是合法值，`or` 默认值会把它静默改成 0.3。
     if conf is not None and not 0.0 <= conf <= 1.0:
         raise HTTPException(
             status_code=422,

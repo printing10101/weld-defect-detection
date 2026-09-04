@@ -144,7 +144,7 @@ def test_report_grades_when_film_evaluable(tmp_path, monkeypatch) -> None:
 
 
 def test_report_without_spacing_refuses_to_grade(tmp_path, monkeypatch) -> None:
-    """缺少像素标定时禁止定级：原实现会伪造 1.0 mm/px 后照常出级别。"""
+    """缺少像素标定时禁止定级：不得伪造默认标定（如 1.0 mm/px）后照常出级别。"""
     from backend.app import dependencies as deps
 
     reg = deps.get_registry()

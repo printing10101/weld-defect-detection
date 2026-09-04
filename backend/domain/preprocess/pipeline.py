@@ -74,12 +74,12 @@ class OpencvPreprocessor:
     def enhance(self, image: np.ndarray, gamma: float) -> np.ndarray:
         """对比度/灰度校正：Gamma（低黑度补偿）+ CLAHE（局部不均）。
 
-        三处加固：
-        1. gamma≈1.0 直接跳过幂运算（原实现对 4k 底片仍要走一遍 float64，
-           约 128 MB 临时内存且毫无效果）；
+        实现要点：
+        1. gamma≈1.0 直接跳过幂运算（对 4k 底片省去约 128 MB 的 float64
+           临时内存且毫无效果）；
         2. 8bit 走 256 项 LUT（cv2.LUT），复杂度与像素位深解耦；
-        3. 量纲按 dtype 取（原实现固定除以 255，16bit 输入会 >1 再溢出回绕，
-           产出雪花噪声），并用四舍五入而非截断，消除 -0.5 LSB 系统偏差。
+        3. 量纲按 dtype 取（固定除以 255 时 16bit 输入会 >1 再溢出回绕，
+           产出雪花噪声），四舍五入而非截断，消除 -0.5 LSB 系统偏差。
         """
         _require_2d(image)
         if not np.isfinite(gamma) or gamma <= 0.0:
@@ -108,7 +108,7 @@ class OpencvPreprocessor:
         out = np.zeros(image.shape[:2], np.uint8)  # 输出恒为 8bit 掩膜
         patch = _slice_roi(image, roi)
         if patch.size == 0:
-            return out  # 空 ROI：原实现会让 GaussianBlur 抛 cv2.error
+            return out  # 空 ROI：直接送 GaussianBlur 会抛 cv2.error
         # Canny 只接受 CV_8U；16bit 底片须先做量纲映射
         patch8 = (
             patch
