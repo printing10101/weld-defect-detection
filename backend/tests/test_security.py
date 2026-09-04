@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
@@ -42,9 +43,19 @@ def test_rate_limit_429() -> None:
         assert r4.json()["error"]["code"] == "RATE_LIMITED"
 
 
-def test_rate_limit_window_resets() -> None:
-    """滑动窗口过期后计数清零（限流不永久阻塞）。"""
+def test_rate_limit_window_resets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """滑动窗口过期后计数清零（限流不永久阻塞）。
+
+    注入确定性单调时钟：旧实现靠 sleep(0.08s) 跨过 0.05s 窗口，全量套件高负载
+    下第 3 个请求可能已被挤到窗口过期之后（预期 429 实得 200）造成偶发失败；
+    改为手动推时钟，断言与墙钟彻底解耦。
+    """
     from fastapi import FastAPI
+
+    import backend.app.security as security_mod
+
+    now = {"t": 1000.0}
+    monkeypatch.setattr(security_mod.time, "monotonic", lambda: now["t"])
 
     test_app = FastAPI()
 
@@ -55,9 +66,9 @@ def test_rate_limit_window_resets() -> None:
     test_app.add_middleware(RateLimitMiddleware, limit=2, window_s=0.05)
     with TestClient(test_app) as client:
         assert client.get("/ping").status_code == 200
+        now["t"] += 0.01
         assert client.get("/ping").status_code == 200
+        now["t"] += 0.01
         assert client.get("/ping").status_code == 429
-        import time
-
-        time.sleep(0.08)
+        now["t"] += 1.0  # 跨过窗口
         assert client.get("/ping").status_code == 200  # 窗口过期恢复
