@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 from fastapi import Request
 from fastapi.testclient import TestClient
@@ -65,49 +65,44 @@ def test_approval_flow_end_to_end():
     reg.config.export.require_approval = True
     try:
         # 系统管理员直接下载 → 401（需审批/令牌）
-        with principal_role("sysadmin", username="系统管理员"):
-            with TestClient(app) as c:
-                denied = c.get(f"/api/v1/report/{report_id}/pdf")
-                assert denied.status_code == 401
-                assert denied.json()["detail"]["code"] == "EXPORT_TOKEN_REQUIRED"
+        with principal_role("sysadmin", username="系统管理员"), TestClient(app) as c:
+            denied = c.get(f"/api/v1/report/{report_id}/pdf")
+            assert denied.status_code == 401
+            assert denied.json()["detail"]["code"] == "EXPORT_TOKEN_REQUIRED"
         # 保密员（审批人）本人可直接导出（预授权语义）
-        with principal_role("secadmin", username="保密员"):
-            with TestClient(app) as c:
-                ok = c.get(f"/api/v1/report/{report_id}/pdf")
-                assert ok.status_code == 200
-                assert ok.headers["content-type"].startswith("application/pdf")
+        with principal_role("secadmin", username="保密员"), TestClient(app) as c:
+            ok = c.get(f"/api/v1/report/{report_id}/pdf")
+            assert ok.status_code == 200
+            assert ok.headers["content-type"].startswith("application/pdf")
         # 普通系统管理员走完整审批流
-        with principal_role("sysadmin", username="系统管理员"):
-            with TestClient(app) as c:
-                req = c.post(
-                    "/api/v1/export/requests",
-                    json={"subject": f"report:{report_id}", "reason": "归档调阅"},
-                )
-                assert req.status_code == 200
-                request_id = req.json()["request_id"]
-        with principal_role("secadmin", username="保密员"):
-            with TestClient(app) as c:
-                approve = c.post(f"/api/v1/export/requests/{request_id}/approve")
-                assert approve.status_code == 200
-                assert approve.json()["status"] == "approved"
-        with principal_role("sysadmin", username="系统管理员"):
-            with TestClient(app) as c:
-                tok = c.post(f"/api/v1/export/requests/{request_id}/token")
-                assert tok.status_code == 200
-                token = tok.json()["token"]
-                # 凭令下载 → 200
-                dl = c.get(
-                    f"/api/v1/report/{report_id}/pdf",
-                    headers={"X-Export-Token": token},
-                )
-                assert dl.status_code == 200
-                # 一次性：二次下载 → 401
-                again = c.get(
-                    f"/api/v1/report/{report_id}/pdf",
-                    headers={"X-Export-Token": token},
-                )
-                assert again.status_code == 401
-                assert again.json()["detail"]["code"] == "EXPORT_TOKEN_INVALID"
+        with principal_role("sysadmin", username="系统管理员"), TestClient(app) as c:
+            req = c.post(
+                "/api/v1/export/requests",
+                json={"subject": f"report:{report_id}", "reason": "归档调阅"},
+            )
+            assert req.status_code == 200
+            request_id = req.json()["request_id"]
+        with principal_role("secadmin", username="保密员"), TestClient(app) as c:
+            approve = c.post(f"/api/v1/export/requests/{request_id}/approve")
+            assert approve.status_code == 200
+            assert approve.json()["status"] == "approved"
+        with principal_role("sysadmin", username="系统管理员"), TestClient(app) as c:
+            tok = c.post(f"/api/v1/export/requests/{request_id}/token")
+            assert tok.status_code == 200
+            token = tok.json()["token"]
+            # 凭令下载 → 200
+            dl = c.get(
+                f"/api/v1/report/{report_id}/pdf",
+                headers={"X-Export-Token": token},
+            )
+            assert dl.status_code == 200
+            # 一次性：二次下载 → 401
+            again = c.get(
+                f"/api/v1/report/{report_id}/pdf",
+                headers={"X-Export-Token": token},
+            )
+            assert again.status_code == 401
+            assert again.json()["detail"]["code"] == "EXPORT_TOKEN_INVALID"
         # 审批动作入安全审计链（C-19）
         entries, _ = reg.security_store.list_security_audit(limit=50)
         assert any(
@@ -124,20 +119,16 @@ def test_reject_flow():
     original = reg.config.export.require_approval
     reg.config.export.require_approval = True
     try:
-        with principal_role("sysadmin", username="系统管理员"):
-            with TestClient(app) as c:
-                req = c.post(
-                    "/api/v1/export/requests", json={"subject": f"report:{report_id}"}
-                )
-                request_id = req.json()["request_id"]
-        with principal_role("secadmin", username="保密员"):
-            with TestClient(app) as c:
-                rej = c.post(f"/api/v1/export/requests/{request_id}/reject")
-                assert rej.status_code == 200
-                assert rej.json()["status"] == "rejected"
-                # 已拒绝不能再签发令牌
-                tok = c.post(f"/api/v1/export/requests/{request_id}/token")
-                assert tok.status_code == 409
+        with principal_role("sysadmin", username="系统管理员"), TestClient(app) as c:
+            req = c.post("/api/v1/export/requests", json={"subject": f"report:{report_id}"})
+            request_id = req.json()["request_id"]
+        with principal_role("secadmin", username="保密员"), TestClient(app) as c:
+            rej = c.post(f"/api/v1/export/requests/{request_id}/reject")
+            assert rej.status_code == 200
+            assert rej.json()["status"] == "rejected"
+            # 已拒绝不能再签发令牌
+            tok = c.post(f"/api/v1/export/requests/{request_id}/token")
+            assert tok.status_code == 409
     finally:
         reg.config.export.require_approval = original
 
@@ -150,23 +141,18 @@ def test_wrong_subject_token_rejected():
     original = reg.config.export.require_approval
     reg.config.export.require_approval = True
     try:
-        with principal_role("sysadmin", username="系统管理员"):
-            with TestClient(app) as c:
-                req = c.post(
-                    "/api/v1/export/requests", json={"subject": f"report:{report_id}"}
-                )
-                request_id = req.json()["request_id"]
-        with principal_role("secadmin", username="保密员"):
-            with TestClient(app) as c:
-                c.post(f"/api/v1/export/requests/{request_id}/approve")
-        with principal_role("sysadmin", username="系统管理员"):
-            with TestClient(app) as c:
-                token = c.post(f"/api/v1/export/requests/{request_id}/token").json()["token"]
-                wrong = c.get(
-                    f"/api/v1/report/{other_report}/pdf",
-                    headers={"X-Export-Token": token},
-                )
-                assert wrong.status_code == 401
+        with principal_role("sysadmin", username="系统管理员"), TestClient(app) as c:
+            req = c.post("/api/v1/export/requests", json={"subject": f"report:{report_id}"})
+            request_id = req.json()["request_id"]
+        with principal_role("secadmin", username="保密员"), TestClient(app) as c:
+            c.post(f"/api/v1/export/requests/{request_id}/approve")
+        with principal_role("sysadmin", username="系统管理员"), TestClient(app) as c:
+            token = c.post(f"/api/v1/export/requests/{request_id}/token").json()["token"]
+            wrong = c.get(
+                f"/api/v1/report/{other_report}/pdf",
+                headers={"X-Export-Token": token},
+            )
+            assert wrong.status_code == 401
     finally:
         reg.config.export.require_approval = original
 
@@ -178,10 +164,9 @@ def test_no_approval_mode_allows_download():
     original = reg.config.export.require_approval
     reg.config.export.require_approval = False
     try:
-        with principal_role("sysadmin", username="系统管理员"):
-            with TestClient(app) as c:
-                resp = c.get(f"/api/v1/report/{report_id}/pdf")
-                assert resp.status_code == 200
+        with principal_role("sysadmin", username="系统管理员"), TestClient(app) as c:
+            resp = c.get(f"/api/v1/report/{report_id}/pdf")
+            assert resp.status_code == 200
     finally:
         reg.config.export.require_approval = original
 
@@ -199,20 +184,17 @@ def test_false_reports_rejects_high_secret_level():
         },
         defects=[],
     )
-    reg.repository.set_secret_level(
-        image_id, secret_level=2, classification_basis="测试定密"
-    )
+    reg.repository.set_secret_level(image_id, secret_level=2, classification_basis="测试定密")
     original = reg.config.export.require_approval
     reg.config.export.require_approval = False
     try:
-        with principal_role("sysadmin", username="系统管理员"):
-            with TestClient(app) as c:
-                resp = c.get(
-                    "/api/v1/std-eval/false-reports",
-                    params={"eval_result_path": str(_write_eval_json_with_film(image_id))},
-                )
-                assert resp.status_code == 403
-                assert resp.json()["detail"]["code"] == "SECRET_LEVEL_DENIED"
+        with principal_role("sysadmin", username="系统管理员"), TestClient(app) as c:
+            resp = c.get(
+                "/api/v1/std-eval/false-reports",
+                params={"eval_result_path": str(_write_eval_json_with_film(image_id))},
+            )
+            assert resp.status_code == 403
+            assert resp.json()["detail"]["code"] == "SECRET_LEVEL_DENIED"
     finally:
         reg.config.export.require_approval = original
 
@@ -226,11 +208,32 @@ def _write_eval_json_with_film(image_id: str):
     payload = {
         "n_defect_images": 1,
         "n_no_defect_images": 0,
-        "false_report_films": [
-            {"id": image_id, "path": f"{image_id}.png", "n_false_reports": 1}
-        ],
+        "false_report_films": [{"id": image_id, "path": f"{image_id}.png", "n_false_reports": 1}],
         "result": {},
     }
     p = tmp / "std_eval.json"
     p.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return str(p)
+
+
+def test_secadmin_cannot_approve_own_request():
+    """职责分离（与载体销毁跨账号确认同口径）：申请人=审批人 → 409 SELF_APPROVAL。"""
+    reg = get_registry()
+    report_id = _make_report_with_pdf()
+    original = reg.config.export.require_approval
+    reg.config.export.require_approval = True
+    try:
+        with principal_role("secadmin", username="保密员"), TestClient(app) as c:
+            req = c.post(
+                "/api/v1/export/requests",
+                json={"subject": f"report:{report_id}", "reason": "自批约束测试"},
+            )
+            assert req.status_code == 200
+            request_id = req.json()["request_id"]
+            approve = c.post(f"/api/v1/export/requests/{request_id}/approve")
+            assert approve.status_code == 409
+            assert approve.json()["detail"]["code"] == "SELF_APPROVAL"
+            # 状态必须仍是 pending（未产生审批事实）
+            assert reg.export_store.get(request_id)["status"] == "pending"
+    finally:
+        reg.config.export.require_approval = original

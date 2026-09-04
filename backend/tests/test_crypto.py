@@ -182,8 +182,37 @@ def test_env_key_roundtrip(monkeypatch) -> None:
     assert cipher.decrypt(cipher.encrypt(b"x")) == b"x"
 
 
-def test_missing_key_raises(monkeypatch) -> None:
+def test_missing_key_raises(monkeypatch, tmp_path: Path) -> None:
+    """env 密钥缺失且本地密钥文件不可写（加固部署口径）→ 拒绝并抛 CryptoKeyError。"""
     monkeypatch.delenv("SCAN_CRYPTO_KEY", raising=False)
+    # 父路径是一个文件 → mkdir 必败 → 密钥文件不可用
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a dir", encoding="utf-8")
+    monkeypatch.setenv("SCAN_CRYPTO_KEY_FILE", str(blocker / ".crypto_key"))
+    with pytest.raises(CryptoKeyError):
+        AesCrypto()
+
+
+def test_local_keyfile_created_and_reused(monkeypatch, tmp_path: Path) -> None:
+    """默认部署模式：本地密钥文件首启生成、进程/重启后复用（密文跨实例可解）。"""
+    monkeypatch.delenv("SCAN_CRYPTO_KEY", raising=False)
+    key_file = tmp_path / "data" / ".crypto_key"
+    monkeypatch.setenv("SCAN_CRYPTO_KEY_FILE", str(key_file))
+    assert not key_file.exists()
+    cipher1 = AesCrypto()
+    assert key_file.is_file(), "首启应生成持久密钥文件"
+    blob = cipher1.encrypt("跨实例解密".encode())
+    # 模拟进程重启：全新实例从同一文件加载密钥
+    cipher2 = AesCrypto()
+    assert cipher2.decrypt(blob) == "跨实例解密".encode()
+
+
+def test_local_keyfile_unwritable_raises(monkeypatch, tmp_path: Path) -> None:
+    """密钥文件父目录不可创建 → CryptoKeyError（绝不静默降级）。"""
+    monkeypatch.delenv("SCAN_CRYPTO_KEY", raising=False)
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a dir", encoding="utf-8")
+    monkeypatch.setenv("SCAN_CRYPTO_KEY_FILE", str(blocker / "data" / ".crypto_key"))
     with pytest.raises(CryptoKeyError):
         AesCrypto()
 
@@ -295,11 +324,24 @@ def test_persist_reads_legacy_sdc1_copy(tmp_path: Path, monkeypatch) -> None:
     assert img is not None and img.shape == (60, 80)
 
 
-def test_persist_plaintext_without_key(tmp_path: Path, monkeypatch) -> None:
-    """encrypt=True 但无密钥 → 明文落盘 + 不崩（桌面单机默认可运行）。"""
+def test_persist_encrypts_via_local_keyfile(tmp_path: Path, monkeypatch) -> None:
+    """encrypt=True 且未设 env 密钥 → 本地持久密钥文件兜底，副本仍为密文（默认部署开箱即加密）。"""
     copy_path, _pdf = _build_report_with_env(tmp_path, monkeypatch, key=None)
     raw = copy_path.read_bytes()
-    assert raw.startswith(b"\x89PNG"), "无密钥时应明文落盘（降级不崩）"
+    assert raw.startswith(b"SDC2"), "无 env 密钥时应经本地密钥文件加密落盘"
+
+
+def test_persist_refuses_plaintext_when_key_unavailable(tmp_path: Path, monkeypatch) -> None:
+    """密钥完全不可用（env 缺失 + 密钥文件不可写）→ 拒绝明文落盘，入库报错而非降级。"""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a dir", encoding="utf-8")
+    monkeypatch.setenv("SCAN_CRYPTO_KEY_FILE", str(blocker / ".crypto_key"))
+    with pytest.raises(Exception):  # noqa: B017 - CryptoKeyError 经 FastAPI 转译，链路层只需"非明文落盘"
+        _build_report_with_env(tmp_path, monkeypatch, key=None)
+    copies = list((tmp_path / "images").glob("*")) if (tmp_path / "images").exists() else []
+    assert not [p for p in copies if p.read_bytes().startswith(b"\x89PNG")], (
+        "密钥不可用时绝不允许明文副本落盘"
+    )
 
 
 def test_read_gray_decrypts(tmp_path: Path, monkeypatch) -> None:

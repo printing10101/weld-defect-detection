@@ -80,6 +80,7 @@ src/vite.config.ts.timestamp-*.mjs
 # 运行时密钥/吊销状态/内存（绝不入库）
 .dsh-memory/
 data/.auth_secret
+data/.crypto_key
 data/.revoked_tokens.json
 
 # 私有资料（绝不入库）：用户自有底片/照片、竞赛文档、标准原文（受版权保护，

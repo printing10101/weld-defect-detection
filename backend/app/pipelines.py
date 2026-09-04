@@ -213,9 +213,7 @@ class InspectionPipeline:
             and meta.density_array is None
         )
         eval_gray = (
-            gray[film.y : film.y + film.h, film.x : film.x + film.w]
-            if film is not None
-            else gray
+            gray[film.y : film.y + film.h, film.x : film.x + film.w] if film is not None else gray
         )
 
         # 2. 影像质量校验：黑度 + IQI（复用 领域逻辑）
@@ -631,17 +629,20 @@ class InspectionPipeline:
         rejects_dir = Path(resolve_config_path(self._reg.config.gate.rejects_dir))
         rejects_dir.mkdir(parents=True, exist_ok=True)
         dest = rejects_dir / f"{reject_id}{suffix}"
-        shutil.copyfile(src, dest)
+        # 加密为默认主路径：密钥不可用（env 与本地密钥文件均失败）时拒绝明文
+        # 落盘并留痕——静态加密失效宁可阻断归档，不可静默降级（GB/T 28452
+        # 用户数据保密性口径）。单次 write_bytes 直接写密文，明文不落盘。
         if self._reg.config.security.encrypt:
             from backend.infra.crypto import AesCrypto, CryptoKeyError
 
             try:
                 cipher = AesCrypto()
             except CryptoKeyError as exc:
-                _LOG.warning("静态加密未生效（%s）：不合格底片归档以明文落盘", exc)
-                return dest
-            plaintext = dest.read_bytes()
-            dest.write_bytes(cipher.encrypt(plaintext))
+                _LOG.error("静态加密密钥不可用（%s）：拒绝将不合格底片以明文落盘", exc)
+                raise
+            dest.write_bytes(cipher.encrypt(src.read_bytes()))
+        else:
+            shutil.copyfile(src, dest)
         return dest
 
     def regenerate_report(self, image_id: str, template: str = "standard") -> dict:
@@ -699,20 +700,22 @@ class InspectionPipeline:
         images_dir = Path(self._reg.config.paths.images_dir)
         images_dir.mkdir(parents=True, exist_ok=True)
         dest = images_dir / f"{image_id}{suffix}"
-        shutil.copyfile(src, dest)
-        # 静态加密：encrypt=True 且密钥可用时，落盘影像副本加密
-        # （AES-256-GCM，魔数 SDC1 前缀）。密钥缺失时降级明文并告警——
-        # 桌面单机默认无密钥仍可运行，但日志明确提示未加密。
+        # 静态加密：encrypt=True（默认）时影像副本以 SDC2 国密信封落盘，
+        # 密钥来自 env SCAN_CRYPTO_KEY 或本地持久密钥文件 data/.crypto_key
+        # （首启自动生成，见 crypto.py）。密钥不可用时拒绝明文落盘并留痕——
+        # 宁可阻断本次入库，不可静默降级明文（GB/T 28452 用户数据保密性）。
+        # 单次 write_bytes 直接写密文：明文自始至终不落盘。
         if self._reg.config.security.encrypt:
             from backend.infra.crypto import AesCrypto, CryptoKeyError
 
             try:
                 cipher = AesCrypto()
             except CryptoKeyError as exc:
-                _LOG.warning("静态加密未生效（%s）：影像副本以明文落盘", exc)
-                return dest
-            plaintext = dest.read_bytes()
-            dest.write_bytes(cipher.encrypt(plaintext))
+                _LOG.error("静态加密密钥不可用（%s）：拒绝将影像副本以明文落盘", exc)
+                raise
+            dest.write_bytes(cipher.encrypt(src.read_bytes()))
+        else:
+            shutil.copyfile(src, dest)
         return dest
 
     # ---- 人工复核缺陷增删改（DB50/T 1807-2025 ）----

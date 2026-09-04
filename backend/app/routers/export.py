@@ -117,7 +117,20 @@ def approve_request(
     reg: Annotated[Registry, Depends(get_registry)],
     body: DecisionIn | None = None,
 ) -> ExportRequestOut:
-    """批准导出（仅安全保密管理员；入安全审计链）。"""
+    """批准导出（仅安全保密管理员；入安全审计链）。
+
+    职责分离（C-14，与载体销毁跨账号确认同口径）：申请人不得自审自批，
+    须由另一名保密员审批——单保密员部署将无法完成审批，属预期管控。
+    """
+    row = reg.export_store.get(request_id)
+    if row is None:
+        raise _err(404, "NOT_FOUND", f"export request not found: {request_id}")
+    if row["requested_by"] == principal.username:
+        raise _err(
+            409,
+            "SELF_APPROVAL",
+            "申请人不得自审自批：请由其他安全保密管理员审批（职责分离）",
+        )
     try:
         row = reg.export_store.decide(request_id, decided_by=principal.username, approved=True)
     except KeyError as exc:
@@ -218,7 +231,9 @@ def _batch_export_alert(reg: Registry, principal: Principal) -> None:
     cfg = reg.config.alerts.batch_export
     if not cfg.enabled:
         return
-    window_start = _fmt_window(datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=cfg.window_min))
+    window_start = _fmt_window(
+        datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=cfg.window_min)
+    )
     entries, _total = reg.repository.list_audit(action="export_download", limit=500)
     recent = [
         e
