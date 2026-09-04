@@ -12,7 +12,7 @@ import { computed, ref } from "vue";
 import ResultBanner from "./ResultBanner.vue";
 import ReviewPanel from "./ReviewPanel.vue";
 import DispositionPanel from "./DispositionPanel.vue";
-import { activeExport, getReportDetections, verifyReport } from "../services/api";
+import { activeExport, getReportDetections, reportPdfUrl, verifyReport } from "../services/api";
 import type {
   ActiveExportOut,
   ReportDetectionsOut,
@@ -45,7 +45,10 @@ const props = defineProps<{
 const emit = defineEmits<{ archive: []; reset: [] }>();
 
 function openPdf(): void {
-  window.open(props.result.pdf_url, "_blank", "noopener");
+  // 不能直接 window.open(result.pdf_url)：那是后端相对路径，打包版页面 origin
+  // 是 tauri.localhost，相对链接到不了 127.0.0.1 后端；须走 reportPdfUrl 拼
+  // BASE 前缀并附 access_token（C-14 导出管控在端点内强制）。
+  window.open(reportPdfUrl(props.result.report_id), "_blank", "noopener");
 }
 
 /* ── 主动学习闭环回流：取明细 → 人工复核/改判 → 回流训练池 ── */

@@ -247,7 +247,7 @@ def test_record_flow_json_and_pdf(client: TestClient, tmp_path: Path):
     body = r.json()
     assert body["grading"]["level_standard"] == "L4"
     assert (tmp_path / "data/eval/std_record.json").exists()
-    r2 = client.post("/std-eval/record/pdf", params={"record_name": "std_record"})
+    r2 = client.get("/std-eval/record/pdf", params={"record_name": "std_record"})
     assert r2.status_code == 200
     assert r2.content[:5] == b"%PDF-"
 
