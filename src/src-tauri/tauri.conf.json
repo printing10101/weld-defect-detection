@@ -12,7 +12,7 @@
   "app": {
     "windows": [{ "title": "ScanDetection", "width": 1280, "height": 800, "label": "main" }],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:18773 http://localhost:18773; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'"
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:18773 http://localhost:18773; img-src 'self' data: blob: http://127.0.0.1:18773 http://localhost:18773; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'"
     }
   },
   "bundle": {
