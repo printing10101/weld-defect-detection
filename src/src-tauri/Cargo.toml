@@ -19,6 +19,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tauri-plugin-single-instance = "2"
 
-# 注：构建 Tauri 需要 Rust 工具链（cargo）。M1 阶段可仅用 `pnpm dev`
-# 开发前端；Tauri 打包与 Python sidecar 注入在 M6 里程碑处理（见 README）。
+# 注：构建 Tauri 需要 Rust 工具链（cargo）。前端可独立用 `pnpm dev` 开发；
+# 桌面壳以 `pnpm tauri dev` / `pnpm tauri build` 构建打包。
