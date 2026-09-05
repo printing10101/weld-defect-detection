@@ -84,7 +84,9 @@ def test_quantifier_unified_quantify_call() -> None:
     # mask 无图：回退包围盒近似
     g_mask_fallback = get_quantifier("mask").quantify(det, 0.1)
     assert g_mask_fallback.length_mm == 10.0
-    # mask 有图：走掩膜精修（紧贴暗斑的框 → 掩膜面积 < 包围盒面积，证明精修路径生效）
+    # mask 有图：走掩膜精修——与同一检测框的包围盒量化对比，面积须同量级且有界。
+    # 此前亮通道符号错误（adaptiveThreshold 亮通道传 +C → 整个 ROI 被标记）使
+    # 掩膜恒为全 ROI，此处旧断言拿 100×50 框对比 24×24 暗斑，属空心校验。
     img = _synthetic_defect_image()
     det_blob = Detection(
         id="b1",
@@ -93,10 +95,16 @@ def test_quantifier_unified_quantify_call() -> None:
         score=0.6,
         uncertainty=0.2,
     )
+    g_bbox_blob = get_quantifier("bbox").quantify(det_blob, 0.1, image=None, cfg=None)
     g_mask_img = get_quantifier("mask").quantify(det_blob, 0.1, image=img, cfg=None)
     assert g_mask_img.length_mm > 0
     assert g_mask_img.area_mm2 > 0
-    assert g_mask_img.area_mm2 < g_bbox.area_mm2  # 圆形掩膜面积 < 外接框面积
+    # 有界：掩膜（轮廓+光晕带）不得是全 ROI（修复前 = ROI 外接框，膨胀 ~40%）
+    assert g_mask_img.area_mm2 < g_bbox_blob.area_mm2 * 2.0
+    # 回退反证：无缺陷均匀图上掩膜为空 → 精确退化为包围盒量化
+    img_uniform = np.full((256, 256), 128, dtype=np.uint8)
+    g_uniform = get_quantifier("mask").quantify(det_blob, 0.1, image=img_uniform, cfg=None)
+    assert g_uniform == g_bbox_blob
 
 
 def test_detect_api() -> None:

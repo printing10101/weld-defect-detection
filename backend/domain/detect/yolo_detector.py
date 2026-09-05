@@ -42,6 +42,17 @@ class YoloDetector:
         # S-04 推理后端可插拔：ONNX Runtime 执行提供者清单（由 get_detector/
         # Registry 从 config.model.providers 注入）；None = 默认 CPU 不变。
         self.providers: list[str] | None = None
+        # Tiling 分块推理（大底片小缺陷召回）：参数由 get_detector/Registry 从
+        # config.detect.tile_* 注入（鸭子类型，不改 DefectDetector 契约）。
+        # tile_size=0 关闭；trigger_side 控制仅在最长边超限的大图上启用，
+        # max_count 限制单图瓦片数上限（超出时平滑放大瓦片，控耗时）。
+        self.tile_size: int = 0
+        self.tile_overlap: float = 0.2
+        self.tile_trigger_side: int = 2400
+        self.tile_max_count: int = 400
+        # 跨瓦片合并 NMS 的 IoU：比推理 NMS 宽松（相邻瓦片对同一缺陷的回归框
+        # 不完全重合，取 infer_iou 会漏合并成双检）；按类独立合并防跨类互吞。
+        self.tile_merge_iou: float = 0.3
 
     # ---- 加载 ----------------------------------------------------------------
     def load(self, model_uri: str, backend: str = "onnx") -> None:
@@ -98,9 +109,153 @@ class YoloDetector:
         # （r = min(nw/w, nh/h)）与下游张量形状错误，把"坏图"变成一次安全空检出。
         if image is None or image.size == 0:
             return []
+        # Tiling：配置开启且最长边超触发阈值时按瓦片推理（小图整图路径不受影响）。
+        tile = self._effective_tile(image)
+        if tile is not None:
+            return self._infer_tiled(image, conf, iou, class_conf, tile)
+        return self._infer_single(image, conf, iou, class_conf)
+
+    def _infer_single(
+        self,
+        image: np.ndarray,
+        conf: float,
+        iou: float,
+        class_conf: dict[int, float] | None = None,
+    ) -> list[Detection]:
+        """整图单次推理（letterbox 到模型输入尺寸）——infer 的不分块路径。"""
         if self._backend in ("torch", "yolo"):
             return self._infer_torch(image, conf, iou, class_conf)
         return self._infer_onnx(image, conf, iou, class_conf)
+
+    # ---- Tiling 分块推理 -----------------------------------------------------
+    def _effective_tile(self, image: np.ndarray) -> int | None:
+        """返回本图应使用的瓦片边长；不分块返回 None。
+
+        触发条件：tile_size>0 且最长边 > tile_trigger_side（焊缝长条底片仅按
+        最短边判断会漏触发——300×8000 的长条整图 letterbox 后高度只剩 ~24px）。
+        瓦片数超过 tile_max_count 时按 1.5× 递增瓦片边长直至预算内（平滑降级：
+        超大底片自动降低放大倍率而不是把耗时拖到分钟级），并留告警日志。
+        """
+        tile = int(self.tile_size or 0)
+        if tile <= 0:
+            return None
+        h, w = image.shape[:2]
+        if max(h, w) <= self.tile_trigger_side:
+            return None
+        base = tile
+        while self._tile_count(h, w, tile, self.tile_overlap) > max(1, int(self.tile_max_count)):
+            tile = int(tile * 1.5)
+        if tile != base:
+            # 降级完成后告警一次（不在循环里逐档刷屏）。
+            _LOG.warning(
+                "tiling: 瓦片数超上限（max_count=%d），瓦片边长 %d→%d（召回率相应下降）",
+                self.tile_max_count,
+                base,
+                tile,
+            )
+        return tile
+
+    @staticmethod
+    def _tile_count(h: int, w: int, tile: int, overlap: float = 0.2) -> int:
+        """给定时边的瓦片网格数量（含重叠步进与贴边收尾）。"""
+        ny = len(YoloDetector._grid_origins(h, tile, overlap))
+        nx = len(YoloDetector._grid_origins(w, tile, overlap))
+        return ny * nx
+
+    @staticmethod
+    def _grid_origins(span: int, tile: int, overlap: float) -> list[int]:
+        """单维瓦片起点序列：重叠步进覆盖 [0, span)，末块贴边（不足一整块也覆盖到）。"""
+        t = max(1, int(tile))
+        # round 而非截断：1-0.9 的浮点漂移会把 step=100 算成 99，瓦片数虚增
+        step = max(1, round(t * (1 - min(max(overlap, 0.0), 0.9))))
+        if span <= t:
+            return [0]
+        origins = list(range(0, span - t + 1, step))
+        if origins[-1] != span - t:
+            origins.append(span - t)
+        return origins
+
+    def _infer_tiled(
+        self,
+        image: np.ndarray,
+        conf: float,
+        iou: float,
+        class_conf: dict[int, float] | None,
+        tile: int,
+    ) -> list[Detection]:
+        """分块推理：瓦片内单独 letterbox（小缺陷保留原生分辨率）→ 坐标平移回
+        全图 → 跨瓦片 NMS 合并重叠区重复检出。
+
+        上下文外扩：每块瓦片向四周多裁 overlap/2 的上下文（贴边收窄），跨瓦片
+        边界的缺陷在相邻瓦片的扩展区内完整可见（硬切会把边界缺陷截成两半，
+        各自都是不可检的局部特征）；检出仅保留中心落在核心区的部分——扩展区
+        只提供"看得全"，归属仍按核心区划分，避免与邻瓦片重复计数。
+
+        代价：推理次数 ≈ 瓦片数（tile_size=1280 的 8K 底片约 64 次）；收益：
+        整图 letterbox 到 640 时 8K→640 的 ~12 倍缩放对小尺寸缺陷（细裂纹、
+        小气孔）是分辨率天花板，分块后单瓦片内缩放仅 ~2 倍。
+        """
+        h, w = image.shape[:2]
+        ov = min(max(self.tile_overlap, 0.0), 0.9)
+        pad = max(0, int(tile * ov / 2))
+        all_dets: list[Detection] = []
+        for y0 in self._grid_origins(h, tile, ov):
+            for x0 in self._grid_origins(w, tile, ov):
+                th = min(tile, h - y0)
+                tw = min(tile, w - x0)
+                y0p, x0p = max(0, y0 - pad), max(0, x0 - pad)
+                y1p, x1p = min(h, y0 + th + pad), min(w, x0 + tw + pad)
+                tile_img = image[y0p:y1p, x0p:x1p]
+                for d in self._infer_single(tile_img, conf, iou, class_conf):
+                    bx = d.bbox.x + x0p  # 平移回全图坐标系
+                    by = d.bbox.y + y0p
+                    cx, cy = bx + d.bbox.w / 2, by + d.bbox.h / 2
+                    # 中心不在核心区 → 该检出归属邻瓦片（扩展区检出不重复计）
+                    if not (x0 <= cx < x0 + tw and y0 <= cy < y0 + th):
+                        continue
+                    all_dets.append(
+                        Detection(
+                            id=f"{d.class_id.name}-{len(all_dets)}",
+                            bbox=BBox(x=bx, y=by, w=d.bbox.w, h=d.bbox.h),
+                            class_id=d.class_id,
+                            score=d.score,
+                            uncertainty=d.uncertainty,
+                            shape=d.shape,
+                            deep_hole=d.deep_hole,
+                        )
+                    )
+        if not all_dets:
+            return []
+        # 跨瓦片 NMS：重叠区同一缺陷被相邻瓦片各检一次 → 合并为一条。
+        # 按类独立 + 独立的宽松合并阈值：相邻瓦片回归框不完全重合，取推理
+        # NMS 的严格阈值会漏合并（双检推高缺陷计数）；类无关合并则可能把
+        # 重叠区的气孔框与夹渣框互吞（类别以高分者为准）。
+        raw = [
+            (
+                d.bbox.x,
+                d.bbox.y,
+                d.bbox.x + d.bbox.w,
+                d.bbox.y + d.bbox.h,
+                d.score,
+                d.class_id.value,
+            )
+            for d in all_dets
+        ]
+        keep = self._nms(raw, self.tile_merge_iou, class_aware=True)
+        # 重编全局唯一 id（各瓦片内局部序号在合并后会重复）并按置信度降序
+        merged = [
+            Detection(
+                id=f"{all_dets[i].class_id.name}-{j}",
+                bbox=all_dets[i].bbox,
+                class_id=all_dets[i].class_id,
+                score=all_dets[i].score,
+                uncertainty=all_dets[i].uncertainty,
+                shape=all_dets[i].shape,
+                deep_hole=all_dets[i].deep_hole,
+            )
+            for j, i in enumerate(sorted(keep, key=lambda k: all_dets[k].score, reverse=True))
+        ]
+        return merged
 
     @staticmethod
     def _thr_for(cls_id: int, conf: float, class_conf: dict[int, float] | None) -> float:
@@ -300,9 +455,21 @@ class YoloDetector:
         return self._to_detections(converted, conf, class_conf)
 
     @staticmethod
-    def _nms(boxes, iou_thr) -> list[int]:
+    def _nms(boxes, iou_thr, class_aware: bool = False) -> list[int]:
+        """NMS：boxes 元素 (x1, y1, x2, y2, score, cls)，返回保留的下标。
+
+        class_aware=True 时按类别独立做 NMS（不同类的框互不抑制）——供跨瓦片
+        合并使用；cv2.dnn.NMSBoxes 无类别参数，按类分组后各跑一遍。
+        """
         if not boxes:
             return []
+        if class_aware:
+            keep: list[int] = []
+            for c in sorted({int(b[5]) for b in boxes}):
+                idxs_c = [i for i, b in enumerate(boxes) if int(b[5]) == c]
+                sub = [boxes[i] for i in idxs_c]
+                keep.extend(idxs_c[k] for k in YoloDetector._nms(sub, iou_thr))
+            return keep
         try:
             # cv2.dnn.NMSBoxes 要求 (x, y, w, h) 格式，需将 (x1,y1,x2,y2) 转为宽高
             xywh = np.array(
@@ -311,7 +478,10 @@ class YoloDetector:
             scores = np.array([b[4] for b in boxes], dtype=np.float32)
             idxs = cv2.dnn.NMSBoxes(xywh, scores, 0.0, iou_thr)  # type: ignore[arg-type]
             if isinstance(idxs, tuple):
-                idxs = idxs[0]
+                idxs = idxs[0] if idxs else []
+            if len(idxs) == 0:
+                # conf=0 合法（/detect 显式允许），全零分候选经 NMS 可能返回空。
+                return []
             return [int(i) for i in idxs]  # type: ignore[reportGeneralTypeIssues]
         except (cv2.error, AttributeError):
             kept: list[int] = []

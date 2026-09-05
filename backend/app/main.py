@@ -110,7 +110,7 @@ async def lifespan(app: FastAPI):
         try:
             from backend.infra.migrate import ensure_migrations
 
-            db_path = get_registry().config.paths.db_path
+            db_path = str(resolve_config_path(get_registry().config.paths.db_path))
             version = ensure_migrations(db_path)
             _LOG.info("schema migrations applied (version=%s)", version)
         except Exception as exc:  # noqa: BLE001 - 迁移失败不应阻止启动；create_all 兜底

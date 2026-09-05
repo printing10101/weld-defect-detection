@@ -49,17 +49,20 @@ PHI_TAGS: dict[str, str] = {
     "OtherPatientIDs": "other_patient_ids",
 }
 
-_SDC1_MAGIC = b"SDC1"
 
 
 def read_diconde_bytes(path: str | Path) -> bytes:
-    """读取 DICONDE 文件字节：静态加密副本（SDC1 魔数）先解密。"""
+    """读取 DICONDE 文件字节：静态加密副本（SDC2 国密 / SDC1 历史 AES）先解密。
+
+    信封分流与 image_loader.read_gray 同口径（decrypt 按魔数自动路由）——
+    此前只认 SDC1，国密化后新落盘的 SDC2 副本会把密文直接喂给 DICOM 解析。
+    """
     with open(path, "rb") as fh:
         buf = fh.read()
-    if buf.startswith(_SDC1_MAGIC):
-        from backend.infra.crypto import AesCrypto
+    if buf.startswith((b"SDC2", b"SDC1")):
+        from backend.infra.crypto import default_crypto_provider
 
-        return AesCrypto().decrypt(buf)
+        return default_crypto_provider().decrypt(buf)
     return buf
 
 

@@ -53,6 +53,7 @@ import binascii
 import hmac as _hmac
 import logging
 import os
+from functools import lru_cache
 from pathlib import Path
 from typing import Protocol
 
@@ -72,7 +73,7 @@ _ENV_KEY = "SCAN_CRYPTO_KEY"
 _ENV_KEY_FILE = "SCAN_CRYPTO_KEY_FILE"  # 本地持久密钥文件路径（可选覆盖）
 _ENV_PROVIDER = "SCAN_CRYPTO_PROVIDER"  # soft-sm（默认）| pkcs11
 _ENV_SM2_KEY = "SCAN_SM2_PRIVATE_KEY"  # 可选：显式 SM2 私钥（64 hex）
-_LOCAL_KEY_FILE_REL = Path("data") / ".crypto_key"  # 默认密钥文件（CWD 相对）
+_LOCAL_KEY_FILE_REL = Path("data") / ".crypto_key"  # 默认密钥文件（data/ 相对路径）
 _KDF_SM4 = b"sd-kdf-sm4"
 _KDF_MAC = b"sd-kdf-mac"
 _KDF_SM2 = b"sd-kdf-sm2"
@@ -101,12 +102,19 @@ def _decode_key(raw: str) -> bytes:
 
 
 def local_key_file() -> Path:
-    """本地持久主密钥文件路径：SCAN_CRYPTO_KEY_FILE 优先，否则 CWD 相对
-    data/.crypto_key（打包版 CWD 即安装根，见 main.rs 的 current_dir 设置）。"""
+    """本地持久主密钥文件路径：SCAN_CRYPTO_KEY_FILE 优先，否则 data/.crypto_key。
+
+    相对路径锚定安装根（与 paths/resolve_config_path 同语义，与 CWD 解耦）；
+    Tauri 打包版随 SCANDETECTION_USER_DATA_DIR 改锚到用户数据目录。此前按
+    CWD 解析：CWD≠安装根启动会在新位置再生成一枚主密钥，既有密文在该进程内
+    全部不可解——已随数据目录统一锚定修复。
+    """
     env = os.environ.get(_ENV_KEY_FILE, "").strip()
     if env:
         return Path(env)
-    return _LOCAL_KEY_FILE_REL
+    from backend.infra.paths import resolve_data_path
+
+    return resolve_data_path(_LOCAL_KEY_FILE_REL)
 
 
 def _load_or_create_local_key() -> bytes:
@@ -125,6 +133,31 @@ def _load_or_create_local_key() -> bytes:
             raise CryptoKeyError(f"本地密钥文件不可读或内容非法 {path}: {exc}") from None
         _LOG.info("静态加密：已加载本地主密钥文件 %s", path)
         return key
+    # 历史布局迁移：旧版本按 CWD 解析密钥文件（CWD≠安装根启动时落在
+    # <CWD>/data/.crypto_key）。目标位置缺密钥而旧 CWD 位置有 → 迁移而非
+    # 再生成一枚新密钥（新密钥会让既有密文全部不可解）。
+    # 仅默认布局参与迁移：SCAN_CRYPTO_KEY_FILE 显式指定新位置时绝不动 CWD
+    # 下的旧文件——那可能是真实主密钥，move 走即永久不可解（测试/运维
+    # 显式覆盖是常见场景）。
+    if not os.environ.get(_ENV_KEY_FILE, "").strip():
+        legacy = Path.cwd() / _LOCAL_KEY_FILE_REL
+        if legacy.is_file() and legacy.resolve() != path.resolve():
+            # 复查目标仍不存在：并发首启可能刚用 O_EXCL 生成新密钥，
+            # 此处若覆盖会让对方进程持有失配密钥。
+            if path.exists():
+                _LOG.warning("目标密钥文件已存在，跳过历史密钥迁移（防覆盖）: %s", path)
+            else:
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    legacy.replace(path)
+                    _LOG.warning(
+                        "静态加密：已把历史 CWD 相对密钥文件迁移 %s → %s", legacy, path
+                    )
+                    return _load_or_create_local_key()
+                except OSError as exc:
+                    raise CryptoKeyError(
+                        f"历史密钥文件迁移失败 {legacy} → {path}: {exc}"
+                    ) from None
     key = os.urandom(_KEY_BYTES)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -528,6 +561,34 @@ class AesCrypto(SoftSmProvider):
     魔数自动分流，存量 SDC1 AES 信封用同一主密钥（SCAN_CRYPTO_KEY）仍可
     解。构造参数与 generate_key 语义不变。
     """
+
+
+@lru_cache(maxsize=1)
+def _cached_default_provider(
+    env_key: str | None, env_key_file: str | None, env_sm2_key: str | None, env_provider: str | None
+) -> SoftSmProvider:
+    """按密钥来源环境变量缓存 provider 实例（key 参数仅作缓存键使用）。
+
+    provider 无可变状态且线程安全（SoftSmProvider docstring），进程内复用
+    免去每张影像/每份报告重复执行 SM2 公钥点乘与 SM3 KDF（纯 Python，每次
+    数十 ms）。以环境变量四元组为缓存键：测试/运维在同一进程内切换密钥
+    来源时自动得到新实例，与"每次新建"行为等价。
+    """
+    return AesCrypto()
+
+
+def default_crypto_provider() -> SoftSmProvider:
+    """进程内共享的默认 provider（按 SCAN_CRYPTO_* 环境变量缓存）。
+
+    所有"用环境默认密钥落盘/解密"的调用方（影像副本、报告、DICOM 解密）
+    统一经此取实例；需要自定义主密钥的场景仍直接构造 AesCrypto(key)。
+    """
+    return _cached_default_provider(
+        os.environ.get(_ENV_KEY),
+        os.environ.get(_ENV_KEY_FILE),
+        os.environ.get(_ENV_SM2_KEY),
+        os.environ.get(_ENV_PROVIDER),
+    )
 
 
 # ---------------------------------------------------------------------------

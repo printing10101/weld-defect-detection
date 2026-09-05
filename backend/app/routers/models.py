@@ -8,8 +8,9 @@
   投产（审计留痕）；评估未达标 → 拒绝并告警+审计。默认 false 保持旧行为（直接切换）。
 - ``POST /api/v1/models/{id}/evaluate``：对指定模型跑 Golden 评估（不切换）。
 
-热切换在 registry 锁内执行（仅串行化并发切换）；检测器推理与切换之间无全局读写锁，
-属于已知限制（生产建议切换期暂停推理或请求排空），见  注释。
+热切换互斥：检测器推理与切换之间由 ResilientDetector 内置读写锁协调——
+``load``（含回退重载）持写锁、``infer``/``infer_tta`` 持读锁，切换等在途
+推理排空后执行、期间新推理排队，不会打到半初始化会话上。
 """
 
 from __future__ import annotations
@@ -21,7 +22,13 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from backend.app.auth import require_role
-from backend.app.dependencies import Registry, _resolve_path, get_operator_name, get_registry
+from backend.app.dependencies import (
+    EVAL_GATE,
+    Registry,
+    _resolve_path,
+    get_operator_name,
+    get_registry,
+)
 from backend.domain.detect import get_detector
 from backend.domain.errors import ModelUnavailableError
 from backend.evaluation.run_eval import run_golden_evaluation
@@ -108,7 +115,14 @@ async def activate_model(
     model_id: str,
     reg: Annotated[Registry, Depends(get_registry)],
     operator: Annotated[str, Depends(get_operator_name)],
+    principal: Annotated[object, Depends(require_role("sysadmin"))] = None,
 ) -> ActivateResponse:
+    """热切换生产检测权重（sysadmin 专属，与 approve 同一权限位）。
+
+    切换对象是全系统的推理权重——审计员/操作员不应能触发；三员权限矩阵
+    下投产类操作（activate/approve/evaluate）统一收口 sysadmin。
+    """
+    del principal  # 仅作角色门控依赖（require_role("sysadmin")）
     # E-14 门禁分支：enabled=true 时 activate 语义变为"提交候选并先评估"，
     # 不直接切换（默认 false 走下方原有直切链路，保持既有测试/行为不变）。
     if reg.config.modelgate.enabled:
@@ -197,7 +211,9 @@ async def _activate_with_gate(model_id: str, reg: Registry, operator: str) -> Ac
             evaluation=record,
         )
     return ActivateResponse(
-        ok=False,
+        # ok=True：candidate 是一次"受理成功"（进入待审批），不是请求失败——
+        # 门禁已启用时本端点不再直接切换，是否投产由 /approve 决定。
+        ok=True,
         active=active_id,
         status="candidate",
         approval_required=True,
@@ -238,45 +254,63 @@ async def approve_model(
 async def evaluate_model(
     model_id: str,
     reg: Annotated[Registry, Depends(get_registry)],
+    principal: Annotated[object, Depends(require_role("sysadmin"))] = None,
 ) -> EvaluateResponse:
-    """在固定 Golden Set 上评估指定模型并闭环写报告/漂移/模型卡/实验。
+    """在固定 Golden Set 上评估指定模型并闭环写报告/漂移/模型卡/实验（sysadmin 专属）。
 
     - 模型不存在 → 404；
     - Golden Set 未准备（data/eval/golden 缺失）→ 409，提示先建立评估集；
-    - 评估在后台线程执行（CPU 密集），不阻塞请求。
+    - 评估在请求线程池内**同步**执行（CPU 密集、可能数十秒到分钟级）；
+      进程级信号量串行化并发评估，防止多份 ONNX 会话叠加常驻内存。
     """
+    del principal  # 仅作角色门控依赖（require_role("sysadmin")）
     entry = reg.model_registry.get(model_id)
     if entry is None:
         raise HTTPException(
             status_code=404,
             detail={"code": "MODEL_NOT_FOUND", "message": f"未找到模型: {model_id}"},
         )
-    # 评估该模型权重：经注册表加载独立检测器（不干扰当前活跃检测器）
+    # 评估该模型权重：经注册表加载独立检测器（不干扰当前活跃检测器）；
+    # tiling 参数与生产同参，保证评估口径与线上推理一致。检测器构建与
+    # 评估都在 EVAL_GATE 闸内——会话构建放闸外时，等闸的请求仍各持一份
+    # 数百 MB 的 ONNX 会话，闸门形同虚设。
+    def _run_gated() -> dict:
+        with EVAL_GATE:
+            det = get_detector(
+                "trained_yolo",
+                model_uri=entry.uri,
+                backend=reg.config.model.backend,
+                providers=reg.config.model.providers,
+                tile_size=reg.config.detect.tile_size,
+                tile_overlap=reg.config.detect.tile_overlap,
+                tile_trigger_side=reg.config.detect.tile_trigger_side,
+                tile_max_count=reg.config.detect.tile_max_count,
+                tile_merge_iou=reg.config.detect.tile_merge_iou,
+            )
+            return run_golden_evaluation(
+                model_id,
+                det,
+                golden_dir=_resolve_path(reg.config.eval.golden_dir),
+                eval_dir=reg.eval_dir,
+                experiments_dir=_resolve_path(reg.config.eval.experiments_dir),
+                drift_baseline_path=_resolve_path(reg.config.eval.drift_baseline_path),
+                conf=reg.config.detect.infer_conf,
+                iou=reg.config.detect.infer_iou,
+                class_conf=reg.config.detect.class_conf,
+                preprocess_fn=_preprocess_factory(reg),
+            )
+
     try:
-        det = get_detector("trained_yolo", model_uri=entry.uri, backend=reg.config.model.backend)
-    except (RuntimeError, OSError, ModelUnavailableError) as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={"code": "MODEL_LOAD_FAILED", "message": str(exc)},
-        ) from exc
-    try:
-        summary = await run_in_threadpool(
-            run_golden_evaluation,
-            model_id,
-            det,
-            golden_dir=_resolve_path(reg.config.eval.golden_dir),
-            eval_dir=reg.eval_dir,
-            experiments_dir=_resolve_path(reg.config.eval.experiments_dir),
-            drift_baseline_path=_resolve_path(reg.config.eval.drift_baseline_path),
-            conf=reg.config.detect.infer_conf,
-            iou=reg.config.detect.infer_iou,
-            class_conf=reg.config.detect.class_conf,
-            preprocess_fn=_preprocess_factory(reg),
-        )
+        summary = await run_in_threadpool(_run_gated)
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=409,
             detail={"code": "NO_GOLDEN_SET", "message": str(exc)},
+        ) from exc
+    except (RuntimeError, OSError, ModelUnavailableError) as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "MODEL_LOAD_FAILED", "message": str(exc)},
         ) from exc
     return EvaluateResponse(
         model_id=summary["model_id"],

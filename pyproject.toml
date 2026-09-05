@@ -17,22 +17,24 @@ dependencies = [
     # §7.5 静态加密（AES-256-GCM，security.encrypt 默认开启）属运行时依赖，
     # 此前误置于 dev 致生产安装缺包、服务启动即 ImportError。移到核心依赖。
     "cryptography>=42",
+    # 以下均为"缺包即启动失败/功能坏死"的运行时依赖（2026-09 核对 requirements.txt
+    # 补齐——此前 pip install -e . 装出的环境 crypto 导入即炸、检测/上传/报告不可用）：
+    "gmssl>=3.2.2",  # infra.crypto 顶层导入（SM2/SM3），缺失 = 启动即 ImportError
+    "pycryptodomex>=3.23",  # gmssl sm2 的 ASN.1 签名模式依赖
+    "opencv-python-headless>=4.9",  # 预处理/量化/标注图顶层链路
+    "onnxruntime>=1.17",  # 默认推理后端（detect.kind=trained_yolo + backend=onnx）
+    "python-multipart>=0.0.9",  # FastAPI multipart 上传（detect/batch 等）
+    "reportlab>=4.0",  # Registry 装配即导入 PdfReporter；规格书首选 weasyprint 因
+    #   Windows 缺 GTK/Pango 实测不可用（2026-08-04 M6），v1 用 reportlab（全离线中文字体）
+    "pypdf>=4.0",  # M7 PDF/A-1b 后处理（XMP + sRGB OutputIntent + 文档 ID）
+    "pillow-heif>=1.0",  # HEIC 解码（image_loader 懒加载，缺失则该格式降级不可用）
 ]
 
 [project.optional-dependencies]
 ml = [
-    "opencv-python-headless>=4.9",
+    # 训练/蒸馏工作站用（torch 体积大且推理部署不需要；detector 对 torch 懒加载）
     "torch>=2.2",
     "ultralytics>=8.2",
-    "onnxruntime>=1.17",
-]
-report = [
-    # 规格书首选 weasyprint（HTML→PDF/A），但 Windows 缺 GTK/Pango 系统库实测不可用
-    # （2026-08-04 M6 实测 import 失败）；v1 用 reportlab（纯 Python、全离线、中文系统字体）
-    "reportlab>=4.0",
-    # M7 PDF/A-1b 后处理：在 reportlab 输出上注入 XMP 标识 + sRGB OutputIntent + 文档 ID
-    "pypdf>=4.0",
-    "onnxruntime>=1.17",  # 检测器契约/冒烟测试 + pyright 解析
 ]
 dev = [
     "pytest>=8",
@@ -41,11 +43,6 @@ dev = [
     "ruff>=0.4",
     "pyright>=1.1.370",
     "import-linter>=2.0",
-    "opencv-python-headless>=4.9",  # transform 契约测试依赖
-    "python-multipart>=0.0.9",      # FastAPI 表单/文件上传（report/measure 等 API 测试）
-    "reportlab>=4.0",               # PDF 报告测试（与 report extra 一致）
-    "pypdf>=4.0",
-    "onnxruntime>=1.17",  # 检测器契约/冒烟测试 + pyright 解析
 ]
 
 [build-system]

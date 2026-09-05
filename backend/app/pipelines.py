@@ -29,14 +29,14 @@ from backend.domain.iqi import enrich_grade, verify_iqi
 from backend.domain.preprocess.metrics import QualityCfg as DomainQualityCfg
 from backend.domain.preprocess.metrics import assess_quality
 from backend.domain.pseudo_defect import screen_pseudo_defects
-from backend.domain.quantify import get_quantifier
+from backend.domain.quantify import MaskRefineCfg, get_quantifier
 from backend.domain.recommend import recommend
 from backend.domain.review import ReviewDecision, ReviewRole, resolve_review
 from backend.domain.spacing import resolve_spacing as _resolve_spacing  # 单一真源（§T8/§6）
 from backend.domain.standards.tables.loader import disclaimer_for
 from backend.evaluation.gate_rejects import GateRejectStore
 from backend.infra.config import resolve_config_path
-from backend.infra.image_loader import load_image
+from backend.infra.image_loader import load_image, read_gray
 
 _LOG = logging.getLogger("scandetection.pipeline")
 
@@ -364,13 +364,15 @@ class InspectionPipeline:
         # 深孔推导：缺陷内部黑度显著高于母材 → 标 deep_hole（直判 IV 的前置信号）。
         # 必须在判定/落库前完成，使 grader 与 defect_rows 都能消费到该标记。
         detections = _derive_deep_hole(detections, meta, density, meta.bit_depth)
-        # 经量化器注册表装配（去除 app 层 new 实现）；/report 历史用包围盒近似，
-        # 显式请求 bbox 保持行为不变，量化参数（掩膜 cfg）无图时忽略。
-        quantifier = get_quantifier("bbox")
+        # 经量化器注册表装配，种类由 detect.quantifier_kind 配置驱动（与 /detect 同源）。
+        # 手头有增强图，掩膜精修在主链路真实生效；精修失效/被禁用时量化器内部
+        # 自动退化为包围盒近似（与旧行为等价）。
+        mrc = MaskRefineCfg(**reg.config.mask_refine.model_dump())
+        quantifier = get_quantifier(reg.config.detect.quantifier_kind)
         # 像素标定缺失时不再伪造 1.0 mm/px 后照常定级——几何量纲无据即触发熔断。
         spacing, spacing_known = _resolve_spacing(pixel_spacing_mm, meta.pixel_spacing_mm)
         quantified = [
-            (d, quantifier.quantify(d, spacing, image=enhanced, cfg=None)) for d in detections
+            (d, quantifier.quantify(d, spacing, image=enhanced, cfg=mrc)) for d in detections
         ]
 
         # 5. 标准判定（，未授权/信息不足熔断 → 不输出级别）
@@ -428,7 +430,9 @@ class InspectionPipeline:
             "modality": meta.modality.value,
             "workpiece_no": workpiece_no,
             "weld_no": weld_no,
-            "pixel_spacing_mm": spacing,
+            # 只落可信标定：未标定时 spacing 是"1.0 mm/px 伪值"（几何量纲无据），
+            # 落库会让人工复核重评级把它当真标定读回、绕过熔断输出综合级别。
+            "pixel_spacing_mm": spacing if spacing_known else None,
             "base_metal_thickness_mm": base_metal_thickness_mm,
             "iqi_pass": iqi.passed,
             "iqi_detail": {
@@ -457,28 +461,55 @@ class InspectionPipeline:
             need_review = True
             basis = [*basis, "逐缺陷级别与检测数量不一致，已退化为人工复核"]
 
-        defect_rows = [
-            {
-                "id": f"{image_id}:{d.id}",  # 全局唯一主键（同一影像内由 d.id 区分）
-                "image_id": image_id,
-                "class_id": d.class_id.value,
-                "bbox_px": [d.bbox.x, d.bbox.y, d.bbox.w, d.bbox.h],
-                "shape": _shape_of(d, g, dc.round_aspect_max).value,
-                "length_mm": g.length_mm,
-                "width_mm": g.width_mm,
-                "area_mm2": g.area_mm2,
-                "perimeter_mm": g.perimeter_mm,
-                "position_x": g.position_x_mm,
-                "position_y": g.position_y_mm,
-                "confidence": d.score,
-                "uncertainty": d.uncertainty,
-                "joint_level": per_grade[i] if i < len(per_grade) else None,
-                "need_review": need_review,
-                "standard_id": std_id,
-                "standard_version": std_version,
-            }
-            for i, (d, g) in enumerate(quantified)
-        ]
+        # 未标定（spacing_known=False）时量化走伪值 1.0 mm/px，mm 字段是
+        # "像素=毫米"的伪物理量——落库置 None（与 /detect 的 calibrated=False
+        # 语义对齐），禁止下游把伪尺寸当真实几何量消费。
+        if spacing_known:
+            defect_rows = [
+                {
+                    "id": f"{image_id}:{d.id}",  # 全局唯一主键（同一影像内由 d.id 区分）
+                    "image_id": image_id,
+                    "class_id": d.class_id.value,
+                    "bbox_px": [d.bbox.x, d.bbox.y, d.bbox.w, d.bbox.h],
+                    "shape": _shape_of(d, g, dc.round_aspect_max).value,
+                    "length_mm": g.length_mm,
+                    "width_mm": g.width_mm,
+                    "area_mm2": g.area_mm2,
+                    "perimeter_mm": g.perimeter_mm,
+                    "position_x": g.position_x_mm,
+                    "position_y": g.position_y_mm,
+                    "confidence": d.score,
+                    "uncertainty": d.uncertainty,
+                    "joint_level": per_grade[i] if i < len(per_grade) else None,
+                    "need_review": need_review,
+                    "standard_id": std_id,
+                    "standard_version": std_version,
+                }
+                for i, (d, g) in enumerate(quantified)
+            ]
+        else:
+            defect_rows = [
+                {
+                    "id": f"{image_id}:{d.id}",
+                    "image_id": image_id,
+                    "class_id": d.class_id.value,
+                    "bbox_px": [d.bbox.x, d.bbox.y, d.bbox.w, d.bbox.h],
+                    "shape": _shape_of(d, g, dc.round_aspect_max).value,
+                    "length_mm": None,
+                    "width_mm": None,
+                    "area_mm2": None,
+                    "perimeter_mm": None,
+                    "position_x": None,
+                    "position_y": None,
+                    "confidence": d.score,
+                    "uncertainty": d.uncertainty,
+                    "joint_level": per_grade[i] if i < len(per_grade) else None,
+                    "need_review": need_review,
+                    "standard_id": std_id,
+                    "standard_version": std_version,
+                }
+                for i, (d, g) in enumerate(quantified)
+            ]
         # 报告行先占位（pdf_path 待生成后回填）
         report_row = {
             "id": report_id,
@@ -608,10 +639,10 @@ class InspectionPipeline:
         # 落盘并留痕——静态加密失效宁可阻断归档，不可静默降级（GB/T 28452
         # 用户数据保密性口径）。单次 write_bytes 直接写密文，明文不落盘。
         if self._reg.config.security.encrypt:
-            from backend.infra.crypto import AesCrypto, CryptoKeyError
+            from backend.infra.crypto import CryptoKeyError, default_crypto_provider
 
             try:
-                cipher = AesCrypto()
+                cipher = default_crypto_provider()
             except CryptoKeyError as exc:
                 _LOG.error("静态加密密钥不可用（%s）：拒绝将不合格底片以明文落盘", exc)
                 raise
@@ -681,10 +712,12 @@ class InspectionPipeline:
         # 宁可阻断本次入库，不可静默降级明文（GB/T 28452 用户数据保密性）。
         # 单次 write_bytes 直接写密文：明文自始至终不落盘。
         if self._reg.config.security.encrypt:
-            from backend.infra.crypto import AesCrypto, CryptoKeyError
+            from backend.infra.crypto import CryptoKeyError, default_crypto_provider
 
             try:
-                cipher = AesCrypto()
+                # 进程内共享 provider（密钥来源不变时复用）：免除每张影像重复
+                # 的 SM2 点乘/KDF 开销（gmssl 纯 Python，单次数十 ms）。
+                cipher = default_crypto_provider()
             except CryptoKeyError as exc:
                 _LOG.error("静态加密密钥不可用（%s）：拒绝将影像副本以明文落盘", exc)
                 raise
@@ -778,8 +811,15 @@ class InspectionPipeline:
             pixel_spacing_mm=spacing if spacing and spacing > 0 else None,
             base_metal_thickness_mm=image.get("base_metal_thickness_mm"),
         )
-        quantifier = get_quantifier("bbox")
-        spacing_eff = spacing if spacing and spacing > 0 else 1.0
+        # 种类随 detect.quantifier_kind 配置（与主链路同源）。复核重评级不重跑
+        # 检测器，但可从落盘影像副本（密文）解出灰度图喂给量化器——否则掩膜
+        # 量化静默退化为包围盒，"首评 vs 复评"几何口径跳变。解图失败才退化。
+        quantifier = get_quantifier(self._reg.config.detect.quantifier_kind)
+        regrade_gray = read_gray(str(image.get("path") or "")) if image.get("path") else None
+        if regrade_gray is None:
+            _LOG.info("regrade: 影像副本不可读 image_id=%s，量化退化为包围盒近似", image_id)
+        spacing_known = bool(spacing and spacing > 0)
+        spacing_eff = spacing if spacing_known else 1.0
         try:
             grade = self._reg.grader.grade(defects, context)
             joint_level = grade.joint_level.value
@@ -790,18 +830,29 @@ class InspectionPipeline:
             per = {}
             need_review = True
             _LOG.info("regrade fused image_id=%s reason=%s", image_id, exc)
-        geometry = {
-            str(d.id): {
-                "shape": _shape_of(d, g, self._reg.config.detect.round_aspect_max).value,
-                "length_mm": g.length_mm,
-                "width_mm": g.width_mm,
-                "area_mm2": g.area_mm2,
-                "perimeter_mm": g.perimeter_mm,
-                "position_x": g.position_x_mm,
-                "position_y": g.position_y_mm,
+        if spacing_known:
+            # 与主链路同口径回写几何（含配置驱动的掩膜精修参数）；未标定时
+            # 1.0 mm/px 是伪值——回写会让人工复核把"像素=毫米"的伪物理量
+            # 覆盖进 DB 并渲染进正式报告（与首轮落库置 None 的熔断语义相抵），
+            # 故 geometry=None 只更新级别。
+            mrc = MaskRefineCfg(**self._reg.config.mask_refine.model_dump())
+            geometry = {
+                str(d.id): {
+                    "shape": _shape_of(d, g, self._reg.config.detect.round_aspect_max).value,
+                    "length_mm": g.length_mm,
+                    "width_mm": g.width_mm,
+                    "area_mm2": g.area_mm2,
+                    "perimeter_mm": g.perimeter_mm,
+                    "position_x": g.position_x_mm,
+                    "position_y": g.position_y_mm,
+                }
+                for d, g in (
+                    (d, quantifier.quantify(d, spacing_eff, image=regrade_gray, cfg=mrc))
+                    for d in defects
+                )
             }
-            for d, g in ((d, quantifier.quantify(d, spacing_eff)) for d in defects)
-        }
+        else:
+            geometry = None
         repo.store_regrade(
             image_id,
             joint_level=joint_level,

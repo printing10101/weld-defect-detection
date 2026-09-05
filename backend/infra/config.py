@@ -407,6 +407,17 @@ class DetectCfg(BaseModel):
     abs_threshold: float = 8.0
     dark_only: bool = False
     review_conf: float = 0.5  # 检测不确定性阈值，超过则判定 need_review（M4b 人工兜底）
+    # Tiling 分块推理（大底片小缺陷召回）：tile_size=0 关闭。开启后最长边超过
+    # tile_trigger_side 的影像按瓦片推理（瓦片内 letterbox 缩放比整图小一个量级，
+    # 小缺陷特征不再被整图缩放淹没），跨瓦片 NMS 合并重叠区重复检出。代价 =
+    # 推理次数 ≈ 瓦片数（8K 底片/1280 瓦片约 64 次 CPU 前向），批量吞吐相应下降。
+    tile_size: int = 0  # 瓦片边长（px）；0=整图推理（历史行为）
+    tile_overlap: float = 0.2  # 相邻瓦片重叠比例
+    tile_trigger_side: int = 2400  # 最长边超过此值才分块（小图整图推理不受影响）
+    tile_max_count: int = 400  # 单图瓦片数上限；超出按 1.5× 放大瓦片（平滑降级控耗时）
+    # 跨瓦片合并 NMS 的 IoU：相邻瓦片对同一缺陷的回归框不完全重合，取比推理
+    # NMS（infer_iou）宽松的阈值防"合并失败→双检"；按类独立合并防跨类互吞。
+    tile_merge_iou: float = 0.3
 
 
 class UploadCfg(BaseModel):
@@ -712,6 +723,7 @@ def validate_config_against_schema(raw: dict) -> list[str]:
 # 安装根目录锚点：backend/infra/config.py -> parents[2] = 安装根目录
 # （与 dependencies._INSTALL_ROOT / model_store._INSTALL_ROOT 同源，用于相对路径配置落盘）
 from backend.infra.paths import INSTALL_ROOT as _INSTALL_ROOT
+from backend.infra.paths import data_dir_override as _data_dir_override
 
 
 def resolve_config_path(p: str) -> Path:
@@ -719,9 +731,17 @@ def resolve_config_path(p: str) -> Path:
 
     绝对路径原样返回；相对路径解析为 _INSTALL_ROOT / p，使产品以任意方式启动
     （安装程序.exe / Tauri 外壳 / 启动脚本，CWD 各异）都能落到正确的运行时目录。
+    Tauri 打包版经 SCANDETECTION_USER_DATA_DIR 把 data/ 前缀的路径改锚到
+    <用户数据目录>/data/...（卸载不清空，见 paths.data_dir_override）；配置/
+    权重等程序资产不受影响。
     """
     if os.path.isabs(p):
         return Path(p)
+    override = _data_dir_override()
+    if override is not None:
+        parts = Path(p).parts
+        if parts and parts[0] == "data":
+            return override.joinpath(*parts)
     return _INSTALL_ROOT / p
 
 
