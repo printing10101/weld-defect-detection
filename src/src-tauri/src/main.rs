@@ -13,6 +13,10 @@
 //   找不到时回退到系统 PATH 的 python.exe。
 //
 // 后端 stdout/stderr 写入 %TEMP%/ScanDetection/backend.log，便于启动失败时排查。
+// release 版按 GUI 子系统链接（双击不伴随常驻控制台窗口）；debug 版保留
+// 控制台以便看启动日志。
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::io;
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -40,6 +44,17 @@ fn main() {
     let event_stop = stop.clone();
 
     tauri::Builder::default()
+        // 单实例锁（须为第一个注册的插件）：第二个实例启动时把参数交给已运行
+        // 实例并立即退出。没有它，双开应用的第二实例会 spawn 后端 → uvicorn
+        // 绑定 18773 失败退出 → 监督线程每 2s 无限重生（每次重导入重依赖再死），
+        // 形成 CPU 空转进程风暴；且 wait_for_port 会"成功"连上首实例的后端，
+        // 掩盖故障。回调仅做窗口前置（聚焦已运行实例）。
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.unminimize();
+                let _ = win.set_focus();
+            }
+        }))
         .setup(move |app| {
             // 单一后台监督线程：负责首次启动 + 存活监控 + 崩溃自愈 + 优雅退出回收；
             // 窗口不阻塞显示，前端通过轮询 /health 自动恢复。
@@ -54,10 +69,19 @@ fn main() {
                 };
                 let app_root = resolve_app_root(&dir);
                 let python = pick_python(&app_root);
+                // 用户数据目录（打包版 = %APPDATA%/<identifier>，其下 data/ 为业务
+                // 数据目录）：先落定再传给后端，壳侧令牌/看门狗标记与后端同源。
+                let user_data_dir = resolve_data_dir(&handle, &app_root);
+                if let Err(e) = std::fs::create_dir_all(user_data_dir.join("data")) {
+                    eprintln!(
+                        "[ScanDetection] cannot create data dir {:?}: {e}",
+                        user_data_dir.join("data")
+                    );
+                }
 
                 // 首启后端并等待就绪。
-                try_spawn_backend(&launch_slot, &app_root, &python);
-                let ready = wait_for_port_stoppable(
+                try_spawn_backend(&launch_slot, &app_root, &python, &user_data_dir);
+                let ready = wait_for_backend_ready_stoppable(
                     "127.0.0.1",
                     BACKEND_PORT,
                     BACKEND_STARTUP_TIMEOUT_SECS,
@@ -65,11 +89,11 @@ fn main() {
                 );
                 if ready {
                     // C-17：后端就绪（端口可连 = lifespan 完成）后注入 IPC 一次性令牌。
-                    inject_ipc_token(&handle, &app_root);
+                    inject_ipc_token(&handle, &user_data_dir);
                 }
 
                 // 进入存活监控/自愈循环（含看门狗重启标记消费）。
-                let marker = app_root.join("data").join("restart_required");
+                let marker = user_data_dir.join("data").join("restart_required");
                 run_supervisor(
                     launch_slot,
                     supervisor_stop,
@@ -78,18 +102,24 @@ fn main() {
                     handle,
                     app_root,
                     python,
+                    user_data_dir,
                 );
             });
             Ok(())
         })
-        .on_window_event(move |_window, event| {
+        .on_window_event(move |window, event| {
             // 主窗口销毁即代表应用退出：置位停止标志并回收后端子进程，
             // 杜绝孤儿进程/端口占用（与监督线程回收双保险）。
+            // label 校验：未来新增次级窗口（关于框/预览窗）关闭不得误杀后端。
+            if window.label() != "main" {
+                return;
+            }
             if let tauri::WindowEvent::Destroyed = event {
                 event_stop.store(true, Ordering::SeqCst);
                 if let Ok(mut guard) = event_slot.lock() {
                     if let Some(mut child) = guard.take() {
                         let _ = child.kill();
+                        let _ = child.wait(); // 回收子进程（Unix 防僵尸）
                         println!("[ScanDetection] backend process stopped");
                     }
                 }
@@ -118,6 +148,31 @@ fn resolve_app_root(dir: &std::path::Path) -> PathBuf {
         cur = d.parent();
     }
     dir.to_path_buf()
+}
+
+/// 解析用户数据目录（data/ 的父目录；Windows 打包版 = %APPDATA%/<identifier>）。
+///
+/// NSIS 卸载会清空安装目录，数据放 <安装目录>/data 意味着卸载即无声删除
+/// 全部检查记录/报告/影像副本/主密钥。目录经 SCANDETECTION_USER_DATA_DIR
+/// 传给后端（backend infra.paths.data_dir_override 同步解析，data/ 前缀的
+/// 路径改锚到 <该目录>/data/...），壳侧的 ipc_token / restart_required 也
+/// 从同一目录读写。开发版保持仓库内 data/。
+fn resolve_data_dir(handle: &tauri::AppHandle, app_root: &std::path::Path) -> PathBuf {
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = app_root;
+        handle.path().app_data_dir().unwrap_or_else(|_| {
+            eprintln!(
+                "[ScanDetection] cannot resolve app data dir; falling back to install dir"
+            );
+            PathBuf::from(app_root)
+        })
+    }
+    #[cfg(debug_assertions)]
+    {
+        let _ = handle;
+        app_root.to_path_buf()
+    }
 }
 
 /// 按优先级选择 Python 解释器（S-02 国产 OS 打包，按目标平台条件编译）：
@@ -155,6 +210,9 @@ fn pick_python(app_root: &std::path::Path) -> PathBuf {
     PathBuf::from("python3")
 }
 
+/// 单代日志上限：每次拉起后端前滚动一次（.log → .log.1），长期运行不无限增长。
+const BACKEND_LOG_MAX_BYTES: u64 = 10 * 1024 * 1024;
+
 /// 后端日志输出对（stdout/stderr），写入 %TEMP%/ScanDetection/backend.log。
 /// 用 TEMP 而非安装目录：安装到 Program Files 时安装目录不可写。
 /// 返回两个独立句柄分别接子进程的 stdout 与 stderr（追加写入，保留历史记录）。
@@ -162,6 +220,15 @@ fn backend_log_stdio() -> Option<(Stdio, Stdio)> {
     let dir = std::env::temp_dir().join("ScanDetection");
     std::fs::create_dir_all(&dir).ok()?;
     let path = dir.join("backend.log");
+    // 简单单代轮转：超过上限时 .log → .log.1（覆盖更旧的一代），
+    // 任意时刻磁盘占用 ≤ 2 × BACKEND_LOG_MAX_BYTES。
+    if let Ok(meta) = std::fs::metadata(&path) {
+        if meta.len() >= BACKEND_LOG_MAX_BYTES {
+            let rolled = path.with_extension("log.1");
+            let _ = std::fs::remove_file(&rolled);
+            let _ = std::fs::rename(&path, &rolled);
+        }
+    }
     let out = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -176,7 +243,11 @@ fn backend_log_stdio() -> Option<(Stdio, Stdio)> {
 }
 
 /// 构造 uvicorn 启动命令（stdout/stderr 归并到同一天日志文件）。
-fn build_uvicorn_command(app_root: &std::path::Path, python: &std::path::Path) -> Command {
+fn build_uvicorn_command(
+    app_root: &std::path::Path,
+    python: &std::path::Path,
+    user_data_dir: &std::path::Path,
+) -> Command {
     let mut cmd = Command::new(python);
     cmd.arg("-m")
         .arg("uvicorn")
@@ -189,6 +260,9 @@ fn build_uvicorn_command(app_root: &std::path::Path, python: &std::path::Path) -
     // 孤儿兜底：把壳自身 PID 传给后端，后端据此监控父进程消失即自杀退出
     //（覆盖壳被强杀/崩溃、窗口 Destroyed 事件不触发而遗留孤儿后端的场景）。
     cmd.env("SCANDETECTION_PARENT_PID", std::process::id().to_string());
+    // 数据目录重定向（打包版）：后端把 data/ 前缀路径落到 <用户数据目录>/data
+    //（db/影像/报告/IPC 令牌/主密钥），与壳侧 resolve_data_dir 保持同源。
+    cmd.env("SCANDETECTION_USER_DATA_DIR", user_data_dir);
     match backend_log_stdio() {
         Some((out, err)) => {
             cmd.stdout(out).stderr(err);
@@ -212,8 +286,9 @@ fn try_spawn_backend(
     child_slot: &Arc<Mutex<Option<Child>>>,
     app_root: &std::path::Path,
     python: &std::path::Path,
+    user_data_dir: &std::path::Path,
 ) -> bool {
-    match build_uvicorn_command(app_root, python).spawn() {
+    match build_uvicorn_command(app_root, python, user_data_dir).spawn() {
         Ok(mut child) => {
             match child_slot.lock() {
                 Ok(mut slot) => *slot = Some(child),
@@ -236,8 +311,12 @@ fn try_spawn_backend(
     }
 }
 
-/// 轮询 TCP 端口，直到可连接或超时（stop 置位时提前返回中断等待）。
-fn wait_for_port_stoppable(
+/// 轮询后端就绪，直到超时或 stop 置位（应用退出中）。
+///
+/// 就绪判定不是裸 TCP 连通——那会把"任意占用 18773 的进程"（残留孤儿后端/
+/// 第三方程序）误判为自家后端就绪，把可能失配的 IPC 令牌注入前端、掩盖
+/// 真正的启动故障。这里在 TCP 可连后进一步请求 /api/v1/health 校验 HTTP 200。
+fn wait_for_backend_ready_stoppable(
     host: &str,
     port: u16,
     timeout_secs: u64,
@@ -250,7 +329,7 @@ fn wait_for_port_stoppable(
         if stop.load(Ordering::SeqCst) {
             return false; // 应用退出中，中止等待
         }
-        if TcpStream::connect(&addr).is_ok() {
+        if probe_backend_health(&addr) {
             println!("[ScanDetection] backend ready on {}", addr);
             return true;
         }
@@ -263,6 +342,25 @@ fn wait_for_port_stoppable(
         }
         thread::sleep(Duration::from_millis(500));
     }
+}
+
+/// 单次健康探测：GET /api/v1/health，收到 HTTP 200 即视为自家后端就绪。
+fn probe_backend_health(addr: &str) -> bool {
+    use std::io::{Read, Write};
+    let Ok(mut stream) = TcpStream::connect(addr) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let req = format!(
+        "GET /api/v1/health HTTP/1.0\r\nHost: {addr}\r\nConnection: close\r\n\r\n"
+    );
+    if stream.write_all(req.as_bytes()).is_err() {
+        return false;
+    }
+    let mut buf = [0u8; 64];
+    let n = stream.read(&mut buf).unwrap_or(0);
+    let head = String::from_utf8_lossy(&buf[..n]);
+    head.starts_with("HTTP/1.0 200") || head.starts_with("HTTP/1.1 200")
 }
 
 /// 后端存活监控与自愈（S-09 配套：Tauri 壳侧崩溃重启）。
@@ -284,6 +382,7 @@ fn run_supervisor(
     handle: tauri::AppHandle,
     app_root: PathBuf,
     python: PathBuf,
+    user_data_dir: PathBuf,
 ) {
     let interval = Duration::from_millis(check_interval_ms.max(200));
     while !stop.load(Ordering::SeqCst) {
@@ -320,23 +419,24 @@ fn run_supervisor(
             if stop.load(Ordering::SeqCst) {
                 break;
             }
-            // 3) 回收旧句柄 → 重新拉起 → 等端口就绪 → 重注入令牌。
+            // 3) 回收旧句柄 → 重新拉起 → 等就绪 → 重注入令牌。
             {
                 if let Ok(mut guard) = child_slot.lock() {
                     if let Some(mut c) = guard.take() {
                         let _ = c.kill();
+                        let _ = c.wait(); // Unix 回收僵尸（Windows 上 kill 后立即返回）
                     }
                 }
             }
-            try_spawn_backend(&child_slot, &app_root, &python);
-            let ready = wait_for_port_stoppable(
+            try_spawn_backend(&child_slot, &app_root, &python, &user_data_dir);
+            let ready = wait_for_backend_ready_stoppable(
                 "127.0.0.1",
                 BACKEND_PORT,
                 BACKEND_STARTUP_TIMEOUT_SECS,
                 &stop,
             );
             if ready {
-                inject_ipc_token(&handle, &app_root); // 后端重启用新令牌，重注入 WebView
+                inject_ipc_token(&handle, &user_data_dir); // 后端重启用新令牌，重注入 WebView
             }
         }
 
@@ -352,6 +452,7 @@ fn run_supervisor(
     if let Ok(mut guard) = child_slot.lock() {
         if let Some(mut c) = guard.take() {
             let _ = c.kill();
+            let _ = c.wait(); // Unix 回收僵尸
             println!("[ScanDetection] backend process stopped (supervisor)");
         }
     }
@@ -359,15 +460,16 @@ fn run_supervisor(
 
 /// C-17：读取后端落盘的一次性 IPC 令牌并注入 WebView（window.__IPC_TOKEN__）。
 ///
-/// 后端在 lifespan 启动时生成令牌写入 <应用根>/data/ipc_token（进程生命周期
-/// 有效）；端口可连即 lifespan 已完成，令牌已就绪。注入后前端 services/api.ts
+/// 后端在 lifespan 启动时生成令牌写入 <数据目录>/ipc_token（进程生命周期
+/// 有效；打包版数据目录 = %APPDATA%/<identifier>，见 resolve_data_dir）；
+/// 端口可连即 lifespan 已完成，令牌已就绪。注入后前端 services/api.ts
 /// 统一携带 X-IPC-Token 头。
 ///
 /// 诚实边界：令牌防"其他本机进程误调 / 网页 CSRF 式调用"，本机回环为明文
 /// 传输，令牌不解决传输加密（需 TLS 时后续挂本机证书，不在本次范围）。
 /// 文件权限为尽力而为（Windows 下依赖用户数据目录继承的 ACL）。
-fn inject_ipc_token(handle: &tauri::AppHandle, app_root: &std::path::Path) {
-    let path = app_root.join("data").join("ipc_token");
+fn inject_ipc_token(handle: &tauri::AppHandle, user_data_dir: &std::path::Path) {
+    let path = user_data_dir.join("data").join("ipc_token");
     // 令牌落盘与端口就绪存在毫秒级竞态：短重试兜底（正常一次即中）。
     let mut token: Option<String> = None;
     for _ in 0..5 {
