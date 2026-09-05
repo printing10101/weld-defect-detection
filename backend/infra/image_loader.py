@@ -224,13 +224,9 @@ def read_gray(image_path: str) -> np.ndarray | None:
     # C-01 国密化：新副本 SDC2（SM4-CTR+HMAC-SM3），存量副本 SDC1（AES-GCM）
     if buf.startswith((b"SDC2", b"SDC1")):
         try:
-            from backend.infra.crypto import AesCrypto, CryptoKeyError
+            from backend.infra.crypto import default_crypto_provider
 
-            try:
-                cipher = AesCrypto()
-            except CryptoKeyError:
-                return None
-            buf = cipher.decrypt(buf)
+            buf = default_crypto_provider().decrypt(buf)
         except Exception:  # noqa: BLE001  # 解密失败（密钥不符/密文损坏）→ 读图降级
             return None
     arr = np.frombuffer(buf, dtype=np.uint8)

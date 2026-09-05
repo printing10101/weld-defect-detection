@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -37,6 +38,13 @@ if TYPE_CHECKING:
 
 _LOG = logging.getLogger("scandetection.dependencies")
 
+# Golden 评估进程级串行闸门：评估路径（/models/{id}/evaluate 与门禁激活的
+# run_candidate_evaluation）都会为候选权重新建 ONNX 会话（数百 MB 常驻 +
+# 预热前向），不设上限的并发评估会把内存抖成数份权重叠加。单闸串行即可
+# ——评估非交互路径，排队优于 OOM。检测器构建也须在闸内，否则会话在
+# 等闸期间已常驻。
+EVAL_GATE = threading.Semaphore(1)
+
 
 def _resolve_path(p: str) -> str:
     """将配置中的相对路径解析为绝对路径（恒锚定安装根，不受 CWD 影响）。
@@ -45,6 +53,52 @@ def _resolve_path(p: str) -> str:
     旧语义在 CWD≠安装根（打包启动）时会把新建路径落到错误位置。
     """
     return str(resolve_config_path(p))
+
+
+class _RwLock:
+    """读写锁（写优先）：推理共享（读）、热切换/回退重载独占（写）。
+
+    写优先（有写者等待时新读者排队）防止持续推理流饿死切换请求；
+    读锁持有一个也阻塞写者、写者阻塞所有新读者——保证切换期间
+    不会有在途推理打到半初始化的模型会话上。
+    """
+
+    def __init__(self) -> None:
+        self._cond = threading.Condition()
+        self._readers = 0
+        self._writer = False
+        self._writers_waiting = 0
+
+    @contextmanager
+    def read(self):
+        with self._cond:
+            while self._writer or self._writers_waiting:
+                self._cond.wait()
+            self._readers += 1
+        try:
+            yield
+        finally:
+            with self._cond:
+                self._readers -= 1
+                if self._readers == 0:
+                    self._cond.notify_all()
+
+    @contextmanager
+    def write(self):
+        with self._cond:
+            self._writers_waiting += 1
+            try:
+                while self._readers or self._writer:
+                    self._cond.wait()
+            finally:
+                self._writers_waiting -= 1
+            self._writer = True
+        try:
+            yield
+        finally:
+            with self._cond:
+                self._writer = False
+                self._cond.notify_all()
 
 
 class ResilientDetector:
@@ -57,6 +111,12 @@ class ResilientDetector:
 
     ``load`` 透传：成功加载（含热切换）即清零计数并回调 ``on_load_success``
     （Registry 据此更新"上一稳定版本"指针与 degraded 复位）。
+
+    并发语义：``infer``/``infer_tta`` 持读写锁读锁、``load`` 持写锁——
+    热切换/回退重载与在途推理互斥（切换请求等当前推理排空，新推理等
+    切换完成），批量 worker 与单张推理共享同一实例因此天然被覆盖。
+    回退触发点在读锁释放之后执行，避免"推理线程持读锁等写锁"自锁。
+    失败计数由独立互斥锁保护（多线程共享本实例，check-then-act 需原子）。
     """
 
     def __init__(
@@ -73,14 +133,18 @@ class ResilientDetector:
         self._auto_rollback = bool(auto_rollback)
         self._on_threshold = on_threshold
         self._on_load_success = on_load_success
+        self._rw = _RwLock()
+        self._counter_lock = threading.Lock()
         self.consecutive_failures = 0
         self.rollback_count = 0
         self.last_rollback_at: str | None = None
 
     def load(self, model_uri: str, backend: str = "onnx") -> None:
-        """透传加载；成功即视为新稳定版本（清零计数、通知 Registry）。"""
-        self._inner.load(model_uri, backend)
-        self.consecutive_failures = 0
+        """透传加载（写锁：与在途推理互斥）；成功即视为新稳定版本。"""
+        with self._rw.write():
+            self._inner.load(model_uri, backend)
+        with self._counter_lock:
+            self.consecutive_failures = 0
         self._on_load_success(model_uri)
 
     def infer(
@@ -91,12 +155,18 @@ class ResilientDetector:
         class_conf: dict[int, float] | None = None,
     ):
         try:
-            dets = self._inner.infer(image, conf, iou, class_conf)
+            with self._rw.read():
+                dets = self._inner.infer(image, conf, iou, class_conf)
         except Exception:
-            self.consecutive_failures += 1
-            if self.consecutive_failures >= self._threshold and self._auto_rollback:
-                self.consecutive_failures = 0
-                self.rollback_count += 1
+            with self._counter_lock:
+                self.consecutive_failures += 1
+                should_rollback = (
+                    self.consecutive_failures >= self._threshold and self._auto_rollback
+                )
+                if should_rollback:
+                    self.consecutive_failures = 0
+                    self.rollback_count += 1
+            if should_rollback:
                 from datetime import UTC, datetime
 
                 self.last_rollback_at = (
@@ -108,12 +178,14 @@ class ResilientDetector:
                     _LOG.error("自动回退执行失败: %s", exc)
             raise
         # 推理成功：连续失败计数清零（"连续"语义）。
-        self.consecutive_failures = 0
+        with self._counter_lock:
+            self.consecutive_failures = 0
         return dets
 
     def infer_tta(self, image, conf, iou, class_conf=None, scales=(0.8, 1.0, 1.25)):
         # infer_tta 是 YoloDetector 的增强能力、非 DefectDetector 协议契约
-        return self._inner.infer_tta(image, conf, iou, class_conf, scales)  # type: ignore[attr-defined]
+        with self._rw.read():
+            return self._inner.infer_tta(image, conf, iou, class_conf, scales)  # type: ignore[attr-defined]
 
 
 class Registry:
@@ -149,9 +221,11 @@ class Registry:
         self.grader: StandardGrader = self._build_grader()
         self.preprocessor = self._build_preprocessor()
         # S-03：paths.db_url 非空时优先作为完整 SQLAlchemy URL（达梦/金仓，未真机验证）；
-        # 默认空 = 传 db_path，保持 sqlite:/// 语义不变。
+        # 默认空 = 传 db_path，保持 sqlite:/// 语义不变。db_path 经 _resolve_path
+        # 锚定安装根——否则 CWD≠安装根启动时主库会落到 <CWD>/data/scan.db，与
+        # 下方 SecurityStore 等已锚定的安全库静默分裂成两个文件。
         self.repository = InspectionRepository(
-            self.config.paths.db_url or self.config.paths.db_path
+            self.config.paths.db_url or _resolve_path(self.config.paths.db_path)
         )
         # 安全治理存储（C-06/C-19）：三员账号/会话/告警/独立安全审计链
         from backend.infra.security_store import SecurityStore
@@ -268,6 +342,11 @@ class Registry:
                 model_uri=uri,
                 backend=self.config.model.backend,
                 providers=self.config.model.providers,
+                tile_size=dc.tile_size,
+                tile_overlap=dc.tile_overlap,
+                tile_trigger_side=dc.tile_trigger_side,
+                tile_max_count=dc.tile_max_count,
+                tile_merge_iou=dc.tile_merge_iou,
             )
             self.detector_kind = "trained_yolo"
             self.detector_degraded = False
@@ -298,6 +377,12 @@ class Registry:
         if last:
             # fail-safe：回退失败抛错由 ResilientDetector 记录，不吞掉原始异常
             self.detector.load(last, self.config.model.backend)
+            # 回退后同步注册表活跃指针：否则 GET /models 仍显示新模型为 active，
+            # 而实际推理用的是旧稳定权重（模型卡/审计与运行时事实不一致）。
+            try:
+                self.model_registry.mark_active_by_uri(last)
+            except Exception as exc:  # noqa: BLE001 - 指针同步失败不影响回退本身
+                _LOG.warning("回退后同步注册表活跃指针失败: %s", exc)
         self.detector_degraded = True
         try:
             self.security_store.raise_alert(
@@ -409,32 +494,41 @@ class Registry:
     def run_candidate_evaluation(self, model_id: str) -> dict:
         """对候选模型跑 Golden 评估（同步；复用 /models/{id}/evaluate 逻辑）。
 
-        使用独立检测器实例（不干扰当前活跃检测器）；Golden Set 缺失抛
-        FileNotFoundError；其余评估失败原样上抛，由路由转 4xx/5xx。
+        使用独立检测器实例（不干扰当前活跃检测器）；与 /evaluate 共用
+        EVAL_GATE 串行闸（含检测器构建，防多份 ONNX 会话叠加常驻内存）；
+        Golden Set 缺失抛 FileNotFoundError；其余评估失败原样上抛，由路由转
+        4xx/5xx。
         """
         entry = self.model_registry.get(model_id)
         if entry is None:
             raise KeyError(model_id)
         from backend.evaluation.run_eval import run_golden_evaluation
 
-        det = get_detector(
-            "trained_yolo",
-            model_uri=entry.uri,
-            backend=self.config.model.backend,
-            providers=self.config.model.providers,
-        )
-        return run_golden_evaluation(
-            model_id,
-            det,
-            golden_dir=_resolve_path(self.config.eval.golden_dir),
-            eval_dir=self.eval_dir,
-            experiments_dir=_resolve_path(self.config.eval.experiments_dir),
-            drift_baseline_path=_resolve_path(self.config.eval.drift_baseline_path),
-            conf=self.config.detect.infer_conf,
-            iou=self.config.detect.infer_iou,
-            class_conf=self.config.detect.class_conf,
-            preprocess_fn=self._preprocess_fn(),
-        )
+        with EVAL_GATE:
+            det = get_detector(
+                "trained_yolo",
+                model_uri=entry.uri,
+                backend=self.config.model.backend,
+                providers=self.config.model.providers,
+                # 评估必须与生产推理同参（含 tiling），否则 Golden 指标与线上不可比
+                tile_size=self.config.detect.tile_size,
+                tile_overlap=self.config.detect.tile_overlap,
+                tile_trigger_side=self.config.detect.tile_trigger_side,
+                tile_max_count=self.config.detect.tile_max_count,
+                tile_merge_iou=self.config.detect.tile_merge_iou,
+            )
+            return run_golden_evaluation(
+                model_id,
+                det,
+                golden_dir=_resolve_path(self.config.eval.golden_dir),
+                eval_dir=self.eval_dir,
+                experiments_dir=_resolve_path(self.config.eval.experiments_dir),
+                drift_baseline_path=_resolve_path(self.config.eval.drift_baseline_path),
+                conf=self.config.detect.infer_conf,
+                iou=self.config.detect.infer_iou,
+                class_conf=self.config.detect.class_conf,
+                preprocess_fn=self._preprocess_fn(),
+            )
 
     def _preprocess_fn(self):
         """生产增强链路（与 activate 后自动评估一致）；preprocess 关闭返回 None。"""

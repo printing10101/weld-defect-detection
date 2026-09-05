@@ -89,13 +89,20 @@ def get_detector(
     backend: str = "onnx",
     blob_cfg: BlobConfig | None = None,
     providers: list[str] | None = None,
+    tile_size: int | None = None,
+    tile_overlap: float | None = None,
+    tile_trigger_side: int | None = None,
+    tile_max_count: int | None = None,
+    tile_merge_iou: float | None = None,
 ) -> DefectDetector:
     """按 kind 装配检测器：``cls + load(model_uri, backend)``。
 
     - trained_yolo：须提供真实 model_uri（权重缺失由调用方策略处理）；
     - baseline_blob：权重可选占位，装配 BlobConfig（缺省用默认配置）；
     - providers（S-04）：ONNX 执行提供者清单，仅在实现暴露 ``providers``
-      属性时注入（鸭子类型，不改 DefectDetector 契约；未知实现静默忽略）。
+      属性时注入（鸭子类型，不改 DefectDetector 契约；未知实现静默忽略）；
+    - tile_*：Tiling 分块推理参数（大底片小缺陷召回），同经鸭子类型注入
+      YoloDetector；不识别这些属性的实现静默忽略。
     未知 kind 抛 ModelUnavailableError（503，需人工复核配置）。
     """
     spec = _DETECTOR_SPECS.get(kind)
@@ -110,8 +117,19 @@ def get_detector(
     else:
         det = spec.cls()
     # S-04：仅对支持 providers 的实现（YoloDetector）注入；接口契约不变。
-    # S-04：providers 是 YoloDetector 的运行期可注入参数、非协议契约。
     if providers is not None and hasattr(det, "providers"):
         det.providers = list(providers)  # type: ignore[union-attr]
+    # Tiling 参数注入（同 providers 的鸭子类型模式）：训练模型评估与生产推理
+    # 必须同参，否则 Golden 指标与线上行为不可比。
+    tile_params = {
+        "tile_size": tile_size,
+        "tile_overlap": tile_overlap,
+        "tile_trigger_side": tile_trigger_side,
+        "tile_max_count": tile_max_count,
+        "tile_merge_iou": tile_merge_iou,
+    }
+    for attr, val in tile_params.items():
+        if val is not None and hasattr(det, attr):
+            setattr(det, attr, val)  # type: ignore[union-attr]
     det.load(model_uri or "", backend)
     return det

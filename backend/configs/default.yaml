@@ -171,8 +171,10 @@ detect:
   infer_conf: 0.3   # 推理置信度阈值（§T8：统一入口，禁散落硬编码）
   infer_iou: 0.5    # NMS IoU 阈值
   # 逐类置信度阈值（ADR-010）：稀有/安全关键缺陷低阈值优先召回，气孔高阈值抑误检。
-  # 键=DefectClass.value(0气孔/1夹渣/2未焊透/3未熔合/4裂纹/5咬边)，未列出的类回落 infer_conf。
-  class_conf: {0: 0.30, 1: 0.12, 2: 0.12, 3: 0.08, 4: 0.05, 5: 0.18}
+  # 键=DefectClass.value(0气孔/1夹渣/2未焊透/3未熔合/4裂纹/5咬边/6内凹)，
+  # 未列出的类回落 infer_conf。注意：必须与 DetectCfg 默认值保持同步
+  # （此前缺 6: 0.10 致内凹实际回落 0.30，召回被静默收紧 3 倍）。
+  class_conf: {0: 0.30, 1: 0.12, 2: 0.12, 3: 0.08, 4: 0.05, 5: 0.18, 6: 0.10}
   round_aspect_max: 3.0  # 圆形/条形分界（NB/T47013：L/W<=3 记为圆形缺陷）
   min_area_px: 30
   max_area_px: 200000
@@ -181,6 +183,16 @@ detect:
   abs_threshold: 8.0
   dark_only: false
   review_conf: 0.5  # 检测不确定性阈值，超过则 need_review（人工兜底，M4b/ADR-010）
+  # Tiling 分块推理：大幅底片整图 letterbox 到 640 时小缺陷（细裂纹/小气孔）
+  # 被缩到不可见，是召回率天花板；分块后单瓦片缩放比 ≈2 倍，特征保留。
+  # 代价：推理次数 ≈ 瓦片数（8K 底片约 64 次 CPU 前向，单图秒级→十秒级），
+  # 批量吞吐下降；调 batch.workers 或换 GPU provider 可摊平。tile_size 置 0 关闭。
+  tile_size: 1280
+  tile_overlap: 0.2       # 重叠区同一缺陷被相邻瓦片各检一次，由跨瓦片 NMS 合并
+  tile_trigger_side: 2400 # 最长边超过此值才分块；小图（含 Golden 合成 512px）整图推理不受影响
+  tile_max_count: 400     # 超大底片超此瓦片数时按 1.5× 放大瓦片（平滑降级，不失控耗时）
+  tile_merge_iou: 0.3     # 跨瓦片合并 NMS 的 IoU（比推理 NMS 宽松：相邻瓦片回归框
+                          # 不完全重合，取 0.3 防同缺陷合并失败成双检；按类独立合并）
 mask_refine:
   enabled: true               # False=退化为包围盒近似（与 BBoxQuantifier 等价）
   blur_k: 5                   # ROI 高斯平滑核（奇数）

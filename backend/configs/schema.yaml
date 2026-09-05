@@ -144,6 +144,11 @@ detect:
   abs_threshold: float            # 绝对阈值下限（低噪声图兜底）
   dark_only: bool                 # 只检暗缺陷（True）或暗+亮（False）
   review_conf: float              # 检测不确定性阈值，超过则 need_review（人工兜底）
+  tile_size: int                  # Tiling 分块推理瓦片边长（px）；0=整图推理（大底片小缺陷召回）
+  tile_overlap: float             # 相邻瓦片重叠比例（重叠区重复检出由跨瓦片 NMS 合并）
+  tile_trigger_side: int          # 最长边超过此值才分块（小图整图推理不受影响）
+  tile_max_count: int             # 单图瓦片数上限；超出按 1.5× 放大瓦片（平滑降级控耗时）
+  tile_merge_iou: float           # 跨瓦片合并 NMS 的 IoU（按类独立合并，比推理 NMS 宽松）
 mask_refine:
   enabled: bool                  # False=退化为包围盒近似（与 BBoxQuantifier 等价）
   blur_k: int                    # ROI 高斯平滑核（奇数）

@@ -107,3 +107,8 @@ data/rejects/
 _doc_task/
 # 军工级要求文档：敏感，公开仓库禁止入库
 /扫描检测软件-军工级要求文档.docx
+
+# 本地工具状态（扫描/审计/记忆缓存）
+.mimosa/
+.dsh-memory/
+.import_linter_cache/
