@@ -4,10 +4,12 @@
  *
  * 功能：放大/缩小/适应屏幕/1:1/还原、平移、旋转、水平/垂直镜像、
  * 正反片转换（反相）、亮度、对比度、窗位窗宽（灰度映射）、锐化、浮雕。
- * 快捷键：+/- 缩放、方向键平移、r/R 旋转、i 反相、f 适应、1 1:1、0 还原。
+ * 快捷键：+/- 缩放、方向键平移、r/R 旋转、i 反相、f 适应、1 1:1、0 还原
+ * （仅当鼠标悬停在本查看器且焦点不在输入控件时生效，多实例互不干扰）。
  *
  * 渲染管线：源图 → 旋转/镜像 → 灰度 LUT（反相/亮度/对比度/窗宽窗位）→
- * 卷积（锐化/浮雕）→ 结果缓存（仅在滤波参数变化时重算，缩放/平移零开销）。
+ * 卷积（锐化/浮雕）→ 结果缓存（滤波/姿态/分辨率档任一变化才重算，缩放/平移
+ * 零开销；重建分辨率按显示所需降档，≥1:1 放大保持全分辨率）。
  * 说明：浏览器 webview 不解码 TIFF/DICOM，此类影像请先经后端预处理接口转为
  * PNG/JPG 预览格式（或使用已入库影像的预览 URL）。
  */
@@ -52,10 +54,30 @@ const emboss = ref(false);
 
 const img = ref<HTMLImageElement | null>(null);
 const imgErr = ref<string | null>(null);
+/** 鼠标是否悬停在本查看器内：window 级快捷键只作用于悬停窗（双片对比时两
+ * 实例都在 window 上监听，不限定归属会让同一按键同时作用于两窗）。 */
+const hovered = ref(false);
 
-// 处理结果缓存：仅滤波/姿态参数变化时重算
+// 处理结果缓存：仅滤波/姿态/分辨率档变化时重算
 const processed = document.createElement("canvas");
+// 虚拟（原图尺寸）维度：重建画布可按显示分辨率降档，变换/适应数学始终用原图尺寸
+let processedVW = 0;
+let processedVH = 0;
 let processedKey = "";
+
+/** 重建分辨率档（半倍频程分档，取 ≥ 所需因子的最小档）：
+ * 缩小/适应态按显示所需设备像素重建——此前 8K 底片 fit 态每次滑滤波都全图
+ * 卷积（单帧 ImageData ≈256MB，数百 ms 卡顿），降档后重建代价降约两个数量级；
+ * ≥1:1 态档位为 1（全分辨率），放大判读精度不受影响。 */
+function resBucket(factor: number): number {
+  return 2 ** (Math.ceil(Math.log2(Math.max(factor, 1e-3)) * 2) / 2);
+}
+
+function expectedKey(): string {
+  const dpr = window.devicePixelRatio || 1;
+  const f = resBucket(Math.min(1, Math.max(scale.value * dpr, 0.02)));
+  return `${filterKey.value}|res${f}`;
+}
 
 const transformState = computed<Transform>(() => ({
   scale: scale.value,
@@ -84,12 +106,17 @@ watch(
       img.value = null;
       return;
     }
+    // 世代标记：快速切换 src 时旧图的 onload/onerror 可能晚到，没有守卫
+    // 会把旧图画进 canvas / 用旧图的失败覆盖新图的成功。
+    const mySrc = src;
     const el = new Image();
     el.onload = () => {
+      if (props.src !== mySrc) return; // 已切到别的图，丢弃迟到回调
       img.value = el;
       fit();
     };
     el.onerror = () => {
+      if (props.src !== mySrc) return;
       imgErr.value = "影像加载失败（TIFF/DICOM 请先用后端转换为 PNG/JPG 预览格式）";
       img.value = null;
     };
@@ -121,6 +148,10 @@ watch(
     rotation.value = t.rotation;
     flipH.value = t.flipH;
     flipV.value = t.flipV;
+    // 渲染由各交互函数显式调度，watch 只改 refs 不触发重绘——补一次调度，
+    // 否则 B 窗在 A 窗缩放/平移后保持旧画面（旋转/镜像恰经 filterKey 触发，
+    // 行为不一致更隐蔽）。
+    scheduleRender();
   },
 );
 
@@ -155,8 +186,16 @@ function rebuildProcessed(): void {
   if (!source) return;
   const rot = ((rotation.value % 360) + 360) % 360;
   const swap = rot === 90 || rot === 270;
-  const w = swap ? source.naturalHeight : source.naturalWidth;
-  const h = swap ? source.naturalWidth : source.naturalHeight;
+  const natW = source.naturalWidth;
+  const natH = source.naturalHeight;
+  processedVW = swap ? natH : natW;
+  processedVH = swap ? natW : natH;
+  // 显示分辨率降档：fit/缩小态只在显示所需分辨率上做 LUT/卷积（见 expectedKey），
+  // ≥1:1 时 factor=1 保持全分辨率。
+  const dpr = window.devicePixelRatio || 1;
+  const factor = resBucket(Math.min(1, Math.max(scale.value * dpr, 0.02)));
+  const w = Math.max(1, Math.round(processedVW * factor));
+  const h = Math.max(1, Math.round(processedVH * factor));
   processed.width = w;
   processed.height = h;
   const ctx = processed.getContext("2d");
@@ -164,8 +203,8 @@ function rebuildProcessed(): void {
   ctx.save();
   ctx.translate(w / 2, h / 2);
   ctx.rotate((rot * Math.PI) / 180);
-  ctx.scale(flipH.value ? -1 : 1, flipV.value ? -1 : 1);
-  ctx.drawImage(source, -source.naturalWidth / 2, -source.naturalHeight / 2);
+  ctx.scale(factor * (flipH.value ? -1 : 1), factor * (flipV.value ? -1 : 1));
+  ctx.drawImage(source, -natW / 2, -natH / 2);
   ctx.restore();
 
   // 灰度 LUT：反相 / 亮度 / 对比度 / 窗宽窗位（0-255 尺度；16bit 影像已被浏览器缩到 8bit）
@@ -197,7 +236,7 @@ function rebuildProcessed(): void {
     applyConvolution(imageData, [-2, -1, 0, -1, 1, 1, 0, 1, 2], 1, 128);
   }
   ctx.putImageData(imageData, 0, 0);
-  processedKey = filterKey.value;
+  processedKey = expectedKey();
 }
 
 // ---- 绘制（缩放/平移路径零重算） ----
@@ -226,11 +265,12 @@ function render(): void {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
   if (!img.value) return;
-  if (processedKey !== filterKey.value) rebuildProcessed();
+  if (processedKey !== expectedKey()) rebuildProcessed();
   ctx.save();
   ctx.translate(cssW / 2 + tx.value, cssH / 2 + ty.value);
   ctx.scale(scale.value, scale.value);
-  ctx.drawImage(processed, -processed.width / 2, -processed.height / 2);
+  // 重建画布可能已按显示分辨率降档，绘制时以虚拟（原图）尺寸为目标大小
+  ctx.drawImage(processed, -processedVW / 2, -processedVH / 2, processedVW, processedVH);
   ctx.restore();
 }
 
@@ -242,9 +282,11 @@ function fit(): void {
   const cw = rect?.width ?? 640;
   const ch = rect?.height ?? 480;
   const pad = 0.94;
-  const swap = rotation.value % 180 !== 0;
-  const iw = swap ? processed.height : processed.width || img.value.naturalWidth;
-  const ih = swap ? processed.width : processed.height || img.value.naturalHeight;
+  // 以原图自然尺寸计算适应比例（此前用处理画布尺寸，换图瞬间会读到上一张的陈旧尺寸）
+  const rot = ((rotation.value % 360) + 360) % 360;
+  const swap = rot % 180 !== 0;
+  const iw = swap ? img.value.naturalHeight : img.value.naturalWidth;
+  const ih = swap ? img.value.naturalWidth : img.value.naturalHeight;
   scale.value = Math.min(cw / iw, ch / ih) * pad;
   tx.value = 0;
   ty.value = 0;
@@ -334,8 +376,26 @@ function onUp(): void {
   }
 }
 
+function isFormControl(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el || !el.tagName) return false;
+  return (
+    el.tagName === "INPUT" ||
+    el.tagName === "TEXTAREA" ||
+    el.tagName === "SELECT" ||
+    el.isContentEditable
+  );
+}
+
 function onKey(e: KeyboardEvent): void {
-  if (!canvas.value || !img.value) return;
+  // 输入控件内不抢占按键：此前在"档案影像编号"等输入框打字，
+  // r/i/f/0/方向键会被查看器拦截并 preventDefault，输入被吞。
+  if (isFormControl(e.target)) return;
+  // 修饰键组合让给全局/浏览器快捷键（AppShell 的 Ctrl+1..6 切工作区、
+  // Ctrl+R 等）：不排除时两边监听都会执行，切工作区的同时查看器被偷改缩放。
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  // 快捷键只作用于鼠标悬停的本查看器（双片对比时两实例都在 window 监听）。
+  if (!hovered.value || !canvas.value || !img.value) return;
   const step = 24;
   switch (e.key) {
     case "+":
@@ -348,18 +408,22 @@ function onKey(e: KeyboardEvent): void {
     case "ArrowLeft":
       tx.value -= step;
       scheduleRender();
+      emitTransform();
       break;
     case "ArrowRight":
       tx.value += step;
       scheduleRender();
+      emitTransform();
       break;
     case "ArrowUp":
       ty.value -= step;
       scheduleRender();
+      emitTransform();
       break;
     case "ArrowDown":
       ty.value += step;
       scheduleRender();
+      emitTransform();
       break;
     case "r":
       rotate(1);
@@ -399,7 +463,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="film-viewer" :style="{ height }">
+  <div
+    class="film-viewer"
+    :style="{ height }"
+    @mouseenter="hovered = true"
+    @mouseleave="hovered = false"
+  >
     <div class="fv-toolbar">
       <button title="放大（+）" @click="zoomBy(1.2)">＋</button>
       <button title="缩小（-）" @click="zoomBy(1 / 1.2)">－</button>
