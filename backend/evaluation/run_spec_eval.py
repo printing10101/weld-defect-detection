@@ -113,7 +113,9 @@ def _run_quant(
         gts = _load_yolo_labels(lbl_dir / f"{p.stem}.txt", wh)
         if not gts:
             continue
-        pairs.extend(geometry_pairs_for_image(gray, [g["bbox"] for g in gts], spacing, cfg=mask_cfg))
+        pairs.extend(
+            geometry_pairs_for_image(gray, [g["bbox"] for g in gts], spacing, cfg=mask_cfg)
+        )
         n_img += 1
     summary = quantification_summary(pairs, rel_threshold=rel_thr)
     summary["n_images"] = n_img

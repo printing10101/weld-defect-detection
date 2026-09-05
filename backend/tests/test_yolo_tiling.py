@@ -38,7 +38,9 @@ def _install_fake_single(monkeypatch, det: Detection, calls: list) -> None:
         return [
             Detection(
                 id="X",
-                bbox=BBox(x=cw / 2 - det.bbox.w / 2, y=ch / 2 - det.bbox.h / 2, w=det.bbox.w, h=det.bbox.h),
+                bbox=BBox(
+                    x=cw / 2 - det.bbox.w / 2, y=ch / 2 - det.bbox.h / 2, w=det.bbox.w, h=det.bbox.h
+                ),
                 class_id=det.class_id,
                 score=det.score,
                 uncertainty=det.uncertainty,
