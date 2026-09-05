@@ -479,7 +479,7 @@ class YoloDetector:
             idxs = cv2.dnn.NMSBoxes(xywh, scores, 0.0, iou_thr)  # type: ignore[arg-type]
             if isinstance(idxs, tuple):
                 idxs = idxs[0] if idxs else []
-            if len(idxs) == 0:
+            if len(idxs) == 0:  # type: ignore[reportArgumentType]
                 # conf=0 合法（/detect 显式允许），全零分候选经 NMS 可能返回空。
                 return []
             return [int(i) for i in idxs]  # type: ignore[reportGeneralTypeIssues]

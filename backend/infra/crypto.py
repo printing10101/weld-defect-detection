@@ -150,14 +150,10 @@ def _load_or_create_local_key() -> bytes:
                 try:
                     path.parent.mkdir(parents=True, exist_ok=True)
                     legacy.replace(path)
-                    _LOG.warning(
-                        "静态加密：已把历史 CWD 相对密钥文件迁移 %s → %s", legacy, path
-                    )
+                    _LOG.warning("静态加密：已把历史 CWD 相对密钥文件迁移 %s → %s", legacy, path)
                     return _load_or_create_local_key()
                 except OSError as exc:
-                    raise CryptoKeyError(
-                        f"历史密钥文件迁移失败 {legacy} → {path}: {exc}"
-                    ) from None
+                    raise CryptoKeyError(f"历史密钥文件迁移失败 {legacy} → {path}: {exc}") from None
     key = os.urandom(_KEY_BYTES)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

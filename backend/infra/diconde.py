@@ -50,7 +50,6 @@ PHI_TAGS: dict[str, str] = {
 }
 
 
-
 def read_diconde_bytes(path: str | Path) -> bytes:
     """读取 DICONDE 文件字节：静态加密副本（SDC2 国密 / SDC1 历史 AES）先解密。
 

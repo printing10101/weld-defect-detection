@@ -819,7 +819,8 @@ class InspectionPipeline:
         if regrade_gray is None:
             _LOG.info("regrade: 影像副本不可读 image_id=%s，量化退化为包围盒近似", image_id)
         spacing_known = bool(spacing and spacing > 0)
-        spacing_eff = spacing if spacing_known else 1.0
+        # 内联条件而非 spacing_known：让类型检查器把 None 收窄掉
+        spacing_eff = spacing if spacing is not None and spacing > 0 else 1.0
         try:
             grade = self._reg.grader.grade(defects, context)
             joint_level = grade.joint_level.value

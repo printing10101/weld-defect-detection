@@ -270,6 +270,7 @@ async def evaluate_model(
             status_code=404,
             detail={"code": "MODEL_NOT_FOUND", "message": f"未找到模型: {model_id}"},
         )
+
     # 评估该模型权重：经注册表加载独立检测器（不干扰当前活跃检测器）；
     # tiling 参数与生产同参，保证评估口径与线上推理一致。检测器构建与
     # 评估都在 EVAL_GATE 闸内——会话构建放闸外时，等闸的请求仍各持一份

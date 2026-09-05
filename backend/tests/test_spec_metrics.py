@@ -273,4 +273,6 @@ class TestConfigConsistency:
 
         loaded = dict(load_config().detect.class_conf)
         default = dict(DetectCfg().class_conf)
-        assert loaded == default, f"default.yaml 与 DetectCfg 的 class_conf 漂移: {loaded} != {default}"
+        assert loaded == default, (
+            f"default.yaml 与 DetectCfg 的 class_conf 漂移: {loaded} != {default}"
+        )
