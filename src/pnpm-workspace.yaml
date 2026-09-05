@@ -1,5 +1,10 @@
-# pnpm v10 构建脚本白名单：仅允许这两个依赖包运行 postinstall 脚本
-# （供应链最小化；其余依赖的构建脚本一律拦截）。
+# 构建脚本白名单（供应链最小化）：仅允许这两个依赖包运行 postinstall 脚本，
+# 其余依赖的构建脚本一律拦截。
+# 双格式兼容：pnpm v10 认 onlyBuiltDependencies 数组；v11 改用 allowBuilds
+# 映射（v11 的部分平台/场景不再读旧键，曾致 CI 冷装报 ERR_PNPM_IGNORED_BUILDS）。
 onlyBuiltDependencies:
   - esbuild
   - vue-demi
+allowBuilds:
+  esbuild: true
+  vue-demi: true
