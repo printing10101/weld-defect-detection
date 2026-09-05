@@ -257,9 +257,6 @@ const levelOptions = ["", "I", "II", "III", "IV"] as const;
           <option :value="100">
             100/页
           </option>
-          <option :value="200">
-            200/页
-          </option>
         </select>
       </div>
     </template>

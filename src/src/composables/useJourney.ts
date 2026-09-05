@@ -7,7 +7,7 @@
  * - error：后端统一错误包的真实 message；
  * - elapsedMs：真实请求耗时计时。
  */
-import { readonly, ref } from "vue";
+import { onScopeDispose, readonly, ref } from "vue";
 import { toErrorMessage } from "../utils/errorMessage";
 import { createReport } from "../services/api";
 import type { ReportOut } from "../types/api";
@@ -23,6 +23,14 @@ export function useJourney() {
   const elapsedMs = ref(0);
 
   let timer: ReturnType<typeof setInterval> | undefined;
+
+  // 兜底回收：处理中（上传最长 120s）切走视图时，卸载当前组件作用域——
+  // 计时 interval 停掉、blob 预览 URL 释放，不再等到请求 settle。
+  onScopeDispose(() => {
+    if (timer) clearInterval(timer);
+    timer = undefined;
+    if (sourceUrl.value) URL.revokeObjectURL(sourceUrl.value);
+  });
 
   function setFile(f: File | null): void {
     if (sourceUrl.value) URL.revokeObjectURL(sourceUrl.value);

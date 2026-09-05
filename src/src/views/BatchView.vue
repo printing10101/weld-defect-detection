@@ -4,7 +4,7 @@
  * 数据全部来自真实后端 /batch 系列接口；进度经 2s 轮询实时更新。
  */
 import { onMounted, onUnmounted, ref } from "vue";
-import { IMAGE_EXTS as EXTS } from "../services/imageFormats";
+import { IMAGE_ACCEPT, IMAGE_EXTS as EXTS } from "../services/imageFormats";
 import { toErrorMessage } from "../utils/errorMessage";
 import BatchProgress from "../components/BatchProgress.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
@@ -31,6 +31,8 @@ const weldNo = ref("");
 const force = ref(true);
 
 let timer: number | null = null;
+/** 当前轮询的批次 id（null=未在轮询）。setTimeout 链式调度的归属标记。 */
+let pollingId: string | null = null;
 
 // 轮询健壮性：连续失败退避 + 后端离线态，避免后端宕机时无限空转。
 const POLL_BASE_MS = 2000;
@@ -53,6 +55,9 @@ async function refreshHistory(): Promise<void> {
 }
 
 function openHistory(row: BatchSummaryOut): void {
+  // 先停掉旧批次的轮询：否则在途的 tick(旧) 会通过归属守卫，把旧批次
+  // 状态覆盖到刚点开的历史批次的界面上（甚至到终态时反向 stopPolling）。
+  stopPolling();
   activeBatchId.value = row.batch_id;
   if (row.status === "finished") {
     void fetchStatusOnce(row.batch_id);
@@ -62,9 +67,15 @@ function openHistory(row: BatchSummaryOut): void {
   }
 }
 
+/** 一次性状态拉取的世代标记：迟到的响应不得覆盖用户切换后的视图。 */
+let fetchToken = 0;
+
 async function fetchStatusOnce(id: string): Promise<void> {
+  const token = ++fetchToken;
   try {
-    status.value = await getBatchStatus(id);
+    const s = await getBatchStatus(id);
+    if (token !== fetchToken) return; // 已切走（切换/新提交都会使代次失效）
+    status.value = s;
     phase.value = "result";
   } catch {
     /* 忽略 */
@@ -72,6 +83,13 @@ async function fetchStatusOnce(id: string): Promise<void> {
 }
 
 /* ── 文件选择（多文件 / 文件夹，文件夹经 webkitdirectory 递归收集） ── */
+function onInputChanged(e: Event): void {
+  const input = e.target as HTMLInputElement;
+  pickFiles(input.files);
+  // 复位 input：不清空的话，再次选择完全相同的文件不触发 change（静默无响应）
+  input.value = "";
+}
+
 function pickFiles(list: FileList | null): void {
   if (!list || list.length === 0) return;
   const accepted: File[] = [];
@@ -142,28 +160,38 @@ async function doSubmit(fd: FormData): Promise<void> {
   }
 }
 
-function scheduleTick(id: string): void {
-  stopPolling();
-  timer = window.setInterval(() => void tick(id), pollIntervalMs());
+function clearTimer(): void {
+  if (timer !== null) {
+    window.clearTimeout(timer);
+    timer = null;
+  }
+}
+
+function scheduleNext(id: string): void {
+  clearTimer();
+  timer = window.setTimeout(() => void tick(id), pollIntervalMs());
 }
 
 function startPolling(id: string): void {
+  stopPolling();
   backendDown.value = false;
   pollErrorCount.value = 0;
-  scheduleTick(id);
+  fetchToken++; // 使在途的 fetchStatusOnce 失效，防止一次性拉取覆盖轮询视图
+  pollingId = id;
   void tick(id);
 }
 
 function stopPolling(): void {
-  if (timer !== null) {
-    window.clearInterval(timer);
-    timer = null;
-  }
+  pollingId = null;
+  clearTimer();
 }
 
 async function tick(id: string): Promise<void> {
   try {
     const s = await getBatchStatus(id);
+    // 归属守卫：请求在途时用户可能已切换/提交了新批次，迟到响应不得覆盖
+    // 新批次状态，更不得触发 stopPolling 杀掉新批次的轮询。
+    if (pollingId !== id) return;
     status.value = s;
     pollErrorCount.value = 0;
     backendDown.value = false;
@@ -171,17 +199,21 @@ async function tick(id: string): Promise<void> {
       stopPolling();
       phase.value = "result";
       void refreshHistory();
+      return;
     }
   } catch {
+    if (pollingId !== id) return; // 同上：迟到失败的响应也不影响新批次
     // 单次轮询失败：累计并退避；超过阈值判定后端离线，停止空转并提示。
     pollErrorCount.value += 1;
     if (pollErrorCount.value >= MAX_OFFLINE_STRIKES) {
       backendDown.value = true;
       stopPolling();
-    } else {
-      scheduleTick(id); // 以更长间隔重排
+      return;
     }
   }
+  // 链式调度：上一次请求完成后再排下一次。此前用 setInterval，请求挂起时
+  // 定时器照发，最坏堆叠十余个并发请求打向同一个挂死后端。
+  if (pollingId === id) scheduleNext(id);
 }
 
 function retryConnection(): void {
@@ -302,10 +334,10 @@ onUnmounted(() => {
           <input
             id="pick-files"
             type="file"
-            accept=".dcm,.png,.tif,.tiff"
+            :accept="IMAGE_ACCEPT"
             multiple
             style="display: none"
-            @change="pickFiles(($event.target as HTMLInputElement).files)"
+            @change="onInputChanged($event)"
           >
           <button
             type="button"
@@ -320,7 +352,7 @@ onUnmounted(() => {
             webkitdirectory
             multiple
             style="display: none"
-            @change="pickFiles(($event.target as HTMLInputElement).files)"
+            @change="onInputChanged($event)"
           >
           <div
             v-if="files.length"
@@ -414,7 +446,7 @@ onUnmounted(() => {
       </div>
       <div
         class="sec-label"
-        data-t="BATCH {{ activeBatchId ? activeBatchId.slice(0, 8) : '' }}"
+        :data-t="`BATCH ${activeBatchId ? activeBatchId.slice(0, 8) : ''}`"
       >
         批次 {{ activeBatchId ? activeBatchId.slice(0, 8) : "" }}
         <span

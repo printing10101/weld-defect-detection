@@ -67,7 +67,9 @@ async function submitBootstrap(): Promise<void> {
   try {
     const out = await bootstrap({ username: bootUsername.value.trim(), role: bootRole.value });
     bootPrivateKey.value = out.private_key ?? "";
-    showBootstrap.value = false;
+    // 保持引导面板展开：私钥展示区就在面板里，收起等于诱导用户丢失唯一一次
+    // 展示的私钥（后端口径：仅本次展示、引导窗口创建后永久关闭）。用户确认
+    // 保存后可手动收起。
     usernameInput.value = out.username;
   } catch (e) {
     error.value = e instanceof ApiRequestError ? e.message : "引导失败";

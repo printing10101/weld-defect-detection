@@ -4,9 +4,10 @@
  * 单片：全部查看/滤波操作；双片：左右两窗并排，缩放/平移/旋转联动（可关）。
  * 数据诚实性：仅显示用户真实选择的本地文件，不预置任何样例。
  */
-import { ref } from "vue";
+import { onUnmounted, ref } from "vue";
 import FilmViewer from "../components/FilmViewer.vue";
 import { imagePreviewUrl } from "../services/api";
+import { IMAGE_ACCEPT } from "../services/imageFormats";
 import type { Transform } from "../types/api";
 
 const urlA = ref<string | null>(null);
@@ -19,6 +20,30 @@ const lastTransform = ref<Transform | null>(null);
 const archiveId = ref("");
 const archiveErr = ref<string | null>(null);
 
+// 当前 URL 是否为 blob:（档案预览是后端 http URL——revokeObjectURL 对它
+// 无意义；只 revoke 真正的 blob，避免生命周期语义混乱）。
+const blobA = ref(false);
+const blobB = ref(false);
+
+function setUrl(which: "A" | "B", url: string | null, isBlob: boolean): void {
+  const old = which === "A" ? urlA.value : urlB.value;
+  const oldIsBlob = which === "A" ? blobA.value : blobB.value;
+  if (old && oldIsBlob) URL.revokeObjectURL(old);
+  if (which === "A") {
+    urlA.value = url;
+    blobA.value = isBlob;
+  } else {
+    urlB.value = url;
+    blobB.value = isBlob;
+  }
+}
+
+// SPA 会话内组件卸载（路由切走）也回收，避免反复"选择主片"累积泄漏 Blob。
+onUnmounted(() => {
+  if (urlA.value && blobA.value) URL.revokeObjectURL(urlA.value);
+  if (urlB.value && blobB.value) URL.revokeObjectURL(urlB.value);
+});
+
 /** 从检测档案加载：输入影像编号，走后端 PNG 预览接口（支持 TIFF/DICOM 密文副本）。 */
 function loadFromArchive(): void {
   const id = archiveId.value.trim();
@@ -27,26 +52,23 @@ function loadFromArchive(): void {
     archiveErr.value = "请输入影像编号（可在档案检索中复制）。";
     return;
   }
-  if (urlA.value) URL.revokeObjectURL(urlA.value);
-  urlA.value = imagePreviewUrl(id);
+  setUrl("A", imagePreviewUrl(id), false);
   nameA.value = `档案影像 ${id}`;
 }
 
 function pick(which: "A" | "B"): void {
   const input = document.createElement("input");
   input.type = "file";
-  input.accept = ".dcm,.png,.jpg,.jpeg,.jfif,.bmp,.gif,.webp,.tif,.tiff,.avif,.heic,.heif";
+  // 白名单取唯一事实源（此前手写清单漏 .dicom/.ima/.pgm/.ppm/.pnm/.ico）
+  input.accept = IMAGE_ACCEPT;
   input.onchange = () => {
     const f = input.files?.[0];
     if (!f) return;
     const url = URL.createObjectURL(f);
+    setUrl(which, url, true);
     if (which === "A") {
-      if (urlA.value) URL.revokeObjectURL(urlA.value);
-      urlA.value = url;
       nameA.value = f.name;
     } else {
-      if (urlB.value) URL.revokeObjectURL(urlB.value);
-      urlB.value = url;
       nameB.value = f.name;
       dualMode.value = true;
     }
@@ -59,13 +81,10 @@ function onTransform(t: Transform): void {
 }
 
 function clear(which: "A" | "B"): void {
+  setUrl(which, null, false);
   if (which === "A") {
-    if (urlA.value) URL.revokeObjectURL(urlA.value);
-    urlA.value = null;
     nameA.value = "";
   } else {
-    if (urlB.value) URL.revokeObjectURL(urlB.value);
-    urlB.value = null;
     nameB.value = "";
     dualMode.value = false;
   }

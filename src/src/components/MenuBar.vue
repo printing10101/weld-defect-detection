@@ -20,6 +20,18 @@ interface Menu {
 
 defineProps<{ activeView: string }>();
 const emit = defineEmits<{ action: [id: string] }>();
+
+// 工作区名映射（表驱动：三元链漏分支时 viewer/std-eval 等页会错显示成"设备标定"）。
+// 键与 ViewId（types/api.ts）一致。
+const WORKSPACE_NAMES: Record<string, string> = {
+  journey: "单张检测",
+  batch: "批量检测",
+  archive: "档案检索",
+  viewer: "底片查看",
+  "std-eval": "系统评价",
+  device: "设备标定",
+};
+
 // 三员认证（C-06）：顶栏展示当前登录身份，支持手动登出
 const auth = useAuthStore();
 const router = useRouter();
@@ -149,13 +161,7 @@ onBeforeUnmount(() => document.removeEventListener("click", onDocClick));
     <!-- 右侧：当前工作区指示（AutoCAD 顶栏上下文信息） -->
     <div class="ctx">
       工作区：{{
-        activeView === "journey"
-          ? "单张检测"
-          : activeView === "batch"
-            ? "批量检测"
-            : activeView === "archive"
-              ? "档案检索"
-              : "设备标定"
+        WORKSPACE_NAMES[activeView] ?? "设备标定"
       }}
     </div>
     <!-- 右侧：当前登录身份（三员之一）+ 登出 -->

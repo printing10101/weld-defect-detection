@@ -5,7 +5,7 @@
  * 校验消息针对真实文件（扩展名/大小）。不包含任何预设样例。
  */
 import { computed, onUnmounted, ref } from "vue";
-import { IMAGE_EXTS as FILE_EXTS } from "../services/imageFormats";
+import { IMAGE_ACCEPT, IMAGE_EXTS as FILE_EXTS } from "../services/imageFormats";
 
 const emit = defineEmits<{
   fileChanged: [file: File | null];
@@ -25,7 +25,9 @@ const weldNo = ref("");
 
 const isDicom = computed(() => {
   const ext = file.value?.name.split(".").pop()?.toLowerCase();
-  return ext === "dcm";
+  // 与 IMAGE_ACCEPT 白名单同口径：.dicom/.ima 也是合法 DICOM 扩展名，
+  // 只认 .dcm 会让它们走 <img> 预览（WebView 解码不了 DICOM，显示破图）。
+  return ["dcm", "dicom", "ima"].includes(ext ?? "");
 });
 
 function onPick(picked: File): void {
@@ -172,7 +174,7 @@ defineExpose({ reset });
         <input
           ref="inputEl"
           type="file"
-          accept=".dcm,.dicom,.ima,.png,.jpg,.jpeg,.jfif,.bmp,.gif,.webp,.tif,.tiff,.avif,.heic,.heif,.pgm,.ppm,.pnm,.ico"
+          :accept="IMAGE_ACCEPT"
           style="display: none"
           @change="onInput"
         >
