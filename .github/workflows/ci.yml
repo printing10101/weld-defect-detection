@@ -36,8 +36,11 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           # 与本地开发一致（pnpm 10+ 才支持 pnpm-workspace.yaml 中的
-          # onlyBuiltDependencies 构建脚本白名单配置段）
-          version: 11
+          # onlyBuiltDependencies 构建脚本白名单配置段）。
+          # 钉精确 minor：11.25 对"配置型 pnpm-workspace.yaml（无 packages 段）"
+          # 的白名单加载存在行为变化，会把 esbuild/vue-demi 的构建脚本判为
+          # IGNORED_BUILDS 直接报错；11.24.0 为本地验证可用版本。
+          version: 11.24.0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
