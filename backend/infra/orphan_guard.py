@@ -44,7 +44,12 @@ def _window_probe(pid: int) -> bool:
             handle = open_proc(0x1000, False, wintypes.DWORD(pid))
             if not handle:
                 # 句柄为空：区分"进程不存在"与"存在但句柄受限"。
-                return int(ctypes.get_last_error() or 0) == 5  # 5=ACCESS_DENIED
+                # getattr 取用：typeshed 把 get_last_error 标为 Windows 专属
+                # 属性，Linux 下类型检查对直接访问报 reportAttributeAccessIssue
+                # （运行时该属性全平台存在，此处本就只在 Windows 探测路径执行）。
+                get_last_error = getattr(ctypes, "get_last_error", None)
+                # 5=ACCESS_DENIED：进程存在但句柄受限，保守判活。
+                return get_last_error is not None and int(get_last_error() or 0) == 5
             try:
                 # 光有句柄还不够——被 TerminateProcess 的进程对象仍可被打开，
                 # 会造成"死人判活"的误判。必须再看退出码：STILL_ACTIVE=259 才算存活。
