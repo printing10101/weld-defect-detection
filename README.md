@@ -24,7 +24,9 @@ TDR/底片误报率）、混淆矩阵、L1–L4 系统分级、漏检/误检/误
 - **批量评片**：线程池并行、进度/取消/断点续跑
 - **训练侧**：数据集构建（分层划分 + 互斥校验）、三人标注一致性仲裁、
   主动学习、伪标签回流
-- **评价体系**：DB50/T 1807-2025 全套指标与记录表（`python -m backend.evaluation.run_std_eval`）
+- **评价体系**：DB50/T 1807-2025 全套指标与记录表（`python -m backend.evaluation.run_std_eval`）；
+  规格专项指标——量化一致性（Bland–Altman + 相对误差≤5%）、评级一致率（≥95% 且 κ≥0.8）、
+  置信度校准（ECE≤0.05）（`python -m backend.evaluation.run_spec_eval`）
 - **底片查看器**：缩放/平移/旋转/镜像/正反片转换/窗位窗宽/锐化/浮雕/双片对比
 
 ## 目录结构
@@ -73,6 +75,18 @@ cd src && npx vue-tsc --noEmit && npm run test:run
 ```
 
 CI（`.github/workflows/ci.yml`）在每次推送时执行上述检查。
+
+## 构建安装包
+
+```bash
+cd src
+pnpm install
+python scripts/slim_python_embed.py   # 打包前裁剪嵌入运行时（省 ~135MB，详见脚本说明）
+pnpm tauri build                      # 产物在 src/src-tauri/target/release/bundle/
+```
+
+注意：裁剪后的 `src/python_embed` 不能再用于跑后端单测（pytest 已剔除），
+后端测试请使用 `backend/.venv` 开发环境。
 
 ## 文档
 

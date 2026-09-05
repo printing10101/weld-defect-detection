@@ -97,9 +97,11 @@ def _predict_with_onnx(img_paths: list[Path], model_path: Path) -> dict[str, lis
     sys.path.insert(0, str(_ROOT / "scripts"))
     import eval_real_onnx as base
 
-    from backend.infra.config import DetectCfg
+    # 部署配置为准（load_config 合并 default.yaml + 环境覆盖）——而非数据类
+    # 默认值，否则运维调参后评估口径与线上漂移。
+    from backend.infra.config import load_config
 
-    base.CLASS_CONF = dict(DetectCfg().class_conf)
+    base.CLASS_CONF = dict(load_config().detect.class_conf)
     sess = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
     inp = sess.get_inputs()[0].name
     out: dict[str, list[dict]] = {}
