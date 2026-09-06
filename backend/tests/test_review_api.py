@@ -91,7 +91,7 @@ def test_review_consensus_closes_loop(tmp_path) -> None:
     assert out["stage"] == "consensus"
     assert out["joint_level"] is not None
     assert out["need_review"] is False
-    assert out["reviewed_by"] == "alice"
+    assert out["reviewed_by"] == "测试管理员"  # 登录态强制归属 principal
     assert out["review_count"] == 1
     assert 0.0 <= out["kappa"] <= 1.0
 
@@ -148,7 +148,7 @@ def test_review_disagreement_then_arbitration(tmp_path) -> None:
         assert out2["stage"] == "arbitrated"
         assert out2["joint_level"] == "II"
         assert out2["need_review"] is False
-        assert out2["reviewed_by"] == "carol"
+        assert out2["reviewed_by"] == "测试管理员"  # 登录态强制归属 principal
         assert out2["review_count"] == 2
 
 

@@ -74,10 +74,14 @@ def test_audit_pdf_smoke(tmp_path: Path) -> None:
 
 
 def test_privacy_audit_endpoint(tmp_path: Path, monkeypatch) -> None:
-    """端点：指定目录扫描 → JSON+PDF 报告落盘 + 审计留痕。"""
-    _jpg_with_exif(tmp_path / "leak.jpg")
+    """端点：指定目录扫描（须位于数据目录内）→ JSON+PDF 报告落盘 + 审计留痕。"""
+    from backend.infra.config import load_config, resolve_config_path
+
+    scan_dir = resolve_config_path(load_config().paths.data_dir).resolve() / "privacy_scan"
+    scan_dir.mkdir(parents=True, exist_ok=True)
+    _jpg_with_exif(scan_dir / "leak.jpg")
     with TestClient(app) as c:
-        resp = c.post("/api/v1/privacy/audit", json={"directory": str(tmp_path)})
+        resp = c.post("/api/v1/privacy/audit", json={"directory": str(scan_dir)})
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["scanned"] == 1
@@ -89,6 +93,9 @@ def test_privacy_audit_endpoint(tmp_path: Path, monkeypatch) -> None:
 
         entries, _total = get_registry().repository.list_audit(action="privacy_audit", limit=50)
         assert entries
+        # 越界目录（数据目录外）→ 422，封死全盘枚举探测面
+        outside = c.post("/api/v1/privacy/audit", json={"directory": str(tmp_path)})
+        assert outside.status_code == 422
 
 
 @pytest.mark.parametrize("kind", ["dicom_phi", "exif"])

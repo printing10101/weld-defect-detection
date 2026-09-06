@@ -85,6 +85,10 @@ def plan_removals(root: Path) -> list[Path]:
     # 注意：pytest 家族的兼容 shim "py" 是 site-packages 下的单文件 py.py
     # （非目录），必须单独命中，否则删了 _pytest 却留下 import 即炸的毒 shim。
     scripts_dir = root / "Scripts"
+    if scripts_dir.is_dir():
+        # Scripts 下只剩 pip/pytest 等开发工具的 exe shim（后端以
+        # `python -m uvicorn` 启动，不经 shim），整目录剔除最干净。
+        targets.append(scripts_dir)
     for name in DEV_PACKAGES:
         pkg_dir = site / name
         if pkg_dir.is_dir():
@@ -92,11 +96,7 @@ def plan_removals(root: Path) -> list[Path]:
         elif (site / f"{name}.py").is_file():
             targets.append(site / f"{name}.py")
         targets.extend(site.glob(f"{name}-*.dist-info"))
-    if scripts_dir.is_dir():
-        for entry in scripts_dir.iterdir():
-            stem = entry.name.lower()
-            if any(stem.startswith(f"{n}") for n in ("pip", "pytest")):
-                targets.append(entry)
+    # Scripts 目录已在上方整体剔除，无需逐个清理 shim 入口。
 
     # 去重（嵌套目录可能重复出现）并保序
     seen: set[Path] = set()

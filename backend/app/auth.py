@@ -124,6 +124,9 @@ class AuthService:
         self._store = store
         self._cfg = config
         self._challenges = ChallengeStore(ttl_sec=config.challenge_ttl_sec)
+        # 引导窗口 TOCTOU 防护：并发双引导各自通过 count==0 检查会创建出
+        # 两个"首个账号"。桌面单进程，进程锁 + 锁内复查即完备。
+        self._bootstrap_lock = threading.Lock()
 
     # ---- 挑战 ----
 
@@ -258,10 +261,15 @@ class AuthService:
     # ---- 账号管理 ----
 
     def bootstrap(self, *, username: str, role: str) -> dict[str, Any]:
-        """引导：仅当系统尚无任何账号时创建第一个账号（引导窗口语义）。"""
-        if self._store.count_accounts() > 0:
-            raise AuthError(409, "BOOTSTRAP_CLOSED", "系统已存在账号，引导窗口已关闭")
-        return self._store.create_account(username=username, role=role, created_by="bootstrap")
+        """引导：仅当系统尚无任何账号时创建第一个账号（引导窗口语义）。
+
+        锁内复查封死并发双引导的 TOCTOU（两个请求各自通过 count==0 后
+        各建一号）。
+        """
+        with self._bootstrap_lock:
+            if self._store.count_accounts() > 0:
+                raise AuthError(409, "BOOTSTRAP_CLOSED", "系统已存在账号，引导窗口已关闭")
+            return self._store.create_account(username=username, role=role, created_by="bootstrap")
 
     def create_account(
         self, *, username: str, role: str, actor: str, public_key: str | None = None

@@ -64,8 +64,10 @@ def review(
     reg: Annotated[Registry, Depends(get_registry)],
     operator: Annotated[str, Depends(get_operator_name)],
 ) -> ReviewOut:
-    # 复核人默认取请求头操作员（闭合 / 操作者身份占位）；显式提供时以显式值为准。
-    reviewer = body.reviewer or operator
+    # 复核人归属防冒名（三员分岗）：登录态下（get_operator_name 以 principal
+    # 为准）强制归属登录者；body.reviewer 仅在未登录（X-Operator-Name 场景）
+    # 时作为兜底。前端复核人输入框为登录账号只读回显。
+    reviewer = operator if operator not in ("", "local") else (body.reviewer or "local")
     pipeline = InspectionPipeline(reg)
     try:
         return ReviewOut(
