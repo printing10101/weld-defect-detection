@@ -10,6 +10,19 @@ $ErrorActionPreference = "Stop"
 $pkgDir = "$env:LOCALAPPDATA\ScanDetection"   # Tauri NSIS installMode=currentUser 默认目录
 $dataDir = "$env:APPDATA\com.scandetection.sd"
 
+Write-Host "==> [0/6] 预检：18773 端口必须空闲（残留孤儿后端会造成假 PASS）" -ForegroundColor Cyan
+$stale = Get-NetTCPConnection -LocalPort 18773 -State Listen -ErrorAction SilentlyContinue
+if ($stale) {
+    $stale | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Seconds 2
+    if (Get-NetTCPConnection -LocalPort 18773 -State Listen -ErrorAction SilentlyContinue) {
+        throw "端口 18773 被占用且无法清理，请手工处理后重试"
+    }
+}
+Write-Host "    端口空闲"
+# 自清理：上一轮冒烟/卸载的残留目录（.pyc 等）不得影响本轮断言
+if (Test-Path $pkgDir) { Remove-Item -Recurse -Force $pkgDir }
+
 Write-Host "==> [1/6] 静默安装（当前用户级，无需管理员）" -ForegroundColor Cyan
 $proc = Start-Process -FilePath $InstallerPath -ArgumentList "/S" -PassThru -Wait
 if ($proc.ExitCode -ne 0) { throw "静默安装失败 exit=$($proc.ExitCode)" }
@@ -61,12 +74,21 @@ try {
 }
 
 $uninstaller = "$pkgDir\uninstall.exe"
-if (Test-Path $uninstaller) {
-    Write-Host "==> 静默卸载" -ForegroundColor Cyan
-    Start-Process -FilePath $uninstaller -ArgumentList "/S" -PassThru -Wait | Out-Null
-    Start-Sleep -Seconds 3
+if (-not (Test-Path $uninstaller)) { throw "卸载器缺失（$uninstaller）——卸载/数据保留断言不可跳过" }
+Write-Host "==> 静默卸载" -ForegroundColor Cyan
+$un = Start-Process -FilePath $uninstaller -ArgumentList "/S" -PassThru -Wait
+if ($un.ExitCode -ne 0) { throw "静默卸载失败 exit=$($un.ExitCode)" }
+Start-Sleep -Seconds 3
+if (Test-Path $pkgDir) {
+    # 卸载器会删除其安装清单内文件；断言口径 = 无任何文件残留
+    # （运行期可能留下个别空目录，无害）。
+    $left = @(Get-ChildItem $pkgDir -Recurse -File -ErrorAction SilentlyContinue)
+    if ($left.Count -gt 0) {
+        throw "卸载后有文件残留: $(($left | ForEach-Object FullName) -join '; ')"
+    }
+    Remove-Item -Recurse -Force $pkgDir -ErrorAction SilentlyContinue
 }
 if (-not (Test-Path "$dataDir\data\smoke_marker.txt")) {
-    throw "卸载后业务数据丢失（数据保护钩子未生效）"
+    throw "卸载后业务数据丢失（数据保护语义被破坏）"
 }
 Write-Host "==> [6/6] 通过：卸载后数据保留，布局正确，后端可一键拉起" -ForegroundColor Green

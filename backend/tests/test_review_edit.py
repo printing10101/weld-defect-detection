@@ -81,17 +81,19 @@ def test_add_manual_defect_triggers_regrade_and_audit(client):
     assert body["defect_count"] == n0 + 1  # 重评级计入新缺陷
     rows = _defects(http, rep["image_id"])
     assert any(d["source"] == "manual" for d in rows)
-    # 审计留痕
-    audit = http.get("/api/v1/audit", params={"object_id": body["defect"]["id"]}).json()
-    assert any(a["action"] == "defect.add" for a in audit["entries"])
-    # 审计哈希链未被破坏
+    # 审计留痕（/audit 端点已收口审计员专属，此处直接断言仓储层）
     from backend.app.dependencies import get_registry
 
+    entries, _total = get_registry().repository.list_audit(object_id=body["defect"]["id"], limit=50)
+    assert any(a["action"] == "defect.add" for a in entries)
+    # 审计哈希链未被破坏
     assert get_registry().repository.verify_chain() is True
 
 
 def test_edit_defect_type_to_crack_forces_iv(client):
     http, rep = client
+    from backend.app.dependencies import get_registry
+
     rows = _defects(http, rep["image_id"])
     target = rows[0]["id"]
     resp = http.patch(
@@ -105,8 +107,8 @@ def test_edit_defect_type_to_crack_forces_iv(client):
     assert body["joint_level"] == "IV"
     updated = next(d for d in _defects(http, rep["image_id"]) if d["id"] == target)
     assert updated["class_id"] == 4 and updated["joint_level"] == "IV"
-    audit = http.get("/api/v1/audit", params={"object_id": target}).json()
-    entry = next(a for a in audit["entries"] if a["action"] == "defect.edit")
+    entries, _total = get_registry().repository.list_audit(object_id=target, limit=50)
+    entry = next(a for a in entries if a["action"] == "defect.edit")
     assert entry["before"]["class_id"] != entry["after"]["class_id"]
 
 
@@ -125,6 +127,8 @@ def test_edit_defect_bbox_updates_geometry(client):
 
 def test_delete_defect_soft_and_audit(client):
     http, rep = client
+    from backend.app.dependencies import get_registry
+
     n0 = len(_defects(http, rep["image_id"]))
     target = _defects(http, rep["image_id"])[0]["id"]
     resp = http.delete(
@@ -137,8 +141,8 @@ def test_delete_defect_soft_and_audit(client):
     assert body["defect"]["deleted"] is True
     rows = _defects(http, rep["image_id"])
     assert len(rows) == n0 - 1  # 软删除后列表不再展示
-    audit = http.get("/api/v1/audit", params={"object_id": target}).json()
-    assert any(a["action"] == "defect.delete" for a in audit["entries"])
+    entries, _total = get_registry().repository.list_audit(object_id=target, limit=50)
+    assert any(a["action"] == "defect.delete" for a in entries)
     from backend.app.dependencies import get_registry
 
     assert get_registry().repository.verify_chain() is True
@@ -190,3 +194,38 @@ def test_edit_missing_defect_404(client):
         json={"class_id": 0, "reason": "不存在"},
     )
     assert r.status_code == 404
+
+
+def test_add_defect_on_uncalibrated_image(tmp_path):
+    """未标定影像（pixel_spacing 落库 None）的人工复核不得失败。
+
+    回归：regrade 对未标定影像只更新级别（geometry=None）；旧的全覆盖校验
+    会把"提供的键都属于本图"判断写反成"必须覆盖全部"，使未标定影像每次
+    复核都 404。
+    """
+    img = tmp_path / "uncal.png"
+    _synthetic(img)
+    with TestClient(app) as http:
+        with open(img, "rb") as f:
+            resp = http.post(
+                "/api/v1/report",
+                files={"image": ("uncal.png", f, "image/png")},
+                data={"base_metal_thickness_mm": "20"},  # 不提供像素标定
+            )
+        assert resp.status_code == 200, resp.text
+        rep = resp.json()
+
+        from backend.app.dependencies import get_registry
+
+        image = get_registry().repository.get_image(rep["image_id"]) or {}
+        assert image.get("pixel_spacing_mm") is None  # 伪标定 1.0 不落库
+
+        n0 = rep["defect_count"]
+        resp = http.post(
+            f"/api/v1/review/{rep['image_id']}/defects",
+            json={"class_id": 0, "bbox_px": [300, 100, 20, 20], "reason": "未标定复核补录"},
+            headers={"X-Operator-Name": "reviewer-u"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["defect_count"] == n0 + 1
+        assert get_registry().repository.verify_chain() is True

@@ -17,6 +17,7 @@
       "../../backend/infra": "backend/infra",
       "../../backend/migrations": "backend/migrations",
       "../../backend/models": "backend/models",
+      "../../scripts/eval_real_onnx.py": "scripts/eval_real_onnx.py",
       "../python_embed": "python_embed"
     }
   }

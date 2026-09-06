@@ -256,6 +256,10 @@ fn build_uvicorn_command(
         .arg("127.0.0.1")
         .arg("--port")
         .arg(BACKEND_PORT.to_string())
+        // 关闭逐请求访问日志：直链下载经 ?access_token= 查询串携带会话凭据，
+        // 访问日志会把完整 URL（含凭据）写入 %TEMP% 日志（本机其他进程可读，
+        // 空闲窗内可重放）；桌面场景逐请求访问日志亦无观测价值。
+        .arg("--no-access-log")
         .current_dir(app_root);
     // 孤儿兜底：把壳自身 PID 传给后端，后端据此监控父进程消失即自杀退出
     //（覆盖壳被强杀/崩溃、窗口 Destroyed 事件不触发而遗留孤儿后端的场景）。
@@ -263,6 +267,10 @@ fn build_uvicorn_command(
     // 数据目录重定向（打包版）：后端把 data/ 前缀路径落到 <用户数据目录>/data
     //（db/影像/报告/IPC 令牌/主密钥），与壳侧 resolve_data_dir 保持同源。
     cmd.env("SCANDETECTION_USER_DATA_DIR", user_data_dir);
+    // 禁止写 .pyc：运行期生成的字节码不在卸载器清单里，会残留在安装目录
+    //（卸载后 $INSTDIR 不干净）。每次启动重新编译的代价（约 1~3s）远小于
+    // 残留物带来的"卸载不干净"观感与合规审计负担。
+    cmd.env("PYTHONDONTWRITEBYTECODE", "1");
     match backend_log_stdio() {
         Some((out, err)) => {
             cmd.stdout(out).stderr(err);

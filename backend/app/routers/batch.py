@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from backend.app.batch_queue import BatchItem
@@ -80,6 +80,7 @@ def _suffix_ok(name: str | None, allowed: tuple[str, ...]) -> bool:
 
 @router.post("/batch", response_model=BatchSubmitOut)
 def submit_batch(
+    request: Request,
     reg: Annotated[Registry, Depends(get_registry)],
     operator: Annotated[str, Depends(get_operator_name)],
     images: Annotated[list[UploadFile], File()],
@@ -96,6 +97,19 @@ def submit_batch(
 
     公共参数（标定/厚度/标准/工件信息/force）应用于批内所有影像。
     """
+    # 请求级总量预拒：multipart 会先整体 spool 到磁盘才进入本函数，
+    # 100 张 × max_bytes ≈ 20GB 的请求足以写满数据盘——按 Content-Length
+    # 在深读前拒绝（并发若干个此类请求即成 DoS 面）。
+    total_cap = reg.config.upload.max_bytes * reg.config.batch.max_per_batch
+    declared = int(request.headers.get("content-length") or 0)
+    if declared > total_cap:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "PAYLOAD_TOO_LARGE",
+                "message": f"批次总大小 {declared} 字节超过上限 {total_cap} 字节",
+            },
+        )
     if not images:
         raise HTTPException(
             status_code=422,

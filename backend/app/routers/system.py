@@ -17,6 +17,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from backend.app.auth import Principal, require_role
 from backend.app.dependencies import Registry, get_registry
 from backend.infra.backup import create_backup, restore_backup, verify_backup
 from backend.infra.config import resolve_config_path
@@ -104,7 +105,12 @@ def run_backup(reg: Registry, actor: str = "system", note: str = "system backup 
 
 
 @router.post("/backup", response_model=BackupResponse)
-def backup(reg: Annotated[Registry, Depends(get_registry)]) -> BackupResponse:
+def backup(
+    reg: Annotated[Registry, Depends(get_registry)],
+    _: Annotated[object, Depends(require_role("sysadmin"))],
+) -> BackupResponse:
+    """全量备份（sysadmin 专属）：归档含 scan.db 全库（账号表/会话哈希/双审计链）
+    与模型注册表——等同导出全部系统状态，不设门控即绕过 C-14 导出审批。"""
     result = run_backup(reg)
     manifest = result["manifest"]
     return BackupResponse(
@@ -120,6 +126,7 @@ def backup(reg: Annotated[Registry, Depends(get_registry)]) -> BackupResponse:
 def restore(
     req: RestoreRequest,
     reg: Annotated[Registry, Depends(get_registry)],
+    principal: Annotated[Principal, Depends(require_role("sysadmin"))],
 ) -> RestoreResponse:
     backups_dir = resolve_config_path(reg.config.paths.data_dir) / "backups"
     try:
@@ -138,7 +145,7 @@ def restore(
     restored = list(restore_backup(archive_path, non_db).get("entries", {}).keys())
 
     reg.repository.append_audit(
-        actor="system",
+        actor=principal.username,
         action="backup_restore",
         object_type="backup",
         object_id=archive_path.name,

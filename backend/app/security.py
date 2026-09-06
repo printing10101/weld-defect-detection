@@ -45,11 +45,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """每客户端 IP 滑动窗口限流。
 
-    默认 60 req/min 每 IP（远超桌面本地正常用量，仅拦截异常打爆）。
-    可通过环境变量 SCAN_RATE_LIMIT 覆盖：0 = 禁用限流（测试环境用，
-    避免 TestClient 共享计数误伤；生产保持默认或按需调高）。
-    内存态计数，进程重启清零——对桌面单机足够。
+    默认 240 req/min 每 IP：桌面单机下壳启动探测（500ms 间隔）+ 前端启动
+    轮询 + 批量评片状态轮询 + 用户操作全部从 127.0.0.1 出去共享同一 IP 桶，
+    旧的 60/min 实测误伤（/health 429 → 前端误判"后端离线"）；240 仍远超
+    正常用量上限语义（仅拦截异常打爆）。可用环境变量 SCAN_RATE_LIMIT 覆盖：
+    0 = 禁用限流（测试环境用，避免 TestClient 共享计数误伤）。
+    /health、/metrics 探针豁免（见 _EXEMPT_SUFFIXES）——liveness 被限流会把
+    "活着"误报成故障。内存态计数，进程重启清零——对桌面单机足够。
     """
+
+    _EXEMPT_PATHS = ("/api/v1/health", "/api/v1/metrics", "/health", "/metrics")
 
     def __init__(self, app, *, limit: int | None = None, window_s: float = 60.0) -> None:
         super().__init__(app)
@@ -57,7 +62,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         if limit is None:
             raw = os.environ.get("SCAN_RATE_LIMIT", "")
-            limit = int(raw) if raw.isdigit() else 60
+            limit = int(raw) if raw.isdigit() else 240
         self._limit = max(0, limit)
         self._window = window_s
         self._hits: dict[str, list[float]] = defaultdict(list)
@@ -66,6 +71,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next) -> Response:
         if self._limit <= 0:  # 禁用限流
+            return await call_next(request)
+        path = request.url.path
+        if path in self._EXEMPT_PATHS:
             return await call_next(request)
         client = request.client.host if request.client else "unknown"
         now = time.monotonic()

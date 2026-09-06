@@ -251,6 +251,7 @@ async function onRetry(): Promise<void> {
 
 function reset(): void {
   stopPolling();
+  fetchToken++; // 失效在途的 fetchStatusOnce：迟到响应不得把用户拽回上一批次的结束视图
   phase.value = "upload";
   status.value = null;
   activeBatchId.value = null;

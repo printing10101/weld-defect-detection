@@ -43,8 +43,12 @@ DEV_PACKAGES = [
     "setuptools",
     "wheel",
 ]
-# 科学栈包内可剔除的测试目录名（相对于包根）
-TEST_DIR_NAMES = {"tests", "testing"}
+# 科学栈包内可剔除的测试目录名（相对于包根）。
+# 注意：只能剔 "tests"——"testing" 是 numpy 的公共运行时子模块
+# （numpy/testing 被 scipy 的 array_api_compat 懒加载依赖，误删会导致
+# scipy.signal/optimize/special/ndimage 全线 ModuleNotFoundError，且因
+# 延迟 import 逃过启动探活——2026-09 实测事故）。
+TEST_DIR_NAMES = {"tests"}
 # 仅对这些大包做 tests 目录剔除（其他包 tests 目录极小，不值得遍历）
 TEST_TRIM_PACKAGES = ["scipy", "numpy", "skimage", "cv2", "pandas", "matplotlib"]
 
