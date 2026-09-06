@@ -112,3 +112,7 @@ _doc_task/
 .mimosa/
 .dsh-memory/
 .import_linter_cache/
+data/sync/
+data/active/
+data/model_registry.json
+data/eval/.gate_work/

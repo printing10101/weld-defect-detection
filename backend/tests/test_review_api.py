@@ -159,12 +159,14 @@ def test_review_audit_chain(tmp_path) -> None:
         rep = _post_report(client, img, pixel_spacing_mm="0.1", base_metal_thickness_mm="20")
         image_id = rep["image_id"]
         _review(client, image_id=image_id, reviewer="alice", role="initial", defect_grades=[])
-        # 审计：该影像的 review 动作应可查，且哈希链连续
-        aud = client.get("/api/v1/audit", params={"object_id": image_id, "action": "review"})
-        assert aud.status_code == 200
-        body = aud.json()
-        assert body["total"] >= 1
-        entries = body["entries"]
+        # 审计：该影像的 review 动作应可查，且哈希链连续。
+        # （/audit 端点为审计员专属——测试直接断言仓储层，绕开角色门控。）
+        from backend.app.dependencies import get_registry
+
+        entries, total = get_registry().repository.list_audit(
+            object_id=image_id, action="review", limit=100
+        )
+        assert total >= 1
         # 链：除首条外，每条 prev_hash == 上一条 hash
         for i in range(1, len(entries)):
             assert entries[i]["prev_hash"] == entries[i - 1]["hash"]
@@ -226,3 +228,9 @@ def test_report_reads_unicode_path_image() -> None:
         assert anno is not None, "中文路径标注图读取失败"
     finally:
         shutil.rmtree(cn_dir, ignore_errors=True)
+
+
+def test_audit_endpoint_auditor_only():
+    """主审计链检索收口安全审计员（三员分岗）：sysadmin 读取 → 403。"""
+    with TestClient(app) as client:
+        assert client.get("/api/v1/audit").status_code == 403

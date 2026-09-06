@@ -82,11 +82,20 @@ class JsonFormatter(logging.Formatter):
 def _writable_log_base_dir() -> str | None:
     """返回可写的日志目录；无法创建/不可写返回 None。
 
-    桌面安装可能落在 Program Files（只读），故日志不随安装目录放置，
-    优先 %LOCALAPPDATA%/ScanDetection/logs（用户可写），LOCALAPPDATA 缺失
-    时回退系统临时目录下的 ScanDetection/logs。
+    候选优先级：
+    1. 打包版用户数据目录（SCANDETECTION_USER_DATA_DIR）/logs——随用户数据
+       卸载保留。**不得**用 %LOCALAPPDATA%/ScanDetection：installMode=
+       currentUser 下该路径即安装目录，硬编码会让日志进 $INSTDIR 被卸载
+       清空（历史缺陷实测：11MB 日志随卸载丢失）。
+    2. %LOCALAPPDATA%/ScanDetection/logs（开发布局，用户可写）。
+    3. %TEMP%/ScanDetection/logs（LOCALAPPDATA 缺失时的兜底）。
     """
     candidates: list[str] = []
+    from backend.infra.paths import data_dir_override
+
+    override = data_dir_override()
+    if override is not None:
+        candidates.append(os.path.join(str(override), "logs"))
     la = os.environ.get("LOCALAPPDATA")
     if la:
         candidates.append(os.path.join(la, "ScanDetection", "logs"))
@@ -110,7 +119,8 @@ def configure_logging(log_format: str = "text") -> None:
     关键路径（模型加载/推理/判定/审计）据此可观测。
 
     输出两路，兼顾持久化与紧急兜底，均不构成无界增长：
-    - 主路：RotatingFileHandler 写入 <用户数据目录>/ScanDetection/logs/backend.log，
+    - 主路：RotatingFileHandler 写入日志目录（打包版=用户数据目录 logs/，
+      开发版=%LOCALAPPDATA%/ScanDetection/logs，见 _writable_log_base_dir），
       超 5MB 轮转、保留 20 份（上限 ~105MB）；
     - 兜底：ERROR 级 stderr（由 Tauri 壳收入 %TEMP%/ScanDetection/backend.log），
       只承载严重异常，频次低，避免逐条业务日志无界写入临时文件。

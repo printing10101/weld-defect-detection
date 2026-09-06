@@ -15,6 +15,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -77,8 +78,24 @@ def _personnel_path() -> Path:
     return resolve_config_path(load_config().std_eval.personnel_path)
 
 
+def _sanitize_record_name(name: str) -> str:
+    """记录名消毒：仅字母/数字/下划线/连字符——record_name 直接拼文件路径，
+    未消毒可经 ..\\ 或绝对路径越界写/读任意文件。"""
+    cleaned = (name or "").strip()
+    if not cleaned or len(cleaned) > 128 or re.search(r"[^A-Za-z0-9_\-\u4e00-\u9fff]", cleaned):
+        raise HTTPException(422, f"record_name 仅允许中英文/数字/下划线/连字符: {name!r}")
+    return cleaned
+
+
+def _eval_result_path(rel_path: str) -> Path:
+    """解析评价结果路径。诚实边界：支持绝对路径（CLI/测试工作流），
+    已登录调用方可探测任意路径是否存在——残留读面，写面已由
+    _sanitize_record_name 封死；如需收紧须先迁移 CLI/测试的路径用法。"""
+    return resolve_config_path(rel_path)
+
+
 def _load_eval_result(rel_path: str) -> dict[str, Any]:
-    p = resolve_config_path(rel_path)
+    p = _eval_result_path(rel_path)
     if not p.is_file():
         raise HTTPException(
             404,
@@ -133,7 +150,7 @@ def create_record(body: RecordIn) -> dict[str, Any]:
     )
     out_dir = resolve_config_path(cfg.eval_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"{body.record_name}.json"
+    out = out_dir / f"{_sanitize_record_name(body.record_name)}.json"
     out.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
     record["record_json"] = str(out)
     return record
@@ -149,6 +166,7 @@ def get_record_pdf(
     """附录A 记录表 PDF 导出（C-14 受控：需导出审批/令牌）。"""
     ensure_export_allowed(f"std_eval:record_pdf:{record_name}", request, principal, reg)
     cfg = load_config().std_eval
+    record_name = _sanitize_record_name(record_name)
     out_dir = resolve_config_path(cfg.eval_dir)
     record_path = out_dir / f"{record_name}.json"
     if not record_path.is_file():
@@ -230,15 +248,23 @@ class EvidenceIn(BaseModel):
 
 @router.post("/std-eval/evidence/{record_id}")
 def create_evidence(record_id: str, body: EvidenceIn) -> dict[str, Any]:
-    """生成"标注原图 vs 系统识别图"对照证据图与 manifest（落 eval_dir/evidence）。"""
-    film = resolve_config_path(body.film_path)
+    """生成"标注原图 vs 系统识别图"对照证据图与 manifest（落 eval_dir/evidence）。
+
+    record_id 直接拼证据目录/文件名，必须消毒（写面封死越界）；底片路径
+    支持绝对路径（证据工作流可能引用数据目录外的评片集），读面残留为
+    已登录角色的存在性/哈希探测——与 _eval_result_path 同一口径。
+    """
+    rid = _sanitize_record_name(record_id)
+    film = Path(body.film_path)
+    film = film if film.is_absolute() else resolve_config_path(str(film))
+    film = film.resolve()
     if not film.is_file():
         raise HTTPException(404, f"底片不存在: {body.film_path}")
     cfg = load_config().std_eval
     out_dir = resolve_config_path(cfg.eval_dir)
     try:
         manifest = build_evidence(
-            record_id=record_id,
+            record_id=rid,
             film_path=film,
             film_id=body.film_id,
             defects=[d.model_dump() for d in body.defects],

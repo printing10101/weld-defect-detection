@@ -84,8 +84,10 @@ def test_privacy_audit_endpoint(tmp_path: Path, monkeypatch) -> None:
         assert body["n_findings"] == 1
         assert Path(body["report_files"]["json"]).is_file()
         assert Path(body["report_files"]["pdf"]).is_file()
-        # 审计留痕
-        entries = c.get("/api/v1/audit?action=privacy_audit").json()["entries"]
+        # 审计留痕（/audit 端点已收口审计员专属，此处直接断言仓储层）
+        from backend.app.dependencies import get_registry
+
+        entries, _total = get_registry().repository.list_audit(action="privacy_audit", limit=50)
         assert entries
 
 

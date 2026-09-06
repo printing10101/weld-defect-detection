@@ -484,8 +484,12 @@ class InspectionRepository:
                     )
                 )
             )
-            known = set(per_defect_levels) | set(geometry or {})
-            unknown = {d.id for d in defects} - known
+            # 校验"提供的键都属于本图"，而非"必须覆盖全部缺陷"——部分更新是
+            # 合法用法（未标定影像 regrade 只更级别不回写几何，geometry=None；
+            # 旧的全覆盖校验会让未标定影像的每次人工复核都 404）。
+            valid_ids = {d.id for d in defects}
+            provided = set(per_defect_levels) | set(geometry or {})
+            unknown = provided - valid_ids
             if unknown:
                 raise KeyError(f"defect ids not belonging to image {image_id}: {sorted(unknown)}")
             for d in defects:

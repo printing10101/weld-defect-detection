@@ -47,6 +47,7 @@ class AuditResponse(BaseModel):
 @router.get("/audit", response_model=AuditResponse)
 def audit(
     reg: Annotated[Registry, Depends(get_registry)],
+    _: Annotated[object, Depends(require_role("auditor"))],
     actor: Annotated[str | None, Query()] = None,
     action: Annotated[str | None, Query()] = None,
     object_type: Annotated[str | None, Query()] = None,
@@ -54,7 +55,11 @@ def audit(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> AuditResponse:
-    # total 取匹配总数：len(当页条目) 在超过 limit 时会低报，审计不可接受
+    """主审计链检索（安全审计员专属，与安全链/操作审计/导出同权限位）。
+
+    三员分岗：审计复核归审计员——系统管理员/保密员/业务角色不应能翻阅
+    含全部操作者行为与 before/after 的完整审计链（此前为本矩阵遗漏）。
+    """
     entries, total = reg.repository.list_audit(
         actor=actor,
         action=action,

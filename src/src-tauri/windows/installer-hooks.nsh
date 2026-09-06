@@ -1,4 +1,4 @@
-; NSIS 安装器钩子（tauri.conf.json -> bundle.windows.nsis.installerHooks 引用）。
+﻿; NSIS 安装器钩子（tauri.conf.json -> bundle.windows.nsis.installerHooks 引用）。
 ; 仅支持 ; / # / /* */ 注释（NSIS 不认 //）。
 ;
 ; 数据保护：历史版本把业务数据（SQLite 检测记录 / 报告 PDF / 影像副本 /
