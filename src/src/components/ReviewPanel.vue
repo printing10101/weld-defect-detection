@@ -3,8 +3,9 @@
  * 人工复核面板：级别复核（POST /api/v1/review）+ 缺陷增删改
  * （POST/PATCH/DELETE，DB50/T 1807 §6.1.4），变更后后端自动重评级。
  */
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { toErrorMessage } from "../utils/errorMessage";
+import { useAuthStore } from "../stores/auth";
 import ConfirmDialog from "./ConfirmDialog.vue";
 import {
   addReviewDefect,
@@ -27,7 +28,15 @@ interface DefectRow {
   source: string | null;
 }
 
-const reviewer = ref("");
+const auth = useAuthStore();
+// 复核人归属防冒名：后端在登录态下强制归属登录账号，此处只读回显。
+const reviewer = ref(auth.username || "");
+watch(
+  () => auth.username,
+  (u) => {
+    if (u) reviewer.value = u;
+  },
+);
 const role = ref<"initial" | "secondary" | "arbitrator">("initial");
 const overallLevel = ref("");
 const note = ref("");
@@ -187,11 +196,12 @@ async function onSubmit(): Promise<void> {
           class="field grow"
           style="margin-top: 0"
         >
-          <label for="rv">评片员（姓名/工号）<span class="req">*</span></label>
+          <label for="rv">评片员（当前登录账号）<span class="req">*</span></label>
           <input
             id="rv"
             v-model="reviewer"
-            placeholder="如 张三 / ZS-001"
+            readonly
+            title="复核归属当前登录账号（三员分岗防冒名）"
           >
         </div>
         <div

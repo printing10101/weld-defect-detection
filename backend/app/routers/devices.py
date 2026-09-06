@@ -117,15 +117,19 @@ def add_calibration(
     device_id: str,
     body: CalibrationIn,
     reg: Annotated[Registry, Depends(get_registry)],
+    operator: Annotated[str, Depends(get_operator_name)],
 ) -> CalibrationOut:
     """记录一次标定：相对偏差 >5% → status=over（跨设备一致率超标）。
 
     标定结果影响测量几何换算，属关键写操作（入主审计链，C-21 补齐）。
+    标定员归属防冒名：登录态强制归属登录者（body.calibrator 仅未登录兜底），
+    前端标定员输入框为登录账号只读回显。
     """
+    calibrator = operator if operator not in ("", "local") else (body.calibrator or "local")
     try:
         calib = reg.device_store.calibrate(
             device_id=device_id,
-            calibrator=body.calibrator,
+            calibrator=calibrator,
             pixel_spacing_mm=body.pixel_spacing_mm,
             ref_pixel_spacing_mm=body.ref_pixel_spacing_mm,
             density_ref=body.density_ref,
@@ -137,7 +141,7 @@ def add_calibration(
             detail={"code": "NOT_FOUND", "message": f"device not found: {device_id}"},
         ) from exc
     reg.repository.append_audit(
-        actor=body.calibrator or "local",
+        actor=calibrator,
         action="device_calibrate",
         object_type="device",
         object_id=str(device_id),

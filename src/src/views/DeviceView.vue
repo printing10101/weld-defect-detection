@@ -4,10 +4,13 @@
  * 系统计算相对偏差并判定跨设备一致性（≤5% → 达标 ok，超差 → over）。
  * 数据全部来自真实后端 /devices 系列接口。
  */
-import { onMounted, ref } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { toErrorMessage } from "../utils/errorMessage";
+import { useAuthStore } from "../stores/auth";
 import { addCalibration, getDevice, listDevices, registerDevice } from "../services/api";
 import type { CalibrationOut, DeviceDetailOut, DeviceOut } from "../types/api";
+
+const auth = useAuthStore();
 
 const devices = ref<DeviceOut[]>([]);
 const selectedId = ref<string | null>(null);
@@ -22,7 +25,14 @@ const regSerial = ref("");
 const regNotes = ref("");
 
 /* 标定表单 */
-const calCalibrator = ref("");
+// 标定员归属防冒名：后端在登录态下强制归属登录账号，此处只读回显。
+const calCalibrator = ref(auth.username || "");
+watch(
+  () => auth.username,
+  (u) => {
+    if (u) calCalibrator.value = u;
+  },
+);
 const calPixelSpacing = ref("");
 const calRefSpacing = ref("");
 const calDensity = ref("");
@@ -283,11 +293,12 @@ onMounted(() => {
             录入标定
           </div>
           <div class="field">
-            <label for="cal1">标定员 <span class="req">*</span></label>
+            <label for="cal1">标定员（当前登录账号）<span class="req">*</span></label>
             <input
               id="cal1"
               v-model="calCalibrator"
-              placeholder="姓名/工号"
+              readonly
+              title="标定归属当前登录账号（三员分岗防冒名）"
             >
           </div>
           <div class="field">
