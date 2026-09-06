@@ -1,6 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
+    "windows": {
+      "webviewInstallMode": {
+        "type": "offlineInstaller"
+      }
+    },
     "resources": {
       "../../backend/__init__.py": "backend/__init__.py",
       "../../backend/alembic.ini": "backend/alembic.ini",
