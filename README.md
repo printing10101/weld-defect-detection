@@ -78,15 +78,18 @@ CI（`.github/workflows/ci.yml`）在每次推送时执行上述检查。
 
 ## 构建安装包
 
-```bash
-cd src
-pnpm install
-python scripts/slim_python_embed.py   # 打包前裁剪嵌入运行时（省 ~135MB，详见脚本说明）
-pnpm tauri build                      # 产物在 src/src-tauri/target/release/bundle/
+```powershell
+# 一键打包（推荐）：裁剪嵌入运行时 → 前端构建 → Tauri 打包 → 输出安装包路径
+powershell -ExecutionPolicy Bypass -File scripts\build_installer.ps1
+# 产物：src/src-tauri/target/release/bundle/nsis/ScanDetection_0.1.0_x64-setup.exe
 ```
 
-注意：裁剪后的 `src/python_embed` 不能再用于跑后端单测（pytest 已剔除），
-后端测试请使用 `backend/.venv` 开发环境。
+- 安装包**离线自足**：内嵌 Python 运行时与全部后端依赖（fastapi/onnxruntime/
+  opencv/国密库等）、WebView2 离线安装器；目标机无需联网、无需管理员权限。
+- **模型权重**：打包前把训练产物放到 `backend/models/weights/best.onnx`
+  （缺失时应用仍可安装运行，但自动退化为基线检测器并在界面标注降级）。
+- 裁剪后的 `src/python_embed` 不能再用于跑后端单测（pytest 已剔除），
+  后端测试请使用 `backend/.venv` 开发环境。
 
 ## 文档
 
