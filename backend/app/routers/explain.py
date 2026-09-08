@@ -1,8 +1,8 @@
 """可解释性热力图。
 
-对指定 defect_id 生成注意力热力图叠加原图（模型无关近似，见
-domain/explain.py 的替代声明），供人工复核视图秒懂模型关注区。
+对指定 defect_id 生成注意力热力图叠加原图，供人工复核视图秒懂模型关注区。
 默认仅人工复核视图调用，不进入主推理链路（主链路不带 explain 参数）。
+torch 后端自动启用真 Grad-CAM，ONNX 部署路径回退显著性近似（domain/explain.py）。
 """
 
 from __future__ import annotations
@@ -37,8 +37,8 @@ async def explain(
     """对指定缺陷生成注意力热力图叠加原图。
 
     defect_id 缺省时对**全部检出缺陷**分别叠加（取最高置信缺陷的叠加结果）。
-    热力图基于 ROI 局部显著性（ 模型无关近似，非真 Grad-CAM——见
-    domain/explain.py 文档的替代声明）。
+    torch 后端（训练/验证工作站）走真 Grad-CAM；ONNX 部署路径自动回退
+    Sobel 显著性近似（见 domain/explain.py 两级设计与诚实降级声明）。
     """
     async with staged_upload(image, reg.config) as tmp_path:
         heatmap_b64 = await run_in_threadpool(_explain_sync, reg, tmp_path, defect_id)
@@ -71,7 +71,14 @@ def _explain_sync(reg: Registry, tmp_path: Path, defect_id: str | None) -> str:
             status_code=404,
             detail={"code": "DEFECT_NOT_FOUND", "message": f"defect not found: {defect_id}"},
         )
-    overlay = attention_heatmap(gray, target)
+    # 热力图输入与推理一致（预处理后的 enhanced）；torch 后端时自动走真 Grad-CAM，
+    # ONNX 部署路径（无梯度）自动回退 Sobel 显著性近似（见 domain/explain.py）。
+    overlay = attention_heatmap(
+        gray,
+        target,
+        cam_model=getattr(reg.detector, "cam_model", None),
+        model_image=enhanced,
+    )
     ok, buf = cv2.imencode(".png", overlay)
     if not ok:
         raise HTTPException(

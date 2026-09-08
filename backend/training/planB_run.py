@@ -1,7 +1,7 @@
 """方案 B 执行脚本：本地小数据路线（不下载 SWRD / Roboflow）。
 
 流程：
-1. 生成更真实、更大规模的合成 X 光焊缝数据集（约 N 张，640×640，6 类缺陷 + 背景）。
+1. 生成更真实、更大规模的合成 X 光焊缝数据集（约 N 张，640×640，7 类缺陷 + 背景）。
 2. dataset_builder.build_dataset 重建 8:1:1 划分与 data.yaml。
 3. 从零训练 YOLOv8n（yolov8n.yaml，无预训练权重下载，离线安全）。
 4. 在 test 划分上评估 → mAP@0.5 / mAP@0.5:0.95 / 各类 AP / P / R。
@@ -54,30 +54,61 @@ EPOCHS_FULL = 50
 IMGSZ = 320
 BATCH = 16
 
-CLASS_NAMES_ZH = ["气孔", "夹渣", "未焊透", "未熔合", "裂纹", "咬边"]
+CLASS_NAMES_ZH = ["气孔", "夹渣", "未焊透", "未熔合", "裂纹", "咬边", "内凹"]
 
 
 # ----------------------------- 背景合成 -----------------------------
 def _base_image(rng: np.random.Generator) -> np.ndarray:
-    base = np.full((H, W), 165.0, np.float32)
-    # 垂直密度梯度（胶片非均匀性）
-    grad = np.linspace(-18.0, 18.0, H, dtype=np.float32)[:, None]
-    base = base + grad
-    # 焊缝亮带（中心），高斯平滑过渡
-    bw = 150
-    x0 = W // 2 - bw // 2
+    base = np.full((H, W), float(rng.uniform(150.0, 180.0)), np.float32)
+    # 垂直密度梯度（胶片非均匀性）：幅度与方向随机，避免所有背景图结构同构
+    amp = float(rng.uniform(10.0, 22.0))
+    base = (
+        base + rng.choice([-1.0, 1.0]) * amp * np.linspace(-1.0, 1.0, H, dtype=np.float32)[:, None]
+    )
+    # 焊缝亮带：位置/宽度/亮度均随机（真实底片焊道不会永远严格居中等宽；
+    # 位移须达 9×8 感知网格半格以上，跨 split 感知校验才能区分）
+    bw = int(rng.integers(100, 260))
+    x0 = W // 2 - bw // 2 + int(rng.integers(-140, 141))
     band = np.zeros((H, W), np.float32)
-    band[:, x0 : x0 + bw] = 35.0
+    lo, hi = max(0, x0), min(W, x0 + bw)
+    if hi > lo:
+        band[:, lo:hi] = float(rng.uniform(25.0, 45.0))
     band = cv2.GaussianBlur(band, (0, 0), 40)
     base = base + band
+    # 黑度不均/水渍斑：2~5 个大尺度软斑块，中等空间频率可在 9×8 感知网格下
+    # 存活，使每张背景的差值哈希符号模式唯一
+    for _ in range(int(rng.integers(2, 6))):
+        bx, by = int(rng.integers(0, W)), int(rng.integers(0, H))
+        r = int(rng.integers(80, 260))
+        blob = np.zeros((H, W), np.float32)
+        cv2.circle(blob, (bx, by), r, 1.0, -1)
+        blob = cv2.GaussianBlur(blob, (0, 0), r / 2.0)
+        base = base - float(rng.uniform(12.0, 30.0)) * blob
+    # 低频黑度场（胶片密度不均）：6×6 随机场立方插值，在 9×8 感知网格上
+    # 接近一一映射，保证任意两张底片的差值哈希模式几乎必然不同
+    coarse = rng.uniform(-1.0, 1.0, (6, 6)).astype(np.float32)
+    field = cv2.resize(coarse, (W, H), interpolation=cv2.INTER_CUBIC)
+    base = base + float(rng.uniform(18.0, 35.0)) * field
     # 颗粒噪声
-    base = base + rng.normal(0, 7, (H, W)).astype(np.float32)
-    # 轻微暗角
+    base = base + rng.normal(0, float(rng.uniform(5.0, 9.0)), (H, W)).astype(np.float32)
+    # 轻微暗角：强度与中心随机
     Y, X = np.mgrid[0:H, 0:W]
-    cx, cy = W / 2, H / 2
-    vig = 1.0 - 0.12 * (((X - cx) / cx) ** 2 + ((Y - cy) / cy) ** 2)
+    cx = W * float(rng.uniform(0.42, 0.58))
+    cy = H * float(rng.uniform(0.42, 0.58))
+    vig = 1.0 - float(rng.uniform(0.08, 0.18)) * (
+        ((X - cx) / max(cx, 1.0)) ** 2 + ((Y - cy) / max(cy, 1.0)) ** 2
+    )
     base = base * vig
-    return np.clip(base, 0, 255).astype(np.uint8)
+    base = np.clip(base, 0, 255).astype(np.uint8)
+    # 整体小角度旋转：不同底片的焊道走向不同，也让每张背景在感知哈希下
+    # 真正可分（否则 15% 无缺陷背景图互为 dHash 重复，跨 split 校验会拦截）
+    angle = float(rng.uniform(-14.0, 14.0))
+    if abs(angle) > 0.5:
+        M = cv2.getRotationMatrix2D((W / 2.0, H / 2.0), angle, 1.0)
+        base = cv2.warpAffine(
+            base, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101
+        )
+    return base
 
 
 # ----------------------------- 缺陷绘制（返回像素 bbox 列表）-----------------------------
@@ -163,6 +194,29 @@ def _draw_undercut(img, rng):
     return [[xc - w // 2, cy - h // 2, xc + w // 2, cy + h // 2]]
 
 
+def _draw_concavity(img, rng):
+    # 内凹（单面焊根部塌陷）：沿焊缝中心线的宽而柔和的低对比暗带，
+    # 与未焊透（窄而锐利）区分：更宽、边缘模糊、灰度更高
+    xc = W // 2 + int(rng.integers(-15, 15))
+    y0 = int(rng.integers(30, H // 2 - 60))
+    ylen = int(rng.integers(H // 3, max(H // 3 + 1, H - 60 - y0)))
+    w = int(rng.integers(22, 44))
+    mask = np.zeros((H, W), np.float32)
+    cv2.ellipse(
+        mask,
+        (xc, y0 + ylen // 2),
+        (w // 2, ylen // 2),
+        float(rng.integers(-6, 6)),
+        0,
+        360,
+        float(rng.integers(55, 95)),
+        -1,
+    )
+    mask = cv2.GaussianBlur(mask, (0, 0), 7)
+    img[:] = np.clip(img.astype(np.float32) - mask, 0, 255).astype(np.uint8)
+    return [[xc - w // 2, y0, xc + w // 2, y0 + ylen]]
+
+
 _DRAWERS = [
     _draw_porosity,
     _draw_slag,
@@ -170,36 +224,63 @@ _DRAWERS = [
     _draw_lack_of_fusion,
     _draw_crack,
     _draw_undercut,
+    _draw_concavity,
 ]
+
+
+def _dhash_u8(img: np.ndarray) -> int:
+    """与 dataset_guard.dhash 同算法（ndarray 直算版），用于生成期去重。"""
+    resized = cv2.resize(img, (9, 8), interpolation=cv2.INTER_AREA)
+    diff = resized[:, 1:] > resized[:, :-1]
+    return int(np.packbits(diff.flatten()).tobytes().hex(), 16)
+
+
+def _hamming(a: int, b: int) -> int:
+    return (a ^ b).bit_count()
 
 
 def generate(n: int, seed: int = 12345) -> None:
     IMG.mkdir(parents=True, exist_ok=True)
     LBL.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(seed)
+    seen_hashes: list[int] = []
     for i in range(n):
-        img = _base_image(rng)
-        ndef = int(rng.integers(0, 5))
-        if rng.random() < 0.15:  # ~15% 背景图，教模型"无缺陷"
-            ndef = 0
-        labels: list[str] = []
-        for _ in range(ndef):
-            cls = int(rng.integers(0, 6))
-            for x1, y1, x2, y2 in _DRAWERS[cls](img, rng):
-                x1 = max(0, x1)
-                y1 = max(0, y1)
-                x2 = min(W, x2)
-                y2 = min(H, y2)
-                bw = x2 - x1
-                bh = y2 - y1
-                if bw < 3 or bh < 3:
-                    continue
-                xc = (x1 + x2) / 2 / W
-                yc = (y1 + y2) / 2 / H
-                nw = bw / W
-                nh = bh / H
-                labels.append(f"{cls} {xc:.6f} {yc:.6f} {nw:.6f} {nh:.6f}")
-        cv2.imwrite(str(IMG / f"syn_{i:04d}.png"), img)
+        # 生成期感知去重：dataset_guard 的 §8.3.1 互斥校验会拦截跨 split 的
+        # dHash 近似重复，这里从源头保证任意两张合成图汉明距离 >4
+        for _attempt in range(12):
+            img = _base_image(rng)
+            ndef = int(rng.integers(0, 5))
+            if rng.random() < 0.15:  # ~15% 背景图，教模型"无缺陷"
+                ndef = 0
+            labels: list[str] = []
+            for _ in range(ndef):
+                cls = int(rng.integers(0, 7))
+                for x1, y1, x2, y2 in _DRAWERS[cls](img, rng):
+                    x1 = max(0, x1)
+                    y1 = max(0, y1)
+                    x2 = min(W, x2)
+                    y2 = min(H, y2)
+                    bw = x2 - x1
+                    bh = y2 - y1
+                    if bw < 3 or bh < 3:
+                        continue
+                    xc = (x1 + x2) / 2 / W
+                    yc = (y1 + y2) / 2 / H
+                    nw = bw / W
+                    nh = bh / H
+                    labels.append(f"{cls} {xc:.6f} {yc:.6f} {nw:.6f} {nh:.6f}")
+            h = _dhash_u8(img)
+            if all(_hamming(h, h0) > 4 for h0 in seen_hashes):
+                break
+        else:
+            # 兜底：整体灰度 tilt 改变剖面符号模式，保证可分
+            img = cv2.convertScaleAbs(img, alpha=1.15, beta=float(rng.uniform(-25, 25)))
+            h = _dhash_u8(img)
+        seen_hashes.append(h)
+        # cv2.imwrite 在 Windows 中文路径下会静默失败，改用 imencode 直写
+        ok, buf = cv2.imencode(".png", img)
+        if ok:
+            (IMG / f"syn_{i:04d}.png").write_bytes(buf.tobytes())
         (LBL / f"syn_{i:04d}.txt").write_text("\n".join(labels), encoding="utf-8")
     # 清理可能的遗留图（索引 >= n 的旧图），保证数据集恰为 n 张
     for f in sorted(IMG.glob("syn_*.png")):
@@ -246,7 +327,7 @@ def _ensure_min_split(out_root: Path, split: str, min_n: int = 1) -> None:
             lbl.rename(lbl_dir / (f.stem + ".txt"))
 
 
-def run(n: int, epochs: int) -> dict:
+def run(n: int, epochs: int, imgsz: int = IMGSZ, name: str = "planB_synth") -> dict:
     generate(n)
     from backend.training import dataset_builder
 
@@ -262,9 +343,9 @@ def run(n: int, epochs: int) -> dict:
     m.train(
         data=str(data_yaml.resolve()),
         epochs=epochs,
-        imgsz=IMGSZ,
+        imgsz=imgsz,
         batch=BATCH,
-        name="planB_synth",
+        name=name,
         project=str(runs_dir),
         exist_ok=True,
         hsv_h=0.015,
@@ -287,7 +368,9 @@ def run(n: int, epochs: int) -> dict:
     )
 
     box = metrics.box
-    per_class_ap = [float(x) for x in box.maps]  # len == nc
+    # ultralytics 语义：ap50=逐类 AP@0.5；maps=逐类 mAP@0.5:0.95（10 阈值均值）
+    per_class_ap50 = [float(x) for x in box.ap50]
+    per_class_map = [float(x) for x in box.maps]
     out = {
         "dataset": {
             "source": "synthetic X-ray (local, Plan B)",
@@ -296,7 +379,7 @@ def run(n: int, epochs: int) -> dict:
             "n_val": len(list((out_root / "val" / "images").glob("*"))),
             "n_test": len(list((out_root / "test" / "images").glob("*"))),
             "classes": CLASS_NAMES_ZH,
-            "imgsz": IMGSZ,
+            "imgsz": imgsz,
         },
         "model": {
             "arch": "yolov8n",
@@ -310,7 +393,8 @@ def run(n: int, epochs: int) -> dict:
             "mAP50_95": float(box.map),
             "precision": float(getattr(box, "mp", float("nan"))),
             "recall": float(getattr(box, "mr", float("nan"))),
-            "per_class_AP50": dict(zip(CLASS_NAMES_ZH, per_class_ap)),
+            "per_class_AP50": dict(zip(CLASS_NAMES_ZH, per_class_ap50)),
+            "per_class_mAP50_95": dict(zip(CLASS_NAMES_ZH, per_class_map)),
         },
         "best_weights": str(best),
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -326,11 +410,15 @@ def run(n: int, epochs: int) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true", help="自检：24 张 / 2 epoch")
+    ap.add_argument("--n", type=int, default=N_FULL, help="合成图张数")
+    ap.add_argument("--epochs", type=int, default=EPOCHS_FULL, help="训练 epoch 数")
+    ap.add_argument("--imgsz", type=int, default=IMGSZ, help="训练分辨率（640 利于气孔等小目标）")
+    ap.add_argument("--name", default="planB_synth", help="runs 子目录名")
     args = ap.parse_args()
     if args.quick:
         run(n=24, epochs=2)
     else:
-        run(n=N_FULL, epochs=EPOCHS_FULL)
+        run(n=args.n, epochs=args.epochs, imgsz=args.imgsz, name=args.name)
 
 
 if __name__ == "__main__":

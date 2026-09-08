@@ -275,6 +275,9 @@ function render(): void {
 }
 
 // ---- 视图操作 ----
+/** 最近一次"适应屏幕"的比例：倍率快捷键（2×/4×/8×）的基准。 */
+const fitScale = ref(1);
+
 function fit(): void {
   const el = canvas.value;
   if (!el || !img.value) return;
@@ -288,6 +291,7 @@ function fit(): void {
   const iw = swap ? img.value.naturalHeight : img.value.naturalWidth;
   const ih = swap ? img.value.naturalWidth : img.value.naturalHeight;
   scale.value = Math.min(cw / iw, ch / ih) * pad;
+  fitScale.value = scale.value;
   tx.value = 0;
   ty.value = 0;
   scheduleRender();
@@ -317,14 +321,25 @@ function reset(): void {
   fit();
 }
 
-function zoomBy(factor: number, cx = 0, cy = 0): void {
-  const next = Math.min(32, Math.max(0.02, scale.value * factor));
-  const ratio = next / scale.value;
+function zoomTo(next: number, cx = 0, cy = 0): void {
+  const clamped = Math.min(32, Math.max(0.02, next));
+  const ratio = clamped / scale.value;
   tx.value = cx + (tx.value - cx) * ratio;
   ty.value = cy + (ty.value - cy) * ratio;
-  scale.value = next;
+  scale.value = clamped;
   scheduleRender();
   emitTransform();
+}
+
+function zoomBy(factor: number, cx = 0, cy = 0): void {
+  zoomTo(scale.value * factor, cx, cy);
+}
+
+/** 倍率快捷缩放：以"适应屏幕"为 1× 基准放大 n 倍（围绕视图中心），
+ * 供 2×/4×/8× 快捷钮——看细节时不必从 fit 态连点多次 ＋。 */
+function zoomToFitFactor(mult: number): void {
+  if (!img.value) return;
+  zoomTo(fitScale.value * mult);
 }
 
 function rotate(dir: 1 | -1): void {
@@ -470,19 +485,99 @@ onBeforeUnmount(() => {
     @mouseleave="hovered = false"
   >
     <div class="fv-toolbar">
-      <button title="放大（+）" @click="zoomBy(1.2)">＋</button>
-      <button title="缩小（-）" @click="zoomBy(1 / 1.2)">－</button>
-      <button title="适应屏幕（f）" @click="fit()">适应</button>
-      <button title="1:1 尺寸（1）" @click="zoom1to1()">1:1</button>
-      <button title="逆时针旋转（R）" @click="rotate(-1)">↺</button>
-      <button title="顺时针旋转（r）" @click="rotate(1)">↻</button>
-      <button title="水平镜像" :class="{ on: flipH }" @click="flipH = !flipH">⇋</button>
-      <button title="垂直镜像" :class="{ on: flipV }" @click="flipV = !flipV">⇅</button>
-      <button title="正反片转换（i）" :class="{ on: invert }" @click="invert = !invert">◐</button>
-      <button title="窗位窗宽" :class="{ on: winEnabled }" @click="toggleWin">窗</button>
-      <button title="还原（0）" @click="reset()">还原</button>
+      <button
+        title="放大（+）"
+        @click="zoomBy(1.2)"
+      >
+        ＋
+      </button>
+      <button
+        title="缩小（-）"
+        @click="zoomBy(1 / 1.2)"
+      >
+        －
+      </button>
+      <button
+        title="适应屏幕（f）"
+        @click="fit()"
+      >
+        适应
+      </button>
+      <button
+        title="1:1 尺寸（1）"
+        @click="zoom1to1()"
+      >
+        1:1
+      </button>
+      <button
+        title="适应屏幕的 2 倍"
+        @click="zoomToFitFactor(2)"
+      >
+        2×
+      </button>
+      <button
+        title="适应屏幕的 4 倍（查看细节）"
+        @click="zoomToFitFactor(4)"
+      >
+        4×
+      </button>
+      <button
+        title="适应屏幕的 8 倍"
+        @click="zoomToFitFactor(8)"
+      >
+        8×
+      </button>
+      <button
+        title="逆时针旋转（R）"
+        @click="rotate(-1)"
+      >
+        ↺
+      </button>
+      <button
+        title="顺时针旋转（r）"
+        @click="rotate(1)"
+      >
+        ↻
+      </button>
+      <button
+        title="水平镜像"
+        :class="{ on: flipH }"
+        @click="flipH = !flipH"
+      >
+        ⇋
+      </button>
+      <button
+        title="垂直镜像"
+        :class="{ on: flipV }"
+        @click="flipV = !flipV"
+      >
+        ⇅
+      </button>
+      <button
+        title="正反片转换（i）"
+        :class="{ on: invert }"
+        @click="invert = !invert"
+      >
+        ◐
+      </button>
+      <button
+        title="窗位窗宽"
+        :class="{ on: winEnabled }"
+        @click="toggleWin"
+      >
+        窗
+      </button>
+      <button
+        title="还原（0）"
+        @click="reset()"
+      >
+        还原
+      </button>
     </div>
-    <div ref="wrap" class="fv-stage">
+    <div
+      ref="wrap"
+      class="fv-stage"
+    >
       <canvas
         ref="canvas"
         @wheel="onWheel"
@@ -491,21 +586,71 @@ onBeforeUnmount(() => {
         @mouseup="onUp"
         @mouseleave="onUp"
       />
-      <div v-if="imgErr" class="fv-error">{{ imgErr }}</div>
-      <div v-else-if="!img" class="fv-hint">{{ props.label || "未加载影像" }}</div>
-      <div v-else-if="props.label" class="fv-label">{{ props.label }}</div>
+      <div
+        v-if="imgErr"
+        class="fv-error"
+      >
+        {{ imgErr }}
+      </div>
+      <div
+        v-else-if="!img"
+        class="fv-hint"
+      >
+        {{ props.label || "未加载影像" }}
+      </div>
+      <div
+        v-else-if="props.label"
+        class="fv-label"
+      >
+        {{ props.label }}
+      </div>
     </div>
     <div class="fv-filters">
-      <label>亮度<input v-model.number="brightness" type="range" min="20" max="300" step="5" /></label>
-      <label>对比度<input v-model.number="contrast" type="range" min="20" max="300" step="5" /></label>
+      <label>亮度<input
+        v-model.number="brightness"
+        type="range"
+        min="20"
+        max="300"
+        step="5"
+      ></label>
+      <label>对比度<input
+        v-model.number="contrast"
+        type="range"
+        min="20"
+        max="300"
+        step="5"
+      ></label>
       <template v-if="winEnabled">
-        <label>窗宽<input v-model.number="winWidth" type="range" min="1" max="512" step="1" /></label>
-        <label>窗位<input v-model.number="winLevel" type="range" min="0" max="255" step="1" /></label>
+        <label>窗宽<input
+          v-model.number="winWidth"
+          type="range"
+          min="1"
+          max="512"
+          step="1"
+        ></label>
+        <label>窗位<input
+          v-model.number="winLevel"
+          type="range"
+          min="0"
+          max="255"
+          step="1"
+        ></label>
       </template>
-      <label>锐化<input v-model.number="sharpen" type="range" min="0" max="100" step="5" /></label>
-      <label class="chk"><input v-model="emboss" type="checkbox" />浮雕</label>
+      <label>锐化<input
+        v-model.number="sharpen"
+        type="range"
+        min="0"
+        max="100"
+        step="5"
+      ></label>
+      <label class="chk"><input
+        v-model="emboss"
+        type="checkbox"
+      >浮雕</label>
     </div>
-    <div class="fv-status">{{ statusText }}</div>
+    <div class="fv-status">
+      {{ statusText }}
+    </div>
   </div>
 </template>
 

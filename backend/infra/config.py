@@ -65,7 +65,10 @@ class AuthCfg(BaseModel):
     session_ttl_min        : 会话绝对有效期（分钟，从签发起算上限）；
     max_sessions           : 单账号并发会话上限（超限吊销最旧会话，单点登录语义）；
     max_failed_attempts    : 连续挑战失败锁定阈值；
-    lockout_min            : 触发锁定后的锁定时长（分钟），并落安全告警。
+    lockout_min            : 触发锁定后的锁定时长（分钟），并落安全告警；
+    guest_mode             : 访客模式——true 时未携带令牌的请求以 guest 身份放行
+                             （require_role 对 guest 全量放行，见 app.auth）。
+                             默认 False（安全默认），本机演示/浏览场景显式开启。
     """
 
     challenge_ttl_sec: int = 60
@@ -74,6 +77,7 @@ class AuthCfg(BaseModel):
     max_sessions: int = 1
     max_failed_attempts: int = 5
     lockout_min: int = 30
+    guest_mode: bool = False
 
 
 class BatchExportAlertCfg(BaseModel):
@@ -418,6 +422,10 @@ class DetectCfg(BaseModel):
     # 跨瓦片合并 NMS 的 IoU：相邻瓦片对同一缺陷的回归框不完全重合，取比推理
     # NMS（infer_iou）宽松的阈值防"合并失败→双检"；按类独立合并防跨类互吞。
     tile_merge_iou: float = 0.3
+    # 逐类温度校准表（§15.4 置信度校准）：由 training/fit_calibration 拟合产出，
+    # 文件内含 model_id 指纹——加载时校验，与当前权重不匹配则静默不启用
+    # （绝不让过期校准表污染新权重）。None = 关闭校准。
+    calibration_file: str | None = None
 
 
 class UploadCfg(BaseModel):
@@ -513,6 +521,8 @@ class BatchCfg(BaseModel):
     workers: int = 2  # 并行 worker 数（IO/推理并行度；过大会加重 CPU/内存）
     max_per_batch: int = 100  # 单批最大图数（防一次性打爆资源）
     per_image_estimate_sec: float = 8.0  # 单图预估耗时（进度条/预计时间展示用）
+    dedup: bool = True  # 批量上传查重：批内 + 与历史已检影像按文件 SHA256 比对，
+    # 命中则批次暂缓（awaiting_review）交人工复核决定跳过/仍检测；false=不做查重
     max_retained_batches: int = 50  # 内存保留终结批次上限（S-*：防 100h 长跑内存随批次无界增长；
     # 超过后只驱逐"已完成且无失败可重试任务"的最旧批次出内存）
     max_retained_snapshot_files: int = 200  # 磁盘快照保留上限（S-21 防磁盘随批次无界增长）：

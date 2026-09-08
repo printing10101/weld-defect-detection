@@ -2,6 +2,7 @@
 /** 检测旅程视图：编排 上传 → 处理中 → 报告解读（全部由 useJourney 的真实数据流驱动）。 */
 import { computed } from "vue";
 import { useJourney } from "../composables/useJourney";
+import { useViewerFilmsStore } from "../stores/viewerFilms";
 import Stepper from "../components/Stepper.vue";
 import UploadPanel from "../components/UploadPanel.vue";
 import PipelineTrack from "../components/PipelineTrack.vue";
@@ -9,12 +10,16 @@ import ReportView from "../components/ReportView.vue";
 
 const emit = defineEmits<{ archive: [] }>();
 
+const viewerFilms = useViewerFilmsStore();
+
 const { phase, sourceUrl, file, elapsedMs, error, result, setFile, submit, reset } = useJourney();
 
 const step = computed<1 | 2 | 3>(() => (phase.value === "upload" ? 1 : phase.value === "processing" ? 2 : 3));
 
 function onFileChanged(f: File | null): void {
   setFile(f);
+  // 选片即同步到底片查看（reset 走 null，不入库）
+  if (f) viewerFilms.add([f]);
 }
 function onSubmit(fd: FormData): void {
   void submit(fd);

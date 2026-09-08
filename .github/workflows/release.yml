@@ -1,0 +1,102 @@
+name: Release
+
+# 打 tag（v*）或手动触发：构建离线自足安装包 → 冒烟 → 附加到 GitHub Release。
+# 权重处理（诚实降级）：仓库内无权重（大文件不入 git）时构建"基线降级版"并在
+# 产物名/说明中标注，禁止冒充正式交付版；正式发版前把 best.onnx 放到
+# models/weights/best.onnx（或用 -RequireWeights 的本地打包链）。
+# 注意：安装包未做代码签名（无证书），SmartScreen 会提示——见 SECURITY.md。
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write # 附加产物到 Release
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # 供给脚本按嵌入运行时版本（3.12.x）锁定依赖；dev venv 仅承担
+          # "跑裁剪/供给脚本 + 跨解释器 pip"的角色，版本随此处。
+          python-version: "3.12"
+
+      - name: Create dev venv (slim/provision scripts + pip carrier)
+        run: |
+          python -m venv backend\.venv
+          backend\.venv\Scripts\python -m pip install --upgrade pip
+          backend\.venv\Scripts\python -m pip install -r requirements.txt
+
+      - uses: pnpm/action-setup@v4
+        with:
+          # 与 ci.yml frontend 一致：11.25 对配置型 pnpm-workspace.yaml 的
+          # 白名单加载有行为变化，11.24.0 为本地验证可用版本。
+          version: 11.24.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: src/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/src-tauri
+
+      - name: Stage model weights (if present)
+        id: weights
+        shell: pwsh
+        run: |
+          if (Test-Path "models\weights\best.onnx") {
+            New-Item -ItemType Force -Path "backend\models\weights" -Force | Out-Null
+            Copy-Item "models\weights\best.onnx" "backend\models\weights\best.onnx" -Force
+            Write-Host "权重就绪：正式版构建"
+            "present=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "::warning::仓库内无 models/weights/best.onnx——构建基线降级版（界面显示降级横幅），不得作为正式交付物"
+            "present=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          if ("${{ steps.weights.outputs.present }}" -eq "true") {
+            powershell -ExecutionPolicy Bypass -File scripts\build_installer.ps1 -RequireWeights
+          } else {
+            powershell -ExecutionPolicy Bypass -File scripts\build_installer.ps1
+          }
+
+      - name: Smoke test installer
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts\smoke_test_installer.ps1
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ github.ref_name }}
+          path: src/src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $exe = Get-ChildItem "src\src-tauri\target\release\bundle\nsis\*-setup.exe" |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $note = ""
+          if ("${{ steps.weights.outputs.present }}" -ne "true") {
+            $note = "（基线降级版：不含 AI 权重，仅评估打包链路，禁止正式交付）"
+          }
+          gh release view $env:GITHUB_REF_NAME --repo ${{ github.repository }} 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:GITHUB_REF_NAME --repo ${{ github.repository }} --generate-notes
+          }
+          gh release upload $env:GITHUB_REF_NAME $exe.FullName --repo ${{ github.repository }} --clobber
+          Write-Host "已附加：$($exe.Name) $note"

@@ -1,0 +1,82 @@
+{
+  "model_id": "best::8370aeeef0b1",
+  "fitted_at": "2026-09-08T03:38:45",
+  "method": "per_class_temperature_ece_grid_cv2",
+  "data": {
+    "dirs": [
+      "D:\\扫描检测软件\\data\\training\\val",
+      "D:\\扫描检测软件\\data\\training\\test"
+    ],
+    "n_images": 136,
+    "n_pairs": 719
+  },
+  "cv2": {
+    "ece_before_mean": 0.2716,
+    "ece_after_mean": 0.21665,
+    "note": "图像级 2 折交叉验证（折间互验均值）= 泛化估计"
+  },
+  "insample_ece": {
+    "before": 0.2717,
+    "after": 0.1763
+  },
+  "temperatures": {
+    "0": 0.25,
+    "1": 0.25,
+    "2": 0.25,
+    "3": 0.25,
+    "4": 6.75,
+    "5": 8.0,
+    "6": 5.5
+  },
+  "per_class": {
+    "0": {
+      "best_temp": 0.25,
+      "ece_before": 0.2152,
+      "ece_after": 0.1164,
+      "n": 372,
+      "skipped": false
+    },
+    "1": {
+      "best_temp": 0.25,
+      "ece_before": 0.269,
+      "ece_after": 0.1536,
+      "n": 58,
+      "skipped": false
+    },
+    "2": {
+      "best_temp": 0.25,
+      "ece_before": 0.2127,
+      "ece_after": 0.1597,
+      "n": 64,
+      "skipped": false
+    },
+    "3": {
+      "best_temp": 0.25,
+      "ece_before": 0.3972,
+      "ece_after": 0.3267,
+      "n": 51,
+      "skipped": false
+    },
+    "4": {
+      "best_temp": 6.75,
+      "ece_before": 0.3555,
+      "ece_after": 0.2831,
+      "n": 76,
+      "skipped": false
+    },
+    "5": {
+      "best_temp": 8.0,
+      "ece_before": 0.4918,
+      "ece_after": 0.4411,
+      "n": 45,
+      "skipped": false
+    },
+    "6": {
+      "best_temp": 5.5,
+      "ece_before": 0.3829,
+      "ece_after": 0.3248,
+      "n": 53,
+      "skipped": false
+    }
+  }
+}

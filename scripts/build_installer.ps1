@@ -1,8 +1,11 @@
-﻿# ScanDetection 一键打包脚本（Windows）
+﻿# 射线焊缝缺陷智能检测系统（ScanDetection）一键打包脚本（Windows）
 # 用法：在仓库根目录执行
 #   powershell -ExecutionPolicy Bypass -File scripts\build_installer.ps1            # 无权重也可构建（警告）
 #   powershell -ExecutionPolicy Bypass -File scripts\build_installer.ps1 -RequireWeights   # 无权重即中止（正式交付用）
-# 产物：src\src-tauri\target\release\bundle\nsis\ScanDetection_0.1.0_x64-setup.exe
+# 产物：src\src-tauri\target\release\bundle\nsis\射线焊缝缺陷智能检测系统_0.1.0_x64-setup.exe
+#
+# 交付口径：对外只交付本安装包。scripts\launch_app.vbs / stop_app.vbs 为开发
+# 调试启动器（会打开系统默认浏览器），不随安装包分发，禁止作为交付物外发。
 #
 # 前置（打包机一次性准备）：
 #   1. Rust toolchain（rustup，MSVC target）+ Node.js 20+/pnpm 10+
@@ -18,6 +21,9 @@ $venvPython = Join-Path $root "backend\.venv\Scripts\python.exe"
 if (-not (Test-Path $venvPython)) {
     throw "未找到 backend\.venv\Scripts\python.exe —— 请先按 README 创建后端开发环境"
 }
+
+Write-Host "==> [0/5] 供给嵌入式 Python 运行时（缺失时自动从 python.org 嵌入包 + 锁定依赖构建，CI 可复现）" -ForegroundColor Cyan
+& (Join-Path $PSScriptRoot "provision_python_embed.ps1")
 
 Write-Host "==> [1/5] 裁剪嵌入 Python 运行时（剔除 pip/pytest/包内测试目录，省 ~35MB）" -ForegroundColor Cyan
 & $venvPython (Join-Path $root "scripts\slim_python_embed.py")

@@ -1,7 +1,7 @@
 # 焊缝射线缺陷检测 — 数据资产与许可证台账
 
 > 用途：记录用户自有数据、可合法用于训练/比赛的外部公开数据集，以及合规使用边界。  
-> 更新日期：2026-08-05  
+> 更新日期：2026-09-07（同日全网复扫，新增候选见 §6；基础台账 2026-08-05）  
 > 重大更新：本机磁盘装不下 SWRD（115.86 GB），已确认 **Roboflow 上的两个小体积、合规 X 光焊缝集** 可作为实际可落地的主训练集补充（见 §2.1）。SWRD 降级为「有大磁盘时的增强选项」。
 
 ---
@@ -16,6 +16,8 @@
 | GDXray+ Welds | NC(仅研究/教育) | 3.5–4.5 GB 全集 | 是 | bbox 文本 | ⚠️ 可下 | ⚠️ 仅教育/无奖 |
 | **HF rikkarth（Kaggle CC0 镜像）** | **CC0** | ~2.0k 张 | **否(外观)** | YOLOv8 直下 | ✅ **已下载至 data/external/hf/rikkarth/** | ✅ 仅预训练 |
 | RIAWELC | 不明(无 LICENSE) | 24k 张 | 是 | 分类 | ✅ | ❓ 待确认 |
+| **X-weld (Zenodo)** ⭐ | **Apache 2.0** | 475 MB | 是(编号区) | LMDB/OCR | ✅ 已下载 | ⚠️ **无缺陷标注，仅作底片编号 OCR 备用** |
+| LoHi-WELD ⭐新增 | 官方声明免费(须引用) | 3,022 张×2 分辨率 | **否(可见光)** | JSON bbox | ✅ Google Drive | ✅ 须引用 |
 
 **结论**：实际可执行的主训练集组合 = **Roboflow(Public Domain/CC BY 4.0) + 用户 165 张精标 + 合成增强**，三者都小体积、合规、可比赛，完全绕开 SWRD 115GB 死穴。
 
@@ -25,6 +27,12 @@
 
 ### 1.1 文件位置
 `C:\Users\Lenovo\Desktop\扫描检测软件\图片\`
+
+> ⚠️ **2026-09-07 状态更新：该批底片已遗失。** 原桌面路径不存在；全盘（C/D）按
+> `定检*`/`PG10*`/`PL11*` 文件名检索无果；C/D 回收站为空；微信缓存
+> （`Documents/xwechat_files`）仅剩 2026-09 缩略图。**唯一可能找回的途径是手机端
+> 微信聊天记录**（当年经微信收发）。在找回前，§4 中所有依赖用户 165 张的阶段 B/C
+> 真实域微调均不可执行；部署回归（deploy_model）已改为缺失时优雅跳过。
 
 ### 1.2 实际内容
 | 子集 | 数量 | 状态 | 说明 |
@@ -192,6 +200,63 @@
 - **缺陷类别 → 由数据自带语义 + 自动映射决定，无需用户判断**：
   - Danila 自带语义类别名，`roboflow_ingest` 用 `map_source_label` 自动映射到本项目 6 类。
   - XrayWeld 类别匿名 0–4，**助手决定仅作图像域预训练/特征提取**（不强行并入检测训练，避免错误标注）；推测 0–4 = 气孔/夹渣/裂纹/未焊透/未熔合（顺序待核，不保证正确）。
+
+---
+
+## 6. 2026-09-07 全网复扫：台账外新发现（助手核查记录）
+
+> 复扫范围：GitHub / Zenodo / Kaggle / Roboflow / IEEE / PMC / 焊接学报 / ModelScope。
+> 台账原有条目（§2.1–2.6）结论均维持不变。
+
+### 6.1 ⭐ X-weld — Zenodo 真 X 光焊缝集（新最高优先候选）
+| 字段 | 内容 |
+|------|------|
+| 记录 | https://zenodo.org/records/10618962 （DOI: 10.5281/zenodo.10618962，2024-02-05 发布） |
+| 许可证 | **Apache License 2.0**（已从 Zenodo 元数据核实）——可商用/可比赛，须保留 LICENSE 声明 |
+| 下载 | 直链 `https://zenodo.org/api/records/10618962/files/my_dataset.zip/content`，单文件 **475.3 MB**，MD5 `ab70472fc2229ea07d46e37c18c974fe` |
+| 图像类型 | **X 射线焊缝图像**（真 X 光） |
+| 国内可达 | ✅ Zenodo 无 Cloudflare 拦截，可脚本直下 |
+| 待核实 | ⚠️ 元数据极简（无类别清单/标注格式/张数说明），需下载解压后核实：①是否有 bbox 标注 ②类别是否覆盖本项目 7 类 ③标注质量 |
+| 建议动作 | 下载到 `data/external/zenodo/xweld/` 核实后再定用途；Apache 2.0 允许接入主训练集 |
+
+#### ✅ 6.1.1 核实结论（2026-09-07 已下载并解压核验）
+- **下载校验**：475,303,436 字节，MD5 `ab70472fc2229ea07d46e37c18c974fe` 与 Zenodo 记录一致 ✅（本机直连被 DNS 污染，用 AliDNS DoH 解析真实 IP + `curl --resolve zenodo.org:443:188.185.43.153 --ssl-no-revoke` 成功拉取）
+- **实际内容**：train_3.9(7,565)/val_3.9(1,100)/test_1459(1,458) 共 **10,123 张，全部为底片边缘编号区的字符裁剪块**（LMDB `image-%09d`/`label-%09d` 经典 OCR 格式），label 为编号转写字符串（LCZX-…、日期、10FEJB 等），**无任何缺陷类别/框标注**
+- **定性**：Zenodo 标题有误导——这是**底片编号识别（OCR）数据集**，**不能用于缺陷检测训练**
+- **保留价值**：Apache 2.0，若日后做「底片编号自动识别→元数据回填」功能可直接复用；已落盘 `data/external/zenodo/xweld/`（zip + extracted + samples/contact_sheet.png 抽样拼图）
+- **对主训练集的影响**：X-weld 出局，真 X 光合规主训练集回到「Roboflow Danila(需梯子/API key) + 用户 165 张精标 + 合成增强」组合；本机网络现实下（GitHub/Zenodo/HF 被墙、Kaggle 可达、无代理端口）暂无新增合规 X 光框标注集可用
+
+### 6.2 LoHi-WELD — IEEE Access 2024（可见光，作 rikkarth 的升级替代/补充）
+| 字段 | 内容 |
+|------|------|
+| 论文 | Block et al., "LoHi-WELD: A Novel Industrial Dataset for Weld Defect Detection and Classification", IEEE Access 2024, DOI: 10.1109/ACCESS.2024.3407019 |
+| 代码/下载 | https://github.com/SylvioBlock/LoHi-Weld （数据走 Google Drive 链接） |
+| 许可证 | 论文/仓库官方声明：**研究、非商业、商业均可免费使用，须引用论文**（按 CC BY 同等口径处理，引用格式见论文） |
+| 规模 | **3,022 张**真实 MAG 机器人焊接焊道图像，高/低分辨率双版本；JSON bbox 标注 + 官方 5 折划分 |
+| 类别 | 4 类：气孔(pores)/夹渣(deposits)/凹陷(discontinuities)/污渍(stains) |
+| 图像类型 | ⚠️ **可见光焊道表面照片，非 X 光** |
+| 用途定位 | 同 §2.3 rikkarth（backbone 预热/域适应），但**规模更大(3,022 vs 2,028)、标注更细、商用友好、有官方 5 折**；Google Drive 国内可达性需实测，不行则走 HF 镜像间接获取 |
+
+### 6.3 Kaggle「Radiographs Welding Defect Detection」（真 X 光，license 待用户核对）
+| 字段 | 内容 |
+|------|------|
+| 链接 | https://www.kaggle.com/datasets/viacheslavasadchiy/radiographs-welding-defect-detection （2025-05 上传） |
+| 图像类型 | **X 射线焊缝底片**，带 YOLO/分割标注（Kaggle 元数据含 yolo/segmentation/computer-vision 标签） |
+| 来源 | 俄罗斯 Gazprom 工业黑客松流出 ⚠️ |
+| 许可证 | ✅ 已核实（2026-09-07）：**CC BY-NC-SA 4.0（非商业 + 相同方式共享）**。按 §5.1 最严口径：**比赛禁用作主训练集**，仅限教育/研究用途，与 GDXray 同级处理；NC-SA 的传染性还要求派生数据集同许可 |
+
+### 6.4 ModelScope 转载集（国内快速备选，谨慎）
+- https://www.modelscope.cn/datasets/xisowei666/xyxr_datasets —— YOLO 检测数据集合集，内含「**6 类 X 射线底片焊缝缺陷检测数据集**」zip。
+- 国内直连速度快、可脚本下载；但属**转载性质，原始来源与许可不明**，按 §2.6 对 CSDN 3056 张集的同一口径处理：**可作开发调试/预训练参考，不作合规主训练集**。
+
+### 6.5 排除项与低价值项（本次复扫确认）
+| 项 | 结论 |
+|----|------|
+| Say et al. 2023（PMC10385814，4,479 张 6 类） | 其数据实为 **GDXray 裁剪+增强产物**，非独立新源，已含于 §2.4 的 GDXray 口径 |
+| Zenodo「Submerged Arc Welding Open Repository」(15083865) | 是 SAW 工艺数据 + 射线检测**报告**，非标注图像集，低价值 |
+| WDXI（北邮） | 多处检索显示**未公开分发**，维持 §2.6 不建议结论 |
+| RIAWELC | 本次确认其为**分类集**（4 类 LP/PO/CR/LF，13,766 原始 + 增强 24,407），且仍无 LICENSE 文件；维持 §2.5 谨慎结论，可另作分类头预训练参考 |
+| "SKIP" 数据集 | 多轮检索未能确认存在该名的焊缝射线数据集（疑与其他文献混淆），未收录 |
 
 ---
 

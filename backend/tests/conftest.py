@@ -34,6 +34,10 @@ os.environ.setdefault("SCAN_IPC__ENFORCE", "false")
 # 否则限流计数跨测试实例共享，登录请求会偶发 429）。
 os.environ.setdefault("SCAN_RATE_LIMIT", "0")
 
+# 访客模式：default.yaml 为演示开启 guest_mode，但测试套件验证的是"未登录 401"
+# 的既有契约——测试环境强制关闭（env 优先级高于 yaml，见 infra.config.load_config）。
+os.environ.setdefault("SCAN_AUTH__GUEST_MODE", "false")
+
 
 @pytest.fixture(scope="session")
 def auth_table() -> Path:

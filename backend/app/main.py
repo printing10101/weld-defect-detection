@@ -324,7 +324,9 @@ def create_app() -> FastAPI:
 
     # IPC 一次性令牌校验（C-17）：业务请求须带 X-IPC-Token 或会话凭据。
     # enforce 由配置驱动（测试经 conftest 置 false，最小侵入）。
-    if cfg.ipc.enforce:
+    # 访客模式（auth.guest_mode）下浏览器请求不携带令牌/会话，IPC 门与其语义
+    # 冲突——随访客模式一并停用（访客身份与权限仍由 get_principal/require_role 把关）。
+    if cfg.ipc.enforce and not cfg.auth.guest_mode:
         app.add_middleware(
             IpcTokenMiddleware,
             enforce=True,
@@ -460,7 +462,9 @@ async def _serve_root():
             "<h2>ScanDetection</h2><p>前端未构建（dist 缺失）。"
             "请使用 Tauri 桌面端，或在开发模式下执行 <code>pnpm build</code>。</p>"
         )
-    return FileResponse(DIST / "index.html")
+    # index.html 禁缓存：内容散列命名的 assets 可长效缓存，但 index.html 必须每次
+    # 回源，否则前端重新构建后浏览器仍停留在旧 bundle（表现为新功能"看不到"）。
+    return FileResponse(DIST / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/{full_path:path}")
@@ -480,5 +484,5 @@ async def _serve_spa(full_path: str):
     index = DIST / "index.html"
     if not index.is_file():
         raise HTTPException(status_code=404)
-    # SPA 回退：未知前端路由交给 index.html 处理。
-    return FileResponse(index)
+    # SPA 回退：未知前端路由交给 index.html 处理（同样禁缓存，理由见 _serve_root）。
+    return FileResponse(index, headers={"Cache-Control": "no-cache"})

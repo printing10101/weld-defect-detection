@@ -188,7 +188,7 @@ def test_uncertainty_clamped() -> None:
 
 def test_yolo_to_detections_uses_estimator() -> None:
     # 大且高置信气孔 → 低不确定（不再恒等于 1-score）
-    dets = YoloDetector._to_detections([(10, 10, 40, 40, 0, 0.95)], conf=0.3, class_conf=None)
+    dets = YoloDetector()._to_detections([(10, 10, 40, 40, 0, 0.95)], conf=0.3, class_conf=None)
     assert len(dets) == 1
     assert dets[0].uncertainty < 0.1
     assert dets[0].uncertainty != round(1.0 - 0.95, 4)  # 与旧 1-score 行为不同

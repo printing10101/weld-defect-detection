@@ -7,7 +7,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$pkgDir = "$env:LOCALAPPDATA\ScanDetection"   # Tauri NSIS installMode=currentUser 默认目录
+$pkgDir = "$env:LOCALAPPDATA\射线焊缝缺陷智能检测系统"   # Tauri NSIS installMode=currentUser 默认目录（= productName）
 $dataDir = "$env:APPDATA\com.scandetection.sd"
 
 Write-Host "==> [0/6] 预检：18773 端口必须空闲（残留孤儿后端会造成假 PASS）" -ForegroundColor Cyan

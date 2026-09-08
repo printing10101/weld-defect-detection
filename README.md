@@ -20,10 +20,16 @@ TDR/底片误报率）、混淆矩阵、L1–L4 系统分级、漏检/误检/误
   圆形缺陷点数法、条形缺陷限值、综合评级，多标准可扩展
 - **人工复核**：逐缺陷/综合级别复核 + κ 一致性 + 仲裁；缺陷增删、类型修改、
   位置调整全程审计留痕
+- **可解释性**：torch 后端真 Grad-CAM 类激活热力图；ONNX 部署路径自动回退
+  Sobel 显著性近似（辅助功能，不进入主推理链路）
 - **报告**：PDF/A 长期归档 + 内容数字签名 + 防篡改校验
 - **批量评片**：线程池并行、进度/取消/断点续跑
 - **训练侧**：数据集构建（分层划分 + 互斥校验）、三人标注一致性仲裁、
   主动学习、伪标签回流
+- **部署后评估闭环**（`python -m backend.training.post_deploy_eval`）：部署权重
+  在带标注评估集上自动产出实测 mAP/逐类 AP/召回/精确 + ECE 置信度校准 +
+  回归对比，落盘评估报告 + 模型卡（`data/model_cards/`）+ 实验记录
+  （`data/experiments/experiments.jsonl`）；评估域如实标注 synthetic/real
 - **评价体系**：DB50/T 1807-2025 全套指标与记录表（`python -m backend.evaluation.run_std_eval`）；
   规格专项指标——量化一致性（Bland–Altman + 相对误差≤5%）、评级一致率（≥95% 且 κ≥0.8）、
   置信度校准（ECE≤0.05）（`python -m backend.evaluation.run_spec_eval`）
@@ -76,13 +82,29 @@ cd src && npx vue-tsc --noEmit && npm run test:run
 
 CI（`.github/workflows/ci.yml`）在每次推送时执行上述检查。
 
+## 端到端冒烟与持久性盯测
+
+```bash
+backend/.venv/Scripts/python scripts/e2e_api_smoke.py --soak 120
+```
+
+真实 HTTP 进程全链验证：SM2 登录 → 检测/判定/报告（含 C-14 导出审批流）→
+批量提交/失败隔离/取消 → 循环推理内存盯测（RSS 泄漏启发式）。打包链的
+端到端验证另见 `scripts/smoke_test_installer.ps1`。
+
 ## 构建安装包
 
 ```powershell
-# 一键打包（推荐）：裁剪嵌入运行时 → 前端构建 → Tauri 打包 → 输出安装包路径
+# 一键打包（推荐）：供给/裁剪嵌入运行时 → 前端构建 → Tauri 打包 → 输出安装包路径
+# src/python_embed 缺失时自动从 python.org 嵌入包 + 锁定依赖构建（CI 可复现）
 powershell -ExecutionPolicy Bypass -File scripts\build_installer.ps1
-# 产物：src/src-tauri/target/release/bundle/nsis/ScanDetection_0.1.0_x64-setup.exe
+# 产物：src/src-tauri/target/release/bundle/nsis/射线焊缝缺陷智能检测系统_0.1.0_x64-setup.exe
 ```
+
+- **运行入口（交付口径）**：安装包是本软件唯一的对外使用入口——安装后从
+  桌面/开始菜单启动独立桌面程序。`scripts/launch_app.vbs`（打开系统默认
+  浏览器访问本地服务）与 `stop_app.vbs` 是**开发调试用**启动器，仅限开发机
+  自用，不随安装包分发、禁止作为交付物外发。
 
 - 安装包**离线自足**：内嵌 Python 运行时与全部后端依赖（fastapi/onnxruntime/
   opencv/国密库等）、WebView2 离线安装器；目标机无需联网、无需管理员权限。
@@ -95,8 +117,11 @@ powershell -ExecutionPolicy Bypass -File scripts\build_installer.ps1
 
 - [用户手册](docs/用户手册.md) — 面向评片/管理人员的操作说明（GB/T 25000.51 用户文档集）
 - [安装与卸载指南](docs/安装与卸载指南.md) — 运行环境要求、安装/升级/卸载
+- [底片扫描与数字化要求](docs/底片扫描与数字化要求.md) — 扫描操作人员作业规范（过评片门禁的硬性要求）
 - [部署基线](docs/deployment-baseline.md) — 三员账号引导与运行基线
 - [国产化适配矩阵](docs/国产化适配矩阵.md) — 已验证/待真机适配状态
+- [安全策略](SECURITY.md) — 漏洞报告渠道、安全设计要点与已知限制
+- [更新日志](CHANGELOG.md) — 版本变更记录
 - API 契约：`docs/api/openapi.json`（`python scripts/gen_openapi.py` 重新生成）
 
 ## 已知限制

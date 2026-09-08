@@ -2,20 +2,33 @@
 /**
  * 批量处理视图：多底片/文件夹导入 → 异步队列 → 进度可视化 → 取消/重试 → 历史。
  * 数据全部来自真实后端 /batch 系列接口；进度经 2s 轮询实时更新。
+ * 查重复核：提交命中重复（批内/与历史已检影像）时后端整批置 awaiting_review
+ * 暂缓态，本页逐项确认「跳过/仍检测」后批次才继续执行。
  */
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { IMAGE_ACCEPT, IMAGE_EXTS as EXTS } from "../services/imageFormats";
 import { toErrorMessage } from "../utils/errorMessage";
+import { useViewerFilmsStore } from "../stores/viewerFilms";
 import BatchProgress from "../components/BatchProgress.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
-import { cancelBatch, getBatchStatus, listBatches, retryBatch, submitBatch } from "../services/api";
-import type { BatchStatusOut, BatchSummaryOut } from "../types/api";
+import {
+  cancelBatch,
+  getBatchStatus,
+  listBatches,
+  resolveBatchDuplicates,
+  retryBatch,
+  submitBatch,
+} from "../services/api";
+import type { BatchDuplicateItem, BatchStatusOut, BatchSummaryOut } from "../types/api";
 
 const emit = defineEmits<{ archive: [] }>();
 
+// 批量选片即时汇入「底片查看」（store 负责去重与 Blob 回收）
+const viewerFilms = useViewerFilmsStore();
+
 const MAX_PER_BATCH = 100;
 
-type Phase = "upload" | "running" | "result";
+type Phase = "upload" | "dedup" | "running" | "result";
 const phase = ref<Phase>("upload");
 const status = ref<BatchStatusOut | null>(null);
 const files = ref<File[]>([]);
@@ -23,6 +36,34 @@ const activeBatchId = ref<string | null>(null);
 const submitError = ref<string | null>(null);
 const submitting = ref(false);
 const history = ref<BatchSummaryOut[]>([]);
+
+/* ── 查重复核（awaiting_review 阶段） ── */
+const duplicates = ref<BatchDuplicateItem[]>([]);
+const dupDecisions = ref<Record<string, "skip" | "keep">>({});
+const resolving = ref(false);
+const skipCount = computed(
+  () => duplicates.value.filter((d) => (dupDecisions.value[d.task_id] ?? "skip") === "skip").length,
+);
+const keepCount = computed(() => duplicates.value.length - skipCount.value);
+
+/** 进入复核阶段：决定缺省「跳过」（重复文件宁可不跑不重跑）。 */
+function enterDedup(dups: BatchDuplicateItem[]): void {
+  duplicates.value = dups;
+  const dec: Record<string, "skip" | "keep"> = {};
+  for (const d of dups) dec[d.task_id] = "skip";
+  dupDecisions.value = dec;
+  phase.value = "dedup";
+}
+
+function setDecision(taskId: string, action: "skip" | "keep"): void {
+  dupDecisions.value = { ...dupDecisions.value, [taskId]: action };
+}
+
+function setAllDecisions(action: "skip" | "keep"): void {
+  const dec: Record<string, "skip" | "keep"> = {};
+  for (const d of duplicates.value) dec[d.task_id] = action;
+  dupDecisions.value = dec;
+}
 
 const pixelSpacingMm = ref("0.1000");
 const baseMetalThicknessMm = ref("");
@@ -107,6 +148,7 @@ function pickFiles(list: FileList | null): void {
   }
   files.value = accepted;
   submitError.value = null;
+  viewerFilms.add(accepted);
 }
 
 const fileSummary = () => {
@@ -151,12 +193,43 @@ async function doSubmit(fd: FormData): Promise<void> {
   try {
     const out = await submitBatch(fd);
     activeBatchId.value = out.batch_id;
-    phase.value = "running";
-    startPolling(out.batch_id);
+    if (out.status === "awaiting_review") {
+      // 查重命中：整批暂缓，先交人工逐项复核
+      status.value = null;
+      enterDedup(out.duplicates ?? []);
+      void refreshHistory();
+    } else {
+      phase.value = "running";
+      startPolling(out.batch_id);
+    }
   } catch (e) {
     submitError.value = toErrorMessage(e);
   } finally {
     submitting.value = false;
+  }
+}
+
+/** 人工复核确认：提交逐项决定，批次继续执行（全跳过则直接完成）。 */
+async function onDedupConfirm(): Promise<void> {
+  if (!activeBatchId.value || resolving.value) return;
+  resolving.value = true;
+  try {
+    await resolveBatchDuplicates(
+      activeBatchId.value,
+      duplicates.value.map((d) => ({
+        task_id: d.task_id,
+        action: dupDecisions.value[d.task_id] ?? "skip",
+      })),
+    );
+    duplicates.value = [];
+    dupDecisions.value = {};
+    status.value = null;
+    phase.value = "running";
+    startPolling(activeBatchId.value);
+  } catch (e) {
+    submitError.value = toErrorMessage(e);
+  } finally {
+    resolving.value = false;
   }
 }
 
@@ -186,6 +259,20 @@ function stopPolling(): void {
   clearTimer();
 }
 
+/** 旧快照/缺 duplicates 字段时，从任务明细兜底还原重复清单。 */
+function fallbackDups(s: BatchStatusOut): BatchDuplicateItem[] {
+  return (s.tasks ?? [])
+    .filter((t) => t.dup_kind)
+    .map((t) => ({
+      task_id: t.task_id,
+      image_name: t.image_name,
+      content_sha256: t.content_sha256 ?? null,
+      kind: t.dup_kind ?? "batch",
+      duplicate_of: t.dup_ref ?? null,
+      history: null,
+    }));
+}
+
 async function tick(id: string): Promise<void> {
   try {
     const s = await getBatchStatus(id);
@@ -195,6 +282,12 @@ async function tick(id: string): Promise<void> {
     status.value = s;
     pollErrorCount.value = 0;
     backendDown.value = false;
+    if (s.status === "awaiting_review") {
+      // 查重暂缓批（历史入口进入/轮询途中发现）：停止轮询，转人工复核
+      stopPolling();
+      enterDedup(s.duplicates ?? fallbackDups(s));
+      return;
+    }
     if (s.status === "finished") {
       stopPolling();
       phase.value = "result";
@@ -236,6 +329,11 @@ async function onCancelConfirmed(): Promise<void> {
   } catch {
     /* 取消失败忽略（轮询会继续展示真实状态） */
   }
+  if (phase.value === "dedup") {
+    // 暂缓批取消后立即终态（无 worker 收尾），拉一次状态展示结果
+    duplicates.value = [];
+    void fetchStatusOnce(activeBatchId.value);
+  }
 }
 
 async function onRetry(): Promise<void> {
@@ -257,6 +355,8 @@ function reset(): void {
   activeBatchId.value = null;
   files.value = [];
   submitError.value = null;
+  duplicates.value = [];
+  dupDecisions.value = {};
   void refreshHistory();
 }
 
@@ -431,6 +531,104 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- 阶段1.5：查重复核（awaiting_review：有重复，先人工确认再执行） -->
+    <div v-else-if="phase === 'dedup'">
+      <div class="sec-label">
+        批次 {{ activeBatchId ? activeBatchId.slice(0, 8) : "" }}
+        <span class="sec-state hold">待查重复核</span>
+      </div>
+      <div class="dedup-box">
+        <div class="dd-head">
+          检测到 <b>{{ duplicates.length }}</b> 个重复文件（与批内其他影像或历史已检影像内容完全相同）。
+          请逐项确认处理方式；未重复的影像不受影响，将在确认后立即开始检测。
+        </div>
+        <div class="dd-list">
+          <div
+            v-for="d in duplicates"
+            :key="d.task_id"
+            class="dd-row"
+          >
+            <div class="dd-info">
+              <div class="dd-name">
+                {{ d.image_name }}
+              </div>
+              <div class="dd-meta">
+                <span
+                  class="dd-kind"
+                  :class="d.kind"
+                >{{ d.kind === "history" ? "与历史已检影像重复" : "批内重复" }}</span>
+                <template v-if="d.kind === 'batch'">
+                  与本批「{{ d.duplicate_of }}」内容相同
+                </template>
+                <template v-else-if="d.history">
+                  首检 {{ d.history.image_id.slice(0, 8) }}
+                  <template v-if="d.history.created_at"> · {{ d.history.created_at }}</template>
+                  <template v-if="d.history.joint_level"> · 级别 {{ d.history.joint_level }}</template>
+                </template>
+              </div>
+            </div>
+            <div class="dd-actions">
+              <button
+                type="button"
+                class="dd-btn"
+                :class="{ on: (dupDecisions[d.task_id] ?? 'skip') === 'skip' }"
+                @click="setDecision(d.task_id, 'skip')"
+              >
+                跳过（推荐）
+              </button>
+              <button
+                type="button"
+                class="dd-btn"
+                :class="{ on: (dupDecisions[d.task_id] ?? 'skip') === 'keep' }"
+                @click="setDecision(d.task_id, 'keep')"
+              >
+                仍检测
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="dd-foot">
+          <button
+            type="button"
+            class="btn ghost"
+            @click="setAllDecisions('skip')"
+          >
+            全部跳过
+          </button>
+          <button
+            type="button"
+            class="btn ghost"
+            @click="setAllDecisions('keep')"
+          >
+            全部仍检测
+          </button>
+          <span class="dd-hint">跳过的文件不重复检测、不出报告；仍检测的会正常评片归档。</span>
+          <button
+            type="button"
+            class="btn"
+            :disabled="resolving"
+            style="margin-left: auto"
+            @click="onDedupConfirm"
+          >
+            {{ resolving ? "提交中…" : `确认并继续（跳过 ${skipCount} · 仍检测 ${keepCount}）→` }}
+          </button>
+          <button
+            type="button"
+            class="btn ghost dd-danger"
+            @click="onCancel"
+          >
+            放弃整批
+          </button>
+        </div>
+        <div
+          v-if="submitError"
+          class="err show"
+        >
+          ⚠ {{ submitError }}
+        </div>
+      </div>
+    </div>
+
     <!-- 阶段2/3：进度与结果 -->
     <div v-else>
       <div
@@ -517,7 +715,13 @@ onUnmounted(() => {
           <span
             class="h-status"
             :class="row.status"
-          >{{ row.status === "finished" ? "完成" : "进行中" }}</span>
+          >{{
+            row.status === "finished"
+              ? "完成"
+              : row.status === "awaiting_review"
+                ? "待查重复核"
+                : "进行中"
+          }}</span>
         </button>
       </div>
     </div>
@@ -554,6 +758,100 @@ onUnmounted(() => {
 .sec-state.fin {
   background: rgba(42, 143, 74, 0.15);
   color: #1e7a3d;
+}
+.sec-state.hold {
+  background: rgba(214, 134, 21, 0.16);
+  color: #b06a10;
+}
+/* ── 查重复核 ── */
+.dedup-box {
+  border: 1px solid rgba(214, 134, 21, 0.45);
+  border-radius: 10px;
+  background: rgba(214, 134, 21, 0.05);
+  padding: 14px;
+}
+.dd-head {
+  font-size: 13px;
+  color: #44577a;
+  margin-bottom: 12px;
+}
+.dd-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dd-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(120, 140, 180, 0.25);
+  border-radius: 8px;
+  background: #fff;
+}
+.dd-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #22355c;
+  word-break: break-all;
+}
+.dd-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6a7b99;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.dd-kind {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.dd-kind.history {
+  background: rgba(176, 48, 48, 0.12);
+  color: #b03030;
+}
+.dd-kind.batch {
+  background: rgba(214, 134, 21, 0.16);
+  color: #b06a10;
+}
+.dd-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.dd-btn {
+  border: 1px solid rgba(120, 140, 180, 0.35);
+  border-radius: 8px;
+  background: transparent;
+  color: #6a7b99;
+  font-size: 12px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+.dd-btn.on {
+  border-color: #2f6bff;
+  background: rgba(47, 107, 255, 0.1);
+  color: #2f6bff;
+  font-weight: 700;
+}
+.dd-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.dd-hint {
+  font-size: 12px;
+  color: #8a99b5;
+}
+.dd-danger {
+  color: #b03030;
 }
 .check {
   display: flex;
@@ -615,6 +913,9 @@ onUnmounted(() => {
 }
 .h-status.running {
   color: #2f6bff;
+}
+.h-status.awaiting_review {
+  color: #b06a10;
 }
 .faint {
   color: #8a99b5;

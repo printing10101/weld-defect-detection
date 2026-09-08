@@ -17,6 +17,7 @@ import type {
   BatchStatusOut,
   BatchSubmitOut,
   BatchSummaryOut,
+  BatchDedupDecision,
   CalibrationIn,
   CalibrationOut,
   DeviceDetailOut,
@@ -255,6 +256,17 @@ export function cancelBatch(batchId: string): Promise<{ ok: boolean }> {
 /** 断点续跑：重跑本批 failed/cancelled 任务。 */
 export function retryBatch(batchId: string): Promise<BatchRetryOut> {
   return request<BatchRetryOut>(`/batch/${batchId}/retry`, { method: "POST" });
+}
+
+/** 人工查重复核：逐项决定重复文件跳过/仍检测，确认后批次继续执行。 */
+export function resolveBatchDuplicates(
+  batchId: string,
+  decisions: BatchDedupDecision[],
+): Promise<{ ok: boolean; skipped: number; kept: number }> {
+  return request<{ ok: boolean; skipped: number; kept: number }>(
+    `/batch/${batchId}/dedup/resolve`,
+    { method: "POST", body: JSON.stringify({ decisions }) },
+  );
 }
 
 /* ── 设备标定与报告数字签名校验 ── */

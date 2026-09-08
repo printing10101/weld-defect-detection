@@ -20,11 +20,20 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import cv2
 import numpy as np
 
-from backend.domain.detect.uncertainty import estimate_uncertainty
+from backend.domain.detect.calibration import (
+    apply_class_temperature,
+    temperature_transform,
+)
+from backend.domain.detect.uncertainty import (
+    ensemble_uncertainty_stats,
+    estimate_ensemble_uncertainty,
+    estimate_uncertainty,
+)
 from backend.domain.dto import BBox, DefectClass, DefectShape, Detection
 
 _LOG = logging.getLogger("scandetection.detector")
@@ -53,8 +62,26 @@ class YoloDetector:
         # 跨瓦片合并 NMS 的 IoU：比推理 NMS 宽松（相邻瓦片对同一缺陷的回归框
         # 不完全重合，取 infer_iou 会漏合并成双检）；按类独立合并防跨类互吞。
         self.tile_merge_iou: float = 0.3
+        # 逐类温度校准（置信度校准，§15.4 ECE 门禁）：{class_id: T}，由
+        # get_detector/Registry 从 config.detect.calibration_file 注入（鸭子
+        # 类型，不改 DefectDetector 契约）。None/空 = 不校准（原始分数）。
+        # 校准在 sigmoid 分数上做 argmax/阈值比较**之前**，infer_conf/class_conf
+        # 的语义因此统一落在校准尺度上。None/空 = 不校准。
+        self.class_temperature: dict[int, float] | None = None
 
     # ---- 加载 ----------------------------------------------------------------
+    @property
+    def cam_model(self) -> object | None:
+        """真 Grad-CAM 所需的 torch 模型（仅 torch 后端已加载时非 None）。
+
+        ONNX Runtime 部署路径无梯度回传，返回 None——调用方（domain/explain）
+        回退 Sobel 显著性近似。鸭子类型属性：BlobDetector 等其他检测器无此
+        属性，调用方以 getattr(…, "cam_model", None) 探测。
+        """
+        if self._backend in ("torch", "yolo") and self._yolo_model is not None:
+            return self._yolo_model
+        return None
+
     def load(self, model_uri: str, backend: str = "onnx") -> None:
         self._backend = backend
         if backend in ("torch", "yolo"):
@@ -267,13 +294,25 @@ class YoloDetector:
             return class_conf.get(int(cls_id), conf)
         return conf
 
+    def _eff_thr(self, cls_id: int, conf: float, class_conf: dict[int, float] | None) -> float:
+        """温度校准后的有效阈值：与分数同一逐类单调变换。
+
+        只校准分数不校准阈值会静默改变检测工作点（阈值两侧的框集合漂移）；
+        分数与阈值同变换 → 保留的检出集合与未校准完全一致，仅置信度数值
+        落在校准尺度上（review_conf/u_score 语义随之一致）。
+        """
+        thr = self._thr_for(cls_id, conf, class_conf)
+        if self.class_temperature:
+            t = self.class_temperature.get(int(cls_id), 1.0)
+            thr = float(temperature_transform(np.array([thr]), t)[0])
+        return thr
+
     # ---- 共用：后处理 --------------------------------------------------------
     # 约定：boxes 中每个元素为 (x, y, w, h, cls, score)
     # x,y = 左上角像素坐标（未 letterbox 还原后的原图坐标）
     # w,h = 框宽/高（像素）  cls = 类别索引  score = 置信度
-    @staticmethod
     def _to_detections(
-        boxes, conf: float, class_conf: dict[int, float] | None = None
+        self, boxes, conf: float, class_conf: dict[int, float] | None = None
     ) -> list[Detection]:
         dets: list[Detection] = []
         for x, y, w, h, cls, score in boxes:
@@ -281,7 +320,7 @@ class YoloDetector:
             cid = DefectClass(ci) if 0 <= ci < len(DefectClass) else DefectClass.POROSITY
             aspect = max(w, h) / max(min(w, h), 1e-6)
             shape = DefectShape.ROUND if aspect <= 3.0 else DefectShape.LINEAR
-            eff = YoloDetector._thr_for(ci, conf, class_conf)
+            eff = self._eff_thr(ci, conf, class_conf)
             area = max(float(w) * float(h), 0.0)
             u = estimate_uncertainty(score, eff, ci, area)
             dets.append(
@@ -310,6 +349,12 @@ class YoloDetector:
         跨尺度 NMS 去重。小幅提升小目标（气孔）与细长缺陷（裂纹）召回；
         代价是推理耗时 ×len(scales)，默认关闭（调用方显式开启）。
 
+        不确定性升级：合并时统计每条保留检出在**各视角**中的检出比例与得分
+        标准差（``ensemble_uncertainty_stats``），与单视角启发式不确定性 max
+        融合——多视角分歧是 Deep Ensemble 认知不确定性的测试时增广近似，
+        "仅单个尺度冒出"的候选会自动获得更高的 ``uncertainty``，从而更早触发
+        人工复核。
+
         约定：`infer` 内部 letterbox 到固定尺寸并还原坐标到**输入图**坐标系，
         故按均匀缩放 s 预缩放输入后，输出坐标除以 s 即回到原图坐标系。
         """
@@ -318,10 +363,23 @@ class YoloDetector:
         if len(scales) <= 1:
             return self.infer(image, conf, iou, class_conf)
         h, w = image.shape[:2]
+        views: list[list[tuple[BBox, int, float]]] = []
         results: list[Detection] = []
         for s in scales:
             resized = cv2.resize(image, (max(1, int(w * s)), max(1, int(h * s))))
             dets = self.infer(resized, conf, iou, class_conf)
+            # views 必须与保留检出同处原图坐标系（还原坐标后再入列），否则跨视角
+            # IoU 匹配错位、集成不确定性全部虚高。
+            views.append(
+                [
+                    (
+                        BBox(x=d.bbox.x / s, y=d.bbox.y / s, w=d.bbox.w / s, h=d.bbox.h / s),
+                        d.class_id.value,
+                        d.score,
+                    )
+                    for d in dets
+                ]
+            )
             for d in dets:
                 results.append(
                     Detection(
@@ -354,7 +412,24 @@ class YoloDetector:
             for d in results
         ]
         keep = self._nms(raw, iou)
-        merged = [results[i] for i in keep]
+        # 跨视角集成不确定性：检出比例/得分标准差与单视角信号 max 融合
+        kept_tuples = [(results[i].bbox, results[i].class_id.value) for i in keep]
+        stats = ensemble_uncertainty_stats(kept_tuples, views, match_iou=iou)
+        merged: list[Detection] = []
+        for i, (vote_frac, std) in zip(keep, stats, strict=True):
+            d = results[i]
+            u_aug = estimate_ensemble_uncertainty(vote_frac, std)
+            merged.append(
+                Detection(
+                    id=d.id,
+                    bbox=d.bbox,
+                    class_id=d.class_id,
+                    score=d.score,
+                    uncertainty=max(d.uncertainty, u_aug),
+                    shape=d.shape,
+                    deep_hole=d.deep_hole,
+                )
+            )
         return sorted(merged, key=lambda d: d.score, reverse=True)
 
     @staticmethod
@@ -372,7 +447,10 @@ class YoloDetector:
         # ultralytics 仅支持单一 conf；逐类阈值时先以"最低类别阈值"取全部候选，再逐类后过滤。
         pred_conf = min(min(class_conf.values()), conf) if class_conf else conf
         assert self._yolo_model is not None
-        res = self._yolo_model(rgb, conf=pred_conf, iou=iou, verbose=False)[0]
+        # res 显式 Any：ultralytics 的 YOLO.__call__ 返回 Results|Tensor 联合类型，
+        # 其类型存根在本地 ml venv 会触发误报（CI 无 ml 依赖不解析）；鸭子类型访问。
+        pred_iter: Any = self._yolo_model(rgb, conf=pred_conf, iou=iou, verbose=False)
+        res: Any = pred_iter[0]
         # ultralytics 已做 NMS；直接转 (x, y, w, h, cls, score)
         raw: list[tuple[float, float, float, float, int, float]] = []
         if res.boxes is not None and len(res.boxes) > 0:
@@ -380,10 +458,19 @@ class YoloDetector:
             scores = res.boxes.conf.cpu().numpy()
             clss = res.boxes.cls.cpu().numpy()
             for (x1, y1, x2, y2), s, c in zip(xyxy, scores, clss):
-                raw.append((float(x1), float(y1), float(x2 - x1), float(y2 - y1), int(c), float(s)))
+                sc = float(s)
+                if self.class_temperature:
+                    # 分数与阈值同一逐类温度变换（保持检出集合不变）
+                    sc = float(
+                        temperature_transform(
+                            np.array([sc]), self.class_temperature.get(int(c), 1.0)
+                        )[0]
+                    )
+                raw.append((float(x1), float(y1), float(x2 - x1), float(y2 - y1), int(c), sc))
         # 逐类后过滤：class_conf 指定阈值的类按其专属阈值，未指定回落全局 conf。
+        # 阈值与分数同一逐类温度变换（与 ONNX 路径同序同语义）。
         if class_conf:
-            raw = [b for b in raw if b[5] >= self._thr_for(b[4], conf, class_conf)]
+            raw = [b for b in raw if b[5] >= self._eff_thr(b[4], conf, class_conf)]
         return self._to_detections(raw, conf, class_conf)
 
     # ---- onnx ----------------------------------------------------------------
@@ -424,15 +511,27 @@ class YoloDetector:
         # 用 min<0 判定：背景锚框的 logit 必为负，概率恒 ≥0。
         if scores_all.min() < -1e-3:
             scores_all = 1.0 / (1.0 + np.exp(-np.clip(scores_all, -50.0, 50.0)))
+        # 温度校准只改变**输出置信度**，不参与类别指派/阈值筛选/NMS 排序：
+        # 这些决策全部沿用原始分数——逐类不同温度会改变跨类相对排序（类无关
+        # NMS 里锐化类压掉软化类），静默改变检出集合（实测 mAP -7.8 点、
+        # 召回 -6.7 点，对漏检敏感的系统不可接受）。分数与阈值同变换保证
+        # 逐类筛选结果与未校准一致，NMS 用原始分保证跨类竞争与基线一致。
+        scores_cal = (
+            apply_class_temperature(scores_all, self.class_temperature, class_axis=-1)
+            if self.class_temperature
+            else scores_all
+        )
         cls = scores_all.argmax(1)
         score = scores_all.max(1)
-        # 逐类置信度阈值：class_conf 指定某类阈值时优先，未指定回落全局 conf。
-        thr = np.array([self._thr_for(c, conf, class_conf) for c in cls], dtype=np.float32)
-        mask = score >= thr
+        score_cal = scores_cal[np.arange(len(cls)), cls]
+        # 逐类置信度阈值（与分数同变换 → 筛选结果与未校准一致）。
+        thr = np.array([self._eff_thr(c, conf, class_conf) for c in cls], dtype=np.float32)
+        mask = score_cal >= thr
         if not np.any(mask):
             return []
         bx = boxes_xywh[mask]
-        sc = score[mask]
+        sc = score[mask]  # NMS 排序用原始分（跨类竞争与基线一致）
+        sc_cal = score_cal[mask]  # 输出置信度用校准分
         cl = cls[mask]
         x1 = bx[:, 0] - bx[:, 2] / 2
         y1 = bx[:, 1] - bx[:, 3] / 2
@@ -442,16 +541,16 @@ class YoloDetector:
         y1 = (y1 - top) / r
         x2 = (x2 - left) / r
         y2 = (y2 - top) / r
-        # NMS 需要 (x1,y1,x2,y2,score,cls) 格式
+        # NMS 需要 (x1,y1,x2,y2,score,cls) 格式（score=原始分，保持基线排序）
         raw = list(
             zip(x1.tolist(), y1.tolist(), x2.tolist(), y2.tolist(), sc.tolist(), cl.tolist())
         )
         keep = self._nms(raw, iou)
-        # 转成 (x,y,w,h,cls,score) 交给 _to_detections
+        # 转成 (x,y,w,h,cls,score) 交给 _to_detections（score=校准分，仅输出语义）
         converted = []
         for i in keep:
-            x1i, y1i, x2i, y2i, sci, cli = raw[i]
-            converted.append((x1i, y1i, x2i - x1i, y2i - y1i, cli, sci))
+            x1i, y1i, x2i, y2i, _sci, cli = raw[i]
+            converted.append((x1i, y1i, x2i - x1i, y2i - y1i, cli, float(sc_cal[i])))
         return self._to_detections(converted, conf, class_conf)
 
     @staticmethod

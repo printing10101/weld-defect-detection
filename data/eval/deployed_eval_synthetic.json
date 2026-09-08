@@ -1,0 +1,156 @@
+{
+  "model": "D:\\扫描检测软件\\models\\weights\\best.onnx",
+  "model_id": "best::8370aeeef0b1",
+  "domain": "synthetic",
+  "data_dir": "D:\\扫描检测软件\\data\\training\\test",
+  "n_images": 125,
+  "conf": 0.25,
+  "iou": 0.5,
+  "class_conf": {
+    "0": 0.3,
+    "1": 0.12,
+    "2": 0.12,
+    "3": 0.08,
+    "4": 0.05,
+    "5": 0.18,
+    "6": 0.1
+  },
+  "metrics": {
+    "mAP50": 0.6933,
+    "recall": 0.7167,
+    "precision": 0.8474,
+    "gt_total": 713,
+    "by_class": {
+      "0": {
+        "ap50": 0.6143,
+        "recall": 0.6217,
+        "precision": 0.8457,
+        "gt_count": 423
+      },
+      "6": {
+        "ap50": 0.7925,
+        "recall": 0.8837,
+        "precision": 0.8085,
+        "gt_count": 43
+      },
+      "5": {
+        "ap50": 0.6139,
+        "recall": 0.6226,
+        "precision": 0.8684,
+        "gt_count": 53
+      },
+      "2": {
+        "ap50": 0.8604,
+        "recall": 0.9184,
+        "precision": 0.8182,
+        "gt_count": 49
+      },
+      "3": {
+        "ap50": 0.8182,
+        "recall": 0.8444,
+        "precision": 0.9268,
+        "gt_count": 45
+      },
+      "4": {
+        "ap50": 0.9712,
+        "recall": 1.0,
+        "precision": 0.7188,
+        "gt_count": 46
+      },
+      "1": {
+        "ap50": 0.8182,
+        "recall": 0.8889,
+        "precision": 0.9412,
+        "gt_count": 54
+      }
+    }
+  },
+  "ece": {
+    "n_samples": 607,
+    "ece": 0.185,
+    "mce": 0.5835,
+    "verdict": {
+      "passed": false
+    }
+  },
+  "metrics_uncalibrated": {
+    "mAP50": 0.6933,
+    "recall": 0.7167,
+    "precision": 0.8474,
+    "gt_total": 713,
+    "by_class": {
+      "0": {
+        "ap50": 0.6143,
+        "recall": 0.6217,
+        "precision": 0.8457,
+        "gt_count": 423
+      },
+      "6": {
+        "ap50": 0.7925,
+        "recall": 0.8837,
+        "precision": 0.8085,
+        "gt_count": 43
+      },
+      "5": {
+        "ap50": 0.6139,
+        "recall": 0.6226,
+        "precision": 0.8684,
+        "gt_count": 53
+      },
+      "2": {
+        "ap50": 0.8604,
+        "recall": 0.9184,
+        "precision": 0.8182,
+        "gt_count": 49
+      },
+      "3": {
+        "ap50": 0.8182,
+        "recall": 0.8444,
+        "precision": 0.9268,
+        "gt_count": 45
+      },
+      "4": {
+        "ap50": 0.9712,
+        "recall": 1.0,
+        "precision": 0.7188,
+        "gt_count": 46
+      },
+      "1": {
+        "ap50": 0.8182,
+        "recall": 0.8889,
+        "precision": 0.9412,
+        "gt_count": 54
+      }
+    }
+  },
+  "ece_uncalibrated": {
+    "ece": 0.2699,
+    "verdict": {
+      "passed": false
+    }
+  },
+  "calibration": {
+    "file": "D:\\扫描检测软件\\models\\weights\\best.calibration.json",
+    "temperatures": {
+      "0": 0.25,
+      "1": 0.25,
+      "2": 0.25,
+      "3": 0.25,
+      "4": 6.75,
+      "5": 8.0,
+      "6": 5.5
+    },
+    "active": true
+  },
+  "regression": {
+    "against": "2026-09-08T03:57:23",
+    "passed": true,
+    "deltas": {
+      "mAP50": 0.0,
+      "recall": 0.0,
+      "precision": 0.0
+    },
+    "violations": []
+  },
+  "created_at": "2026-09-08T03:57:53"
+}

@@ -13,7 +13,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
 import { AUTH_UNAUTHORIZED_EVENT, getChallenge, getMe, login as apiLogin, logout as apiLogout } from "../services/api";
-import { clearToken, getToken, setToken } from "../services/authToken";
+import { clearGuestMode, clearToken, getToken, isGuestMode, setGuestMode, setToken } from "../services/authToken";
 
 const IDLE_CHECK_MS = 30_000; // 空闲检查周期
 
@@ -22,8 +22,9 @@ export const useAuthStore = defineStore("auth", () => {
   const username = ref<string>("");
   const role = ref<string>("");
   const accountId = ref<string>("");
+  const guest = ref<boolean>(isGuestMode());
 
-  const isLoggedIn = computed(() => token.value !== "");
+  const isLoggedIn = computed(() => token.value !== "" || guest.value);
 
   let idleTimer: number | undefined;
   let lastActivity = Date.now();
@@ -42,8 +43,18 @@ export const useAuthStore = defineStore("auth", () => {
     lastActivity = Date.now();
   }
 
+  /** 访客模式：不登录直接进入（后端 guest_mode 开启时以 guest 身份放行全部接口）。 */
+  function enterGuest(): void {
+    guest.value = true;
+    username.value = "guest";
+    role.value = "guest";
+    accountId.value = "guest";
+    setGuestMode();
+  }
+
   /** 恢复会话：页面刷新后用本地 token 校验身份（失败由 401 事件统一登出）。 */
   async function restore(): Promise<boolean> {
+    if (guest.value && !token.value) return true; // 访客态无需后端校验
     if (!token.value) return false;
     try {
       const me = await getMe();
@@ -71,7 +82,9 @@ export const useAuthStore = defineStore("auth", () => {
     username.value = "";
     role.value = "";
     accountId.value = "";
+    guest.value = false;
     clearToken();
+    clearGuestMode();
     stopIdleWatch();
   }
 
@@ -119,8 +132,10 @@ export const useAuthStore = defineStore("auth", () => {
     username,
     role,
     accountId,
+    guest,
     isLoggedIn,
     login,
+    enterGuest,
     restore,
     logout,
     bindIdleWatch,

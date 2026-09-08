@@ -98,6 +98,16 @@ class ModelRegistry:
                 digest.update(chunk)
         return digest.hexdigest()[:12]
 
+    @classmethod
+    def entry_id_for(cls, path: str) -> str:
+        """<stem>::<sha256[:12]>——条目 id 语义的公开出口。
+
+        供权重未走 scan() 的场景对齐同一 id 语义（如校准表的 model_id 指纹
+        校验、部署后评估的报告标识）。
+        """
+        p = Path(path)
+        return f"{p.stem}::{cls._hash(path)}"
+
     # ---- 扫描 ----------------------------------------------------------------
     def scan(self) -> list[ModelEntry]:
         entries: list[ModelEntry] = []

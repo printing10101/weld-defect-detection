@@ -321,6 +321,35 @@ class Registry:
                 _LOG.error("HttpSyncAdapter 配置无效，回退 local：%s", exc)
         return LocalAdapter(queue)
 
+    def _class_temperature_for(self, weight_path: str) -> dict[int, float] | None:
+        """读取逐类温度校准表（§15.4 置信度校准）。
+
+        任何异常路径（未配置/文件缺失/JSON 损坏/model_id 指纹与当前权重不
+        匹配）一律返回 None 不启用校准——绝不让过期校准表污染新权重，
+        也不让可选的校准文件阻断检测器装配。
+        """
+        import json
+
+        from backend.domain.detect.calibration import parse_calibration_payload
+
+        cal_file = self.config.detect.calibration_file
+        if not cal_file:
+            return None
+        p = Path(_resolve_path(cal_file))
+        if not p.is_file():
+            _LOG.info("温度校准表不存在，跳过校准: %s（fit_calibration 产出后自动启用）", p)
+            return None
+        try:
+            payload = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            _LOG.warning("温度校准表读取失败，跳过校准: %s（%s）", p, exc)
+            return None
+        expected = ModelRegistry.entry_id_for(weight_path)
+        temps = parse_calibration_payload(payload, expected)
+        if temps is None:
+            _LOG.info("温度校准表与当前权重不匹配（%s != 表内指纹），跳过校准", expected)
+        return temps
+
     def _build_detector(self) -> DefectDetector:
         """按 config.detect.kind 经注册表装配检测器（模型无关，）。
 
@@ -347,6 +376,7 @@ class Registry:
                 tile_trigger_side=dc.tile_trigger_side,
                 tile_max_count=dc.tile_max_count,
                 tile_merge_iou=dc.tile_merge_iou,
+                class_temperature=self._class_temperature_for(uri),
             )
             self.detector_kind = "trained_yolo"
             self.detector_degraded = False
@@ -510,12 +540,14 @@ class Registry:
                 model_uri=entry.uri,
                 backend=self.config.model.backend,
                 providers=self.config.model.providers,
-                # 评估必须与生产推理同参（含 tiling），否则 Golden 指标与线上不可比
+                # 评估必须与生产推理同参（含 tiling/温度校准），否则 Golden 指标
+                # 与线上行为不可比
                 tile_size=self.config.detect.tile_size,
                 tile_overlap=self.config.detect.tile_overlap,
                 tile_trigger_side=self.config.detect.tile_trigger_side,
                 tile_max_count=self.config.detect.tile_max_count,
                 tile_merge_iou=self.config.detect.tile_merge_iou,
+                class_temperature=self._class_temperature_for(entry.uri),
             )
             return run_golden_evaluation(
                 model_id,
