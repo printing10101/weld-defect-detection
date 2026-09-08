@@ -36,6 +36,12 @@ function onLoggedOut(): void {
   router.push("/journey");
 }
 
+/** 访客模式：免登录进入（后端 guest_mode 开启时全部接口以 guest 身份放行）。 */
+function enterAsGuest(): void {
+  auth.enterGuest();
+  router.push("/journey");
+}
+
 async function submitLogin(): Promise<void> {
   error.value = "";
   if (!usernameInput.value.trim()) {
@@ -89,7 +95,7 @@ function copyBootKey(): void {
       class="login-card"
       @submit.prevent="submitLogin"
     >
-      <h1 class="title">射线评片智能检测系统</h1>
+      <h1 class="title">射线焊缝缺陷智能检测系统</h1>
       <p class="subtitle">三员身份认证（SM2 挑战-响应）</p>
 
       <label class="field">
@@ -122,6 +128,12 @@ function copyBootKey(): void {
       >
         {{ busy ? "登录中…" : "登 录" }}
       </button>
+
+      <button
+        class="guest"
+        type="button"
+        @click="enterAsGuest"
+      >访客模式（免登录浏览全部功能）</button>
 
       <p
         v-if="error"
@@ -201,6 +213,7 @@ function copyBootKey(): void {
 .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
 .field input, .field select { padding: 6px 8px; border: 1px solid var(--line, #ccc); border-radius: 3px; }
 .primary { padding: 8px; font-weight: 600; cursor: pointer; }
+.guest { padding: 6px; font-size: 12px; cursor: pointer; color: #456; background: #f6f8fa; border: 1px solid var(--line, #ddd); border-radius: 3px; }
 .error { color: #b3261e; font-size: 12px; margin: 0; }
 .hint { font-size: 11px; color: #567; margin: 0; }
 .boot { font-size: 12px; }

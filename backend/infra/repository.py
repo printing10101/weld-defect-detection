@@ -134,6 +134,42 @@ class InspectionRepository:
             rec = session.get(ReportRecord, report_id)
             return self._report_to_dict(rec) if rec is not None else None
 
+    def find_images_by_hashes(self, hashes: list[str]) -> dict[str, list[dict[str, Any]]]:
+        """按文件内容哈希查历史影像（批量查重用）：返回 hash → 命中摘要列表。
+
+        摘要含 image_id/workpiece_no/weld_no/joint_level/created_at，供查重复核
+        界面展示"与哪张历史影像重复"。created_at 升序（最早 = 首次检查）；
+        content_hash 为 NULL 的历史数据天然不参与匹配（IN 不命中 NULL）。
+        """
+        uniq = sorted({h for h in hashes if h})
+        if not uniq:
+            return {}
+        with Session(self._engine) as session:
+            rows = session.execute(
+                select(
+                    ImageRecord.id,
+                    ImageRecord.content_hash,
+                    ImageRecord.workpiece_no,
+                    ImageRecord.weld_no,
+                    ImageRecord.joint_level,
+                    ImageRecord.created_at,
+                )
+                .where(ImageRecord.content_hash.in_(uniq))
+                .order_by(ImageRecord.created_at.asc())
+            ).all()
+        out: dict[str, list[dict[str, Any]]] = {}
+        for image_id, content_hash, wp, weld, level, created_at in rows:
+            out.setdefault(content_hash or "", []).append(
+                {
+                    "image_id": image_id,
+                    "workpiece_no": wp,
+                    "weld_no": weld,
+                    "joint_level": level,
+                    "created_at": created_at.isoformat() if created_at else None,
+                }
+            )
+        return out
+
     def update_report(
         self,
         report_id: str,
@@ -727,6 +763,7 @@ class InspectionRepository:
             "standard_version": rec.standard_version,
             "secret_level": int(rec.secret_level or 0),
             "classification_basis": rec.classification_basis,
+            "content_hash": rec.content_hash,
             "created_at": _fmt_dt(rec.created_at),
         }
 

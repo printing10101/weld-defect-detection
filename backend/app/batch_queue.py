@@ -40,6 +40,10 @@ class BatchItem:
     options: dict[str, Any] = field(default_factory=dict)
     image_name: str | None = None  # 展示用原始文件名（缺省取路径 basename）
     cleanup_dir: Path | None = None  # 批次专属暂存目录（任务完成后整体清理，P1-3）
+    content_sha256: str | None = None  # 文件内容摘要（查重索引 + 落库 content_hash）
+    dup_kind: str | None = None  # 重复类型：history=与历史已检影像重复 | batch=批内重复 | None=不重复
+    dup_ref: str | None = None  # 重复对象描述：批内原文件名或历史 image_id（复核界面展示）
+    dup_history: dict[str, Any] | None = None  # kind=history 时的历史影像摘要（复核界面展示）
 
 
 @dataclass
@@ -57,6 +61,10 @@ class BatchTaskState:
     status: str = "pending"  # pending | running | done | failed | cancelled
     error: str | None = None
     result: dict[str, Any] | None = None
+    content_sha256: str | None = None  # 文件内容摘要（落库与查重展示）
+    dup_kind: str | None = None  # history | batch | None（查重复核展示）
+    dup_ref: str | None = None  # 重复对象描述
+    dup_history: dict[str, Any] | None = None  # 历史影像摘要（kind=history）
 
 
 class BatchManager:
@@ -87,8 +95,12 @@ class BatchManager:
     # ------------------------------------------------------------------
     # 生命周期
     # ------------------------------------------------------------------
-    def submit(self, items: list[BatchItem]) -> str:
-        """提交一批任务，返回 batch_id。"""
+    def submit(self, items: list[BatchItem], *, hold: bool = False) -> str:
+        """提交一批任务，返回 batch_id。
+
+        hold=True（批量查重命中）：批次置 awaiting_review 暂缓态，任务全部
+        pending 不入队，等人工逐项复核（resolve_dups）后再继续执行。
+        """
         self._ensure_pool()
         if not items:
             raise ValueError("batch 至少需要一张影像")
@@ -99,17 +111,35 @@ class BatchManager:
                 image_name=item.image_name or item.image_path.name,
                 image_path=str(item.image_path),
                 options=dict(item.options),
+                content_sha256=item.content_sha256,
+                dup_kind=item.dup_kind,
+                dup_ref=item.dup_ref,
+                dup_history=item.dup_history,
             )
             for item in items
         ]
+        duplicates = [
+            {
+                "task_id": t.task_id,
+                "image_name": t.image_name,
+                "content_sha256": t.content_sha256,
+                "kind": t.dup_kind,
+                "duplicate_of": t.dup_ref,
+                "history": t.dup_history,
+            }
+            for t in tasks
+            if t.dup_kind
+        ]
         batch = {
             "batch_id": batch_id,
-            "status": "running",  # 提交即运行（无排队态，简化桌面场景）
+            # running=立即执行；awaiting_review=查重命中，等人工复核后继续
+            "status": "awaiting_review" if hold else "running",
             "total": len(items),
             "done": 0,
             "failed": 0,
             "cancelled": 0,
             "cancelled_flag": False,
+            "duplicates": duplicates,
             "estimated_sec": round(len(items) * self._per_image_estimate_sec, 1),
             "created_at": fmt_naive_utc(),
             "finished_at": None,
@@ -120,9 +150,65 @@ class BatchManager:
             self._batches[batch_id] = batch
         self._maybe_evict_excess()  # S-*：新增批次后收敛内存保留上限
         self._persist(batch)
-        for item, task in zip(items, tasks):
-            self._pool.submit(self._run_one, batch_id, task.task_id, item)
+        if not hold:
+            for item, task in zip(items, tasks):
+                self._pool.submit(self._run_one, batch_id, task.task_id, item)
         return batch_id
+
+    def resolve_dups(self, batch_id: str, decisions: dict[str, str]) -> dict[str, int]:
+        """人工查重复核：decisions[task_id] ∈ {"keep","skip"}（缺省 skip，宁可不跑不重跑）。
+
+        - skip：任务标 cancelled（error 注明人工跳过），不出检测报告；
+        - keep：照常入队执行（重复影像由人工确认后仍需评片归档）；
+        - 全部 skip 时批次直接 finished 并清理暂存目录。
+        仅 awaiting_review 状态可复核；返回 {"skipped": n, "kept": m}。
+        """
+        self._ensure_pool()
+        with self._lock:
+            batch = self._batches.get(batch_id)
+            if batch is None:
+                raise KeyError(f"batch not found: {batch_id}")
+            if batch.get("status") != "awaiting_review":
+                raise ValueError(f"batch {batch_id} not awaiting dedup review")
+            kept: list[str] = []
+            skipped = 0
+            for t in batch["tasks"]:
+                # 非重复任务无条件继续；默认 skip 只作用于重复任务（宁可不跑不重跑）
+                if not t.get("dup_kind"):
+                    kept.append(t["task_id"])
+                    continue
+                action = decisions.get(t["task_id"], "skip")
+                if action == "keep":
+                    kept.append(t["task_id"])
+                else:
+                    t["status"] = "cancelled"
+                    t["error"] = "人工查重复核：内容重复，确认跳过"
+                    skipped += 1
+            batch["done"] = sum(1 for t in batch["tasks"] if t["status"] == "done")
+            batch["failed"] = sum(1 for t in batch["tasks"] if t["status"] == "failed")
+            batch["cancelled"] = sum(1 for t in batch["tasks"] if t["status"] == "cancelled")
+            if kept:
+                batch["status"] = "running"
+                batch["finished_at"] = None
+            else:
+                # 全部跳过：所有任务已终态，直接收敛完成并清理暂存目录
+                self._maybe_finish(batch)
+        self._persist(batch)
+        if not kept:
+            return {"skipped": skipped, "kept": 0}
+        items: list[tuple[str, str, str, dict[str, Any]]] = []
+        with self._lock:
+            for t in batch["tasks"]:
+                if t["task_id"] in kept:
+                    items.append((t["task_id"], t["image_path"], t["image_name"], t["options"]))
+        for task_id, image_path, image_name, options in items:
+            self._pool.submit(
+                self._run_one,
+                batch_id,
+                task_id,
+                BatchItem(image_path=Path(image_path), options=options, image_name=image_name),
+            )
+        return {"skipped": skipped, "kept": len(items)}
 
     def status(self, batch_id: str) -> dict[str, Any] | None:
         """批次进度/结果快照（含每任务明细）。"""
@@ -133,13 +219,25 @@ class BatchManager:
             return json.loads(json.dumps(batch))  # 深拷贝，防外部篡改
 
     def cancel(self, batch_id: str) -> bool:
-        """标记批次取消：未启动任务不再执行。返回是否命中该批次。"""
+        """标记批次取消：未启动任务不再执行。返回是否命中该批次。
+
+        awaiting_review（查重暂缓）批次：任务尚未入队，pending 直接标
+        cancelled，批次即时 finished 并清理暂存目录（等不到 worker 收尾）。
+        """
         with self._lock:
             batch = self._batches.get(batch_id)
             if batch is None:
                 return False
             if batch["status"] == "finished":
                 return True  # 已完成批次无需取消
+            if batch.get("status") == "awaiting_review":
+                for t in batch["tasks"]:
+                    if t["status"] == "pending":
+                        t["status"] = "cancelled"
+                        t["error"] = "batch cancelled"
+                batch["done"] = sum(1 for t in batch["tasks"] if t["status"] == "done")
+                batch["failed"] = sum(1 for t in batch["tasks"] if t["status"] == "failed")
+                batch["cancelled"] = sum(1 for t in batch["tasks"] if t["status"] == "cancelled")
             batch["cancelled_flag"] = True
             self._maybe_finish(batch)  # 取消后若所有任务已终态则标记 finished（纯状态变更）
         self._persist(batch)
@@ -393,6 +491,10 @@ class BatchManager:
             except (OSError, ValueError, KeyError):
                 _LOG.warning("skip corrupted batch snapshot: %s", path.name)
         for batch in self._batches.values():
+            # 查重暂缓批（awaiting_review）：任务从未启动，重启后仍应等待人工
+            # 复核（暂存目录未清理、原图可用），不得把 pending 误标为 failed。
+            if batch.get("status") == "awaiting_review":
+                continue
             changed = False
             for t in batch.get("tasks", []):
                 if t.get("status") in ("running", "pending"):

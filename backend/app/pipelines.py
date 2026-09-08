@@ -165,6 +165,7 @@ class InspectionPipeline:
         template: str = "standard",
         force: bool = False,
         witness: str | None = None,
+        content_sha256: str | None = None,
     ) -> dict:
         """执行全链路并落库+生成报告，返回结果 dict。
 
@@ -453,6 +454,8 @@ class InspectionPipeline:
             "need_review": need_review,
             "standard_id": std_id,
             "standard_version": std_version,
+            # 文件内容摘要（批量查重/历史比对索引；单图路径未计算时为 None）
+            "content_hash": content_sha256,
         }
         # per_defect_grade 与 detections 按序对齐；长度不符说明 grader 契约被破坏，
         # 与其把级别错配到别的缺陷上（安全事故），不如整体退化为"无级别+需复核"。

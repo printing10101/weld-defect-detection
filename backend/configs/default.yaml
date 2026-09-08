@@ -32,6 +32,7 @@ auth:  # 三员身份认证（C-06/C-07/C-09）
   max_sessions: 1         # 单账号并发会话上限（超限吊销最旧会话）
   max_failed_attempts: 5  # 连续挑战失败锁定阈值
   lockout_min: 30         # 锁定时长（分钟），触发时落安全告警
+  guest_mode: true        # 访客模式：免登录以 guest 身份浏览/使用全部功能（演示用）
 alerts:  # 安全告警规则（C-22 异常行为告警，各 kind 开关/阈值集中配置）
   batch_export:           # 批量导出：窗口期内同一操作者导出下载≥threshold 次 → high 告警
     enabled: true
@@ -183,6 +184,9 @@ detect:
   abs_threshold: 8.0
   dark_only: false
   review_conf: 0.5  # 检测不确定性阈值，超过则 need_review（人工兜底，M4b/ADR-010）
+  # 逐类温度校准表（§15.4）：training/fit_calibration 拟合产出，内含 model_id
+  # 指纹——与当前权重不匹配时静默不启用，权重重训/回退不会被过期校准污染。
+  calibration_file: models/weights/best.calibration.json
   # Tiling 分块推理：大幅底片整图 letterbox 到 640 时小缺陷（细裂纹/小气孔）
   # 被缩到不可见，是召回率天花板；分块后单瓦片缩放比 ≈2 倍，特征保留。
   # 代价：推理次数 ≈ 瓦片数（8K 底片约 64 次 CPU 前向，单图秒级→十秒级），
@@ -226,6 +230,7 @@ batch:
   workers: 2            # 批量并行 worker 数（§12.1）
   max_per_batch: 100    # 单批最大图数（防一次性打爆资源）
   per_image_estimate_sec: 8.0  # 单图预估耗时（进度/预计时间展示用）
+  dedup: true           # 批量上传查重：按文件 SHA256 与批内/历史已检影像比对，命中则批次暂缓交人工复核（true=开启）
   max_retained_batches: 50     # 内存保留终结批次上限（防长跑内存随批次无界增长）
   max_retained_snapshot_files: 200  # 磁盘快照保留上限（data/batch/*.json 超限后剪枝最旧"已完成且无重试价值"快照，防磁盘无界增长）
 backup:  # S-12 备份增强（GB/T 25000.51 可靠性：数据可恢复）

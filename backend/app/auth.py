@@ -359,6 +359,12 @@ def get_principal(
     """
     token = _extract_token(authorization) or _query_token(request)
     if not token:
+        # 访客模式（config.auth.guest_mode）：未携带令牌的请求以 guest 身份放行，
+        # 用于本机演示/浏览全部功能；默认关闭，默认语义仍是 401（安全默认）。
+        if reg.config.auth.guest_mode:
+            principal = Principal(account_id="guest", username="guest", role="guest")
+            request.state.principal = principal
+            return principal
         raise AuthError(401, "UNAUTHORIZED", "未提供会话令牌（请先登录）")
     from backend.infra.crypto import sm3_hex
 
@@ -406,11 +412,13 @@ def require_role(*roles: str):
     """三员权限矩阵依赖工厂（C-06）：角色不符 → 403。
 
     用法：``principal: Annotated[Principal, Depends(require_role("secadmin"))]``。
+    访客模式（role="guest"）全量放行——访客可浏览/使用全部功能，审计 actor 记为 guest。
     """
 
     def _dep(principal: Annotated[Principal, Depends(get_principal)]) -> Principal:
-        if principal.role not in roles:
-            raise AuthError(
+        if principal.role == "guest" or principal.role in roles:
+            return principal
+        raise AuthError(
                 403,
                 "FORBIDDEN",
                 f"当前角色 {principal.role!r} 无权执行该操作（需 {'/'.join(roles)}）",

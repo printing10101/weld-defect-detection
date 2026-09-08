@@ -20,6 +20,13 @@ const STATUS_BADGE: Record<string, string> = {
   failed: "badge-err",
   cancelled: "badge-muted",
 };
+
+/** 批次级状态标签（awaiting_review = 查重命中，等人工复核）。 */
+const BATCH_STATUS_LABEL: Record<string, string> = {
+  running: "处理中",
+  awaiting_review: "待查重复核",
+  finished: "已结束",
+};
 </script>
 
 <template>
@@ -48,9 +55,9 @@ const STATUS_BADGE: Record<string, string> = {
           预计剩余 ≈ {{ status.estimated_sec }}s
         </span>
         <span
-          v-else-if="status.status === 'finished'"
+          v-else
           class="bp-fin"
-        >已结束</span>
+        >{{ BATCH_STATUS_LABEL[status.status] ?? "已结束" }}</span>
       </div>
     </div>
 
@@ -72,6 +79,11 @@ const STATUS_BADGE: Record<string, string> = {
           v-else-if="t.need_review"
           class="bp-rev"
         >需复核</span>
+        <span
+          v-if="t.dup_kind"
+          class="bp-dup"
+          :title="t.dup_kind === 'history' ? `与历史影像 ${t.dup_ref ?? ''} 内容重复` : `与批内 ${t.dup_ref ?? ''} 内容重复`"
+        >重复</span>
         <span
           class="badge"
           :class="STATUS_BADGE[t.status] ?? 'badge-muted'"
@@ -187,6 +199,14 @@ const STATUS_BADGE: Record<string, string> = {
 }
 .bp-rev {
   color: #b08000;
+}
+.bp-dup {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(214, 134, 21, 0.16);
+  color: #b06a10;
+  white-space: nowrap;
 }
 .badge {
   flex: none;

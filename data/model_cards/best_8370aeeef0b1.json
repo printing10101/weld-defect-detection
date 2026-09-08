@@ -1,0 +1,108 @@
+{
+  "model_id": "best::8370aeeef0b1",
+  "version": "20260908",
+  "metrics": {
+    "domain": "synthetic",
+    "n_images": 125,
+    "mAP50": 0.6933,
+    "recall": 0.7167,
+    "precision": 0.8474,
+    "ece": 0.185,
+    "ece_verdict": {
+      "passed": false
+    },
+    "ece_uncalibrated": 0.2699,
+    "calibration": {
+      "file": "D:\\扫描检测软件\\models\\weights\\best.calibration.json",
+      "temperatures": {
+        "0": 0.25,
+        "1": 0.25,
+        "2": 0.25,
+        "3": 0.25,
+        "4": 6.75,
+        "5": 8.0,
+        "6": 5.5
+      },
+      "active": true
+    },
+    "per_class": {
+      "气孔": {
+        "ap50": 0.6143,
+        "recall": 0.6217,
+        "precision": 0.8457,
+        "gt_count": 423
+      },
+      "内凹": {
+        "ap50": 0.7925,
+        "recall": 0.8837,
+        "precision": 0.8085,
+        "gt_count": 43
+      },
+      "咬边": {
+        "ap50": 0.6139,
+        "recall": 0.6226,
+        "precision": 0.8684,
+        "gt_count": 53
+      },
+      "未焊透": {
+        "ap50": 0.8604,
+        "recall": 0.9184,
+        "precision": 0.8182,
+        "gt_count": 49
+      },
+      "未熔合": {
+        "ap50": 0.8182,
+        "recall": 0.8444,
+        "precision": 0.9268,
+        "gt_count": 45
+      },
+      "裂纹": {
+        "ap50": 0.9712,
+        "recall": 1.0,
+        "precision": 0.7188,
+        "gt_count": 46
+      },
+      "夹渣": {
+        "ap50": 0.8182,
+        "recall": 0.8889,
+        "precision": 0.9412,
+        "gt_count": 54
+      }
+    },
+    "regression": {
+      "against": "2026-09-08T03:57:23",
+      "passed": true,
+      "deltas": {
+        "mAP50": 0.0,
+        "recall": 0.0,
+        "precision": 0.0
+      },
+      "violations": []
+    }
+  },
+  "data_distribution": {
+    "source_dir": "D:\\扫描检测软件\\data\\training\\test",
+    "domain": "synthetic",
+    "n_images": 125,
+    "gt_total": 713,
+    "class_counts": {
+      "0": 423,
+      "2": 49,
+      "6": 43,
+      "5": 53,
+      "3": 45,
+      "1": 54,
+      "4": 46
+    }
+  },
+  "limitations": [
+    "当前指标来自**与训练同源的合成底片**，不代表真实射线底片性能；data/real_label 恢复后须以真实域重跑评估",
+    "ECE=0.185 超出门槛 0.05：置信度分流人工复核的阈值语义需重校（training/fit_calibration 可重新拟合校准表）",
+    "部署推理为 ONNX 路径：不确定性为单视角启发式 + TTA 集成近似（非 MC Dropout）"
+  ],
+  "ethics": [
+    "评级/评价输出仅为辅助参考，不构成法定无损检测结论（NB/T 47013 授权表未复核）",
+    "置信度经 ECE 口径校准评估；低置信/高不确定性检出强制进入人工复核"
+  ],
+  "created_at": "2026-09-07T19:57:53"
+}

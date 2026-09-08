@@ -204,11 +204,29 @@ export interface ActivePoolOut {
 
 export type BatchTaskStatus = "pending" | "running" | "done" | "failed" | "cancelled";
 
+/** 单个重复文件的查重复核信息（submit 响应与批次 status 共用） */
+export interface BatchDuplicateItem {
+  task_id: string;
+  image_name: string;
+  content_sha256: string | null;
+  kind: "history" | "batch"; // history=与历史已检影像重复 | batch=批内重复
+  duplicate_of: string | null; // 批内原文件名或历史 image_id
+  history: {
+    image_id: string;
+    workpiece_no: string | null;
+    weld_no: string | null;
+    joint_level: string | null;
+    created_at: string | null;
+  } | null;
+}
+
 /** POST /api/v1/batch → BatchSubmitOut */
 export interface BatchSubmitOut {
   batch_id: string;
   total: number;
   estimated_sec: number;
+  status: "running" | "awaiting_review";
+  duplicates: BatchDuplicateItem[];
 }
 
 /** GET /api/v1/batch/{id} → tasks[] 项 */
@@ -221,6 +239,9 @@ export interface BatchTaskOut {
   report_id: string | null;
   joint_level: string | null;
   need_review: boolean | null;
+  content_sha256?: string | null;
+  dup_kind?: "history" | "batch" | null;
+  dup_ref?: string | null;
 }
 
 /** GET /api/v1/batch/{id} → BatchStatusOut */
@@ -234,6 +255,13 @@ export interface BatchStatusOut {
   estimated_sec: number;
   progress: number;
   tasks: BatchTaskOut[];
+  duplicates?: BatchDuplicateItem[];
+}
+
+/** 人工查重复核的单项决定：skip=跳过不检测 | keep=人工确认后仍检测 */
+export interface BatchDedupDecision {
+  task_id: string;
+  action: "skip" | "keep";
 }
 
 /** GET /api/v1/batches → 列表项（历史/断点续跑入口） */

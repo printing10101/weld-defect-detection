@@ -8,6 +8,7 @@
  */
 
 const TOKEN_KEY = "scan_auth_token";
+const GUEST_KEY = "scan_guest_mode";
 
 export function getToken(): string {
   return (sessionStorage.getItem(TOKEN_KEY) ?? "").trim();
@@ -19,4 +20,17 @@ export function setToken(token: string): void {
 
 export function clearToken(): void {
   sessionStorage.removeItem(TOKEN_KEY);
+}
+
+/** 访客模式（后端 guest_mode 开启时免登录浏览全部功能）：随会话清除。 */
+export function isGuestMode(): boolean {
+  return sessionStorage.getItem(GUEST_KEY) === "1";
+}
+
+export function setGuestMode(): void {
+  sessionStorage.setItem(GUEST_KEY, "1");
+}
+
+export function clearGuestMode(): void {
+  sessionStorage.removeItem(GUEST_KEY);
 }

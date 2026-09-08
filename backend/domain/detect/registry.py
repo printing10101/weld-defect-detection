@@ -94,6 +94,7 @@ def get_detector(
     tile_trigger_side: int | None = None,
     tile_max_count: int | None = None,
     tile_merge_iou: float | None = None,
+    class_temperature: dict[int, float] | None = None,
 ) -> DefectDetector:
     """按 kind 装配检测器：``cls + load(model_uri, backend)``。
 
@@ -103,6 +104,8 @@ def get_detector(
       属性时注入（鸭子类型，不改 DefectDetector 契约；未知实现静默忽略）；
     - tile_*：Tiling 分块推理参数（大底片小缺陷召回），同经鸭子类型注入
       YoloDetector；不识别这些属性的实现静默忽略。
+    - class_temperature：逐类温度校准表（§15.4 置信度校准；文件读取与
+      model_id 校验由调用方完成），同经鸭子类型注入；None = 不校准。
     未知 kind 抛 ModelUnavailableError（503，需人工复核配置）。
     """
     spec = _DETECTOR_SPECS.get(kind)
@@ -131,5 +134,7 @@ def get_detector(
     for attr, val in tile_params.items():
         if val is not None and hasattr(det, attr):
             setattr(det, attr, val)  # type: ignore[union-attr]
+    if class_temperature and hasattr(det, "class_temperature"):
+        det.class_temperature = dict(class_temperature)  # type: ignore[union-attr]
     det.load(model_uri or "", backend)
     return det

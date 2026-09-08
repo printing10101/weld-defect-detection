@@ -15,7 +15,8 @@ from backend.infra.migrate import ensure_migrations
 # schema 演进：0001 基线 + 0002（devices/calibrations + reports 数字签名字段）+ 0003（ 审计增强）
 # + 0004（删除 users 表：移除用户/认证系统，改操作员姓名机制）
 # + 0005（defects 复核留痕）+ 0006（gate_rejects 不合格底片留档台账）
-_HEAD = "0009_carriers_export"
+# + 0010（images.content_hash 影像内容摘要：批量上传查重）
+_HEAD = "0010_image_content_hash"
 
 
 def test_migrate_fresh_db_creates_tables(tmp_path) -> None:
@@ -79,4 +80,5 @@ def test_new_columns_present_in_orm(tmp_path) -> None:
     cols_img = {c.name for c in ImageRecord.__table__.columns}
     cols_def = {c.name for c in DefectRecord.__table__.columns}
     assert "batch_no" in cols_img
+    assert "content_hash" in cols_img
     assert "disposition" in cols_def

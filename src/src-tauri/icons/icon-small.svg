@@ -1,0 +1,29 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#20395B"/><stop offset="0.55" stop-color="#14263F"/><stop offset="1" stop-color="#0B1626"/>
+    </linearGradient>
+    <linearGradient id="film" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#D9E6F5"/><stop offset="1" stop-color="#9DB6D4"/>
+    </linearGradient>
+    <clipPath id="bandClip"><rect x="352" y="448" width="320" height="134" rx="20"/></clipPath>
+    <rect id="hole" x="-15" y="-22" width="30" height="44" rx="10" fill="#12233B"/>
+  </defs>
+  <rect width="1024" height="1024" rx="230" fill="url(#bg)"/>
+  <g transform="rotate(-8 512 512)">
+    <rect x="262" y="246" width="500" height="532" rx="30" fill="url(#film)"/>
+    <g>
+      <use href="#hole" x="312" y="340"/><use href="#hole" x="312" y="512"/><use href="#hole" x="312" y="684"/>
+      <use href="#hole" x="712" y="340"/><use href="#hole" x="712" y="512"/><use href="#hole" x="712" y="684"/>
+    </g>
+    <rect x="346" y="440" width="332" height="150" rx="22" fill="#FDFEFF"/>
+    <g clip-path="url(#bandClip)" fill="#C3D6EA">
+      <path d="M352,540 a27,24 0 0 1 54,0 a27,24 0 0 1 54,0 a27,24 0 0 1 54,0 a27,24 0 0 1 54,0 a27,24 0 0 1 54,0 a27,24 0 0 1 54,0 a27,24 0 0 1 54,0 v42 h-378 Z"/>
+    </g>
+    <rect x="276" y="496" width="472" height="34" rx="17" fill="#43D6FF" opacity="0.75"/>
+    <rect x="276" y="505" width="472" height="14" rx="7" fill="#B9F1FF"/>
+    <circle cx="562" cy="504" r="86" fill="#FF8A00" opacity="0.35"/>
+    <circle cx="562" cy="504" r="52" fill="none" stroke="#FFA62B" stroke-width="24"/>
+    <circle cx="562" cy="504" r="16" fill="#E26E00"/>
+  </g>
+</svg>

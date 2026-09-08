@@ -70,12 +70,16 @@ def _wait_batch(client: TestClient, batch_id: str, timeout_s: float = 60.0) -> d
 
 
 def test_batch_submit_progress_and_done() -> None:
-    """提交 2 张 → 立即返回 batch_id；轮询至 finished：done=2、progress=1.0、任务有结果。"""
+    """提交 2 张（不同内容）→ 立即返回 batch_id；轮询至 finished：done=2、progress=1.0、任务有结果。"""
     name, data = _film_png(seed=1)
+    name2, data2 = _film_png(seed=11)
     with TestClient(app) as client:
         resp = client.post(
             "/api/v1/batch",
-            files=[("images", (name, data, "image/png")), ("images", (name, data, "image/png"))],
+            files=[
+                ("images", (name, data, "image/png")),
+                ("images", (name2, data2, "image/png")),
+            ],
             data={
                 "pixel_spacing_mm": "0.1",
                 "base_metal_thickness_mm": "20",

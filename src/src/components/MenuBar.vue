@@ -39,6 +39,7 @@ const ROLE_NAMES: Record<string, string> = {
   sysadmin: "系统管理员",
   secadmin: "安全保密管理员",
   auditor: "安全审计员",
+  guest: "访客",
 };
 function logout(): void {
   void auth.logout().then(() => router.push("/login"));

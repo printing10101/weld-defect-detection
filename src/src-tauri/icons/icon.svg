@@ -1,0 +1,105 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    射线焊缝缺陷智能检测系统 · 应用图标
+    设计语义：深色工业底色 → X 光底片（带齿孔）→ 焊缝亮带 → AI 扫描线 → 琥珀色缺陷标记环
+    源文件：任何尺寸再渲染均以本 SVG 为准（1024 视窗）。
+  -->
+  <defs>
+    <!-- 背景：深钢蓝纵向渐变 -->
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#20395B"/>
+      <stop offset="0.55" stop-color="#14263F"/>
+      <stop offset="1" stop-color="#0B1626"/>
+    </linearGradient>
+    <!-- 底片：冷蓝灰 -->
+    <linearGradient id="film" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#D9E6F5"/>
+      <stop offset="1" stop-color="#9DB6D4"/>
+    </linearGradient>
+    <!-- 焊缝亮带：曝光更足，近白 -->
+    <linearGradient id="weld" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FDFEFF"/>
+      <stop offset="1" stop-color="#DFEBF7"/>
+    </linearGradient>
+    <!-- 顶部玻璃斜切高光 -->
+    <linearGradient id="sheen" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.14"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0.03"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="soft10" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+    <filter id="soft3" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
+    <clipPath id="bandClip"><rect x="352" y="448" width="320" height="134" rx="20"/></clipPath>
+    <!-- 底片齿孔（35mm 胶片语汇）：竖圆角长孔 -->
+    <rect id="hole" x="-13" y="-19" width="26" height="38" rx="9" fill="#12233B"/>
+  </defs>
+
+  <!-- 底板 -->
+  <rect width="1024" height="1024" rx="230" fill="url(#bg)"/>
+  <!-- 顶部玻璃高光 -->
+  <path d="M0,230 a230,230 0 0 1 230,-230 h564 a230,230 0 0 1 230,230 v96
+           C 700,392 324,392 0,326 Z" fill="url(#sheen)"/>
+
+  <!-- 底片组（整体 -8° 微倾，画面更灵动） -->
+  <g transform="rotate(-8 512 512)">
+    <!-- 底片投影 -->
+    <rect x="266" y="272" width="492" height="508" rx="30" fill="#050B14" opacity="0.5" filter="url(#soft10)"/>
+    <!-- 片基 -->
+    <rect x="262" y="246" width="500" height="532" rx="30" fill="url(#film)"/>
+    <!-- 片基边缘细高光 -->
+    <rect x="262" y="246" width="500" height="532" rx="30" fill="none" stroke="#EEF6FF" stroke-width="5" opacity="0.8"/>
+
+    <!-- 左右齿孔列 -->
+    <g>
+      <use href="#hole" x="312" y="318"/><use href="#hole" x="312" y="384"/>
+      <use href="#hole" x="312" y="450"/><use href="#hole" x="312" y="516"/>
+      <use href="#hole" x="312" y="582"/><use href="#hole" x="312" y="648"/>
+      <use href="#hole" x="312" y="714"/>
+      <use href="#hole" x="712" y="318"/><use href="#hole" x="712" y="384"/>
+      <use href="#hole" x="712" y="450"/><use href="#hole" x="712" y="516"/>
+      <use href="#hole" x="712" y="582"/><use href="#hole" x="712" y="648"/>
+      <use href="#hole" x="712" y="714"/>
+    </g>
+
+    <!-- 焊缝亮带：白亮露出区 + 居中焊道鱼鳞纹 -->
+    <rect x="352" y="448" width="320" height="134" rx="20" fill="url(#weld)"/>
+    <g clip-path="url(#bandClip)" fill="#C3D6EA">
+      <path d="M352,540 a27,24 0 0 1 54,0 a27,24 0 0 1 54,0 a27,24 0 0 1 54,0 a27,24 0 0 1 54,0 a27,24 0 0 1 54,0 a27,24 0 0 1 54,0 a27,24 0 0 1 54,0 v42 h-378 Z"/>
+    </g>
+
+    <!-- 缺陷影像：标记环下的暗斑 + 邻近气孔群（真实底片语汇） -->
+    <circle cx="562" cy="504" r="15" fill="#33506F"/>
+    <circle cx="601" cy="543" r="6.5" fill="#5D7A99"/>
+    <circle cx="584" cy="557" r="4.5" fill="#6E89A8"/>
+
+    <!-- AI 扫描线：贯穿底片，辉光 + 亮芯 -->
+    <rect x="282" y="498" width="460" height="26" rx="13" fill="#43D6FF" opacity="0.35" filter="url(#soft10)"/>
+    <rect x="282" y="506" width="460" height="10" rx="5" fill="#43D6FF" opacity="0.5" filter="url(#soft3)"/>
+    <rect x="282" y="509" width="460" height="5" rx="2.5" fill="#A5EDFF"/>
+
+    <!-- 缺陷标记环：琥珀色瞄准环 + 四刻度 + 中心点 -->
+    <g transform="translate(562 504)">
+      <circle r="52" fill="#FFB13D" opacity="0.16" filter="url(#soft10)"/>
+      <circle r="38" fill="none" stroke="#FFB13D" stroke-width="11"/>
+      <circle r="38" fill="none" stroke="#FF8A00" stroke-width="11" stroke-dasharray="22 217" stroke-dashoffset="11" stroke-linecap="round"/>
+      <g stroke="#FFC46B" stroke-width="10" stroke-linecap="round">
+        <line x1="0" y1="-56" x2="0" y2="-44"/>
+        <line x1="0" y1="56" x2="0" y2="44"/>
+        <line x1="-56" y1="0" x2="-44" y2="0"/>
+        <line x1="56" y1="0" x2="44" y2="0"/>
+      </g>
+      <circle r="8" fill="#FF8A00"/>
+    </g>
+  </g>
+
+  <!-- AI 火花（右上角背景处四芒星，暗示智能检测） -->
+  <path d="M812,196 l10,30 30,10 -30,10 -10,30 -10,-30 -30,-10 30,-10 Z" fill="#8FE9FF" opacity="0.95"/>
+  <path d="M868,290 l6,17 17,6 -17,6 -6,17 -6,-17 -17,-6 17,-6 Z" fill="#8FE9FF" opacity="0.6"/>
+
+  <!-- 内缘描边：提升小尺寸下的轮廓感 -->
+  <rect x="10" y="10" width="1004" height="1004" rx="222" fill="none" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="6"/>
+</svg>

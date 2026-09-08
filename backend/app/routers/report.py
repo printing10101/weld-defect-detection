@@ -108,6 +108,9 @@ async def report(
         # 新评片模式：全链路（检测+渲染 PDF 为重同步任务，进线程池，）
         roi = parse_roi(iqi_roi)
         async with staged_upload(image, reg.config) as tmp_path:
+            # 单图链路同样落内容摘要（images.content_hash），批量查重的
+            # 历史比对才能覆盖单张评片的影像（文件已落盘，整读一遍）。
+            file_hash = await run_in_threadpool(_sha256_of_file, tmp_path)
             out = await run_in_threadpool(
                 lambda: pipeline.run_inspection(
                     tmp_path,
@@ -122,6 +125,7 @@ async def report(
                     template=tpl,
                     force=force,
                     witness=witness,
+                    content_sha256=file_hash,
                 )
             )
     else:
@@ -170,6 +174,17 @@ def report_pdf(
             status_code=404, detail={"code": "NOT_FOUND", "message": "pdf file missing"}
         )
     return FileResponse(str(pdf), media_type="application/pdf", filename=f"{report_id}.pdf")
+
+
+def _sha256_of_file(path: Path) -> str:
+    """整文件流式 SHA256（上传暂存文件为明文，可直读）。"""
+    from hashlib import sha256
+
+    digest = sha256()
+    with Path(path).open("rb") as fh:
+        while chunk := fh.read(1 << 20):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _image_dims(path: str | None) -> tuple[int, int]:

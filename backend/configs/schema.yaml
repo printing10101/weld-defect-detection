@@ -21,6 +21,7 @@ auth:                             # 三员身份认证（C-06/C-07/C-09）
   max_sessions: int               # 单账号并发会话上限（超限吊销最旧会话）
   max_failed_attempts: int        # 连续挑战失败锁定阈值
   lockout_min: int                # 锁定时长（分钟），触发时落安全告警
+  guest_mode: bool                # 访客模式（true=未登录请求以 guest 放行；默认 false）
 alerts:                           # 安全告警规则（C-22 异常行为告警）
   batch_export:                   # 批量导出告警（窗口期内导出≥threshold 次 → high）
     enabled: bool
@@ -144,6 +145,7 @@ detect:
   abs_threshold: float            # 绝对阈值下限（低噪声图兜底）
   dark_only: bool                 # 只检暗缺陷（True）或暗+亮（False）
   review_conf: float              # 检测不确定性阈值，超过则 need_review（人工兜底）
+  calibration_file: str | None    # 逐类温度校准表路径（含 model_id 指纹校验；None=关闭）
   tile_size: int                  # Tiling 分块推理瓦片边长（px）；0=整图推理（大底片小缺陷召回）
   tile_overlap: float             # 相邻瓦片重叠比例（重叠区重复检出由跨瓦片 NMS 合并）
   tile_trigger_side: int          # 最长边超过此值才分块（小图整图推理不受影响）
@@ -179,6 +181,7 @@ batch:
   workers: int                    # 批量并行 worker 数（§12.1）
   max_per_batch: int              # 单批最大图数
   per_image_estimate_sec: float   # 单图预估耗时（预计时间展示用）
+  dedup: bool                     # 批量上传查重：命中（批内/历史）则批次暂缓交人工复核
   max_retained_batches: int       # 内存保留终结批次上限（防长跑内存无界增长）
   max_retained_snapshot_files: int  # 磁盘快照保留上限（防 data/batch 磁盘无界增长）
 backup:                           # S-12 备份增强

@@ -2,13 +2,18 @@
 
 设计文档能力：多底片导入、任务队列、多 worker 并行推理、进度可视化、失败隔离、取消。
 复用 InspectionPipeline 单图全链路；提交立即返回 batch_id，异步执行。
+
+批量查重：提交时对每个文件流式计算 SHA256，先批内比对、再与已入库影像
+（images.content_hash 索引）比对；命中项不直接丢弃，而是整批转入
+awaiting_review 暂缓态，由人工逐项复核（跳过/仍检测）后再继续执行。
 """
 
 from __future__ import annotations
 
 import uuid
+from hashlib import sha256
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
@@ -20,10 +25,23 @@ from backend.infra.config import resolve_config_path
 router = APIRouter(tags=["batch"])
 
 
+class BatchDuplicateOut(BaseModel):
+    """单个重复文件的复核信息（submit 响应与批次 status 共用）。"""
+
+    task_id: str
+    image_name: str
+    content_sha256: str | None = None
+    kind: str  # history=与历史已检影像重复 | batch=批内重复
+    duplicate_of: str | None = None  # 批内原文件名或历史 image_id
+    history: dict | None = None  # kind=history 时的历史影像摘要
+
+
 class BatchSubmitOut(BaseModel):
     batch_id: str
     total: int
     estimated_sec: float
+    status: str = "running"  # running=已开始执行 | awaiting_review=查重命中待人工复核
+    duplicates: list[BatchDuplicateOut] = []
 
 
 class BatchTaskOut(BaseModel):
@@ -35,6 +53,9 @@ class BatchTaskOut(BaseModel):
     report_id: str | None = None
     joint_level: str | None = None
     need_review: bool | None = None
+    content_sha256: str | None = None
+    dup_kind: str | None = None
+    dup_ref: str | None = None
 
 
 class BatchStatusOut(BaseModel):
@@ -47,6 +68,7 @@ class BatchStatusOut(BaseModel):
     estimated_sec: float
     progress: float  # 0..1
     tasks: list[BatchTaskOut]
+    duplicates: list[BatchDuplicateOut] = []
 
 
 class CancelOut(BaseModel):
@@ -151,14 +173,19 @@ def submit_batch(
         "force": force,
     }
     items: list[BatchItem] = []
+    first_by_hash: dict[str, str] = {}  # 批内同内容首现表：hash → 原版文件名
     try:
         max_bytes = reg.config.upload.max_bytes
+        dedup_on = reg.config.batch.dedup
+        written: list[tuple[BatchItem, str]] = []  # (item, 文件 SHA256)
         for f in images:
             suffix = Path(f.filename or "upload.png").suffix.lower() or ".png"
             original_name = Path(f.filename or "upload.png").name
             target = batch_dir / f"{uuid.uuid4().hex}{suffix}"
-            # 分块写盘 + 累计计数，超过 upload.max_bytes 立即 413（与 staged_upload 行为一致）。
+            # 分块写盘 + 累计计数，超过 upload.max_bytes 立即 413（与 staged_upload 行为一致）；
+            # 同一遍流式更新 SHA256，查重无需再整读一遍文件。
             size = 0
+            digest = sha256()
             with target.open("wb") as fh:
                 while True:
                     chunk = f.file.read(1 << 20)
@@ -178,16 +205,42 @@ def submit_batch(
                                 "message": f"文件超过上限 {max_bytes} 字节: {original_name}",
                             },
                         )
+                    digest.update(chunk)
                     fh.write(chunk)
+            content_hash = digest.hexdigest()
+            item_options = dict(options)
+            item_options["content_sha256"] = content_hash  # 落库 images.content_hash
             items.append(
                 BatchItem(
                     image_path=target,
-                    options=dict(options),
+                    options=item_options,
                     image_name=original_name,
                     cleanup_dir=batch_dir,  # 批次完成后整体清理（P1-3）
+                    content_sha256=content_hash,
                 )
             )
-        batch_id = reg.batch_manager.submit(items)
+            written.append((items[-1], content_hash))
+
+        # 查重：先批内（同内容首次出现视为原版，其后为批内重复），再与历史
+        # 已检影像（content_hash 索引，一次 IN 批量查询）比对。历史重复优先
+        # 标注（信息更全：能看到首检记录）。命中任一重复 → 整批暂缓（hold），
+        # 等人工复核决定跳过/仍检测后再执行。
+        if dedup_on:
+            history_index = reg.repository.find_images_by_hashes([h for _, h in written])
+            for item, content_hash in written:
+                if content_hash in history_index:
+                    first = history_index[content_hash][0]  # created_at 升序 → 首检记录
+                    item.dup_kind, item.dup_ref, item.dup_history = (
+                        "history",
+                        first["image_id"],
+                        first,
+                    )
+                elif content_hash in first_by_hash:
+                    item.dup_kind, item.dup_ref = "batch", first_by_hash[content_hash]
+                else:
+                    first_by_hash[content_hash] = item.image_name or ""
+        hold = dedup_on and any(it.dup_kind for it in items)
+        batch_id = reg.batch_manager.submit(items, hold=hold)
     except HTTPException:
         # 413/415/422 等由本函数有意抛出，必须原样上抛，不可被下方 except 吞掉转 500。
         raise
@@ -197,11 +250,68 @@ def submit_batch(
             detail={"code": "BATCH_SUBMIT_FAILED", "message": str(exc)},
         ) from exc
 
+    duplicates: list[BatchDuplicateOut] = []
+    if hold:
+        snap = reg.batch_manager.status(batch_id) or {}
+        duplicates = [BatchDuplicateOut(**d) for d in snap.get("duplicates", [])]
     return BatchSubmitOut(
         batch_id=batch_id,
         total=len(items),
         estimated_sec=round(len(items) * reg.config.batch.per_image_estimate_sec, 1),
+        status="awaiting_review" if hold else "running",
+        duplicates=duplicates,
     )
+
+
+class DedupDecisionIn(BaseModel):
+    task_id: str
+    action: Literal["skip", "keep"] = "skip"  # skip=跳过不检测 | keep=人工确认后仍检测
+
+
+class DedupResolveIn(BaseModel):
+    """查重复核提交：只列重复任务的决定；未列出的重复任务按 skip 处理。"""
+
+    decisions: list[DedupDecisionIn] = []
+
+
+class DedupResolveOut(BaseModel):
+    ok: bool
+    skipped: int
+    kept: int
+
+
+@router.post("/batch/{batch_id}/dedup/resolve", response_model=DedupResolveOut)
+def resolve_batch_duplicates(
+    batch_id: str,
+    body: DedupResolveIn,
+    reg: Annotated[Registry, Depends(get_registry)],
+    operator: Annotated[str, Depends(get_operator_name)],
+) -> DedupResolveOut:
+    """人工查重复核：逐项决定重复文件跳过或仍检测，确认后批次继续执行。"""
+    try:
+        counts = reg.batch_manager.resolve_dups(
+            batch_id, {d.task_id: d.action for d in body.decisions}
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": f"batch not found: {batch_id}"},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "NOT_AWAITING_REVIEW", "message": str(exc)},
+        ) from exc
+    # 复核动作入不可变审计链（谁对哪批做出了何种处置）
+    reg.repository.append_audit(
+        actor=operator,
+        action="batch_dedup_resolve",
+        object_type="batch",
+        object_id=batch_id,
+        before=None,
+        after=counts,
+    )
+    return DedupResolveOut(ok=True, **counts)
 
 
 @router.get("/batch/{batch_id}", response_model=BatchStatusOut)
@@ -229,6 +339,9 @@ def batch_status(
                 report_id=result.get("report_id"),
                 joint_level=result.get("joint_level"),
                 need_review=bool(result.get("need_review")) if result else None,
+                content_sha256=t.get("content_sha256"),
+                dup_kind=t.get("dup_kind"),
+                dup_ref=t.get("dup_ref"),
             )
         )
     total = max(1, batch["total"])
@@ -243,6 +356,7 @@ def batch_status(
         estimated_sec=batch["estimated_sec"],
         progress=round(progress, 3),
         tasks=tasks,
+        duplicates=[BatchDuplicateOut(**d) for d in batch.get("duplicates", [])],
     )
 
 

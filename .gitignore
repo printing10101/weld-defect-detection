@@ -38,6 +38,8 @@ data/prelabels/
 backend/data/
 data/eval/.gate_work/
 data/eval/evidence/
+# 部署后评估的时间戳历史快照（每次运行落一份，只入库非时间戳的最新报告）
+data/eval/deployed_eval_*_2[0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9].json
 data/experiments/
 runs/
 backend/models/weights/*.onnx
@@ -89,6 +91,7 @@ data/.revoked_tokens.json
 # 私有资料（绝不入库）：用户自有底片/照片、竞赛文档、标准原文（受版权保护，
 # 不得转载分发）、本地运行时产物
 图片/
+定检/
 射线竞赛/
 承压设备射线检测缺陷自动识别系统评价方法.pdf
 measure_signals.json

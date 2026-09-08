@@ -7,7 +7,7 @@
  */
 import { createRouter, createWebHashHistory, type RouteRecordRaw } from "vue-router";
 import type { ViewId } from "../types/api";
-import { getToken } from "../services/authToken";
+import { getToken, isGuestMode } from "../services/authToken";
 import ArchiveView from "../views/ArchiveView.vue";
 import BatchView from "../views/BatchView.vue";
 import DeviceView from "../views/DeviceView.vue";
@@ -31,8 +31,9 @@ export const routes: RouteRecordRaw[] = [
 export function createAppRouter(history = createWebHashHistory()) {
   const router = createRouter({ history, routes });
   // 登录守卫（C-06/C-07）：未登录一律跳转登录页；已登录访问登录页回工作台。
+  // 访客模式（登录页"访客入口"）：免登录放行全部工作区（后端 guest_mode 放行接口）。
   router.beforeEach((to) => {
-    const authed = getToken() !== "";
+    const authed = getToken() !== "" || isGuestMode();
     if (!authed && to.name !== "login") return { name: "login" };
     if (authed && to.name === "login") return { name: "journey" };
     return true;

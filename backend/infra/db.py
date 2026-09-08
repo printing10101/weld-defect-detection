@@ -71,6 +71,8 @@ class ImageRecord(Base):
     secret_level: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # 定密依据（C-10）：变更密级时必须登记的依据（文件/条款号）
     classification_basis: Mapped[str | None] = mapped_column(String(256), default=None)
+    # 影像文件内容摘要（SHA256 hex，批量查重/历史比对索引）；历史数据迁移后为 NULL
+    content_hash: Mapped[str | None] = mapped_column(String(64), default=None, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
