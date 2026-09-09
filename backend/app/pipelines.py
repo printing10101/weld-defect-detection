@@ -33,6 +33,7 @@ from backend.domain.quantify import MaskRefineCfg, get_quantifier
 from backend.domain.recommend import recommend
 from backend.domain.review import ReviewDecision, ReviewRole, resolve_review
 from backend.domain.spacing import resolve_spacing as _resolve_spacing  # 单一真源（§T8/§6）
+from backend.domain.stamp import StampCfg, read_stamp
 from backend.domain.standards.tables.loader import disclaimer_for
 from backend.evaluation.gate_rejects import GateRejectStore
 from backend.infra.config import resolve_config_path
@@ -166,6 +167,7 @@ class InspectionPipeline:
         force: bool = False,
         witness: str | None = None,
         content_sha256: str | None = None,
+        batch_no: str | None = None,
     ) -> dict:
         """执行全链路并落库+生成报告，返回结果 dict。
 
@@ -405,6 +407,28 @@ class InspectionPipeline:
         # 质量门禁未达阈值且非阻断模式（block_on_quality=False）时仅告警，并入人工复核标记。
         need_review = bool(need_review or quality_warn)
 
+        # 5.5 底片印字识别（扫描日期/编号，正向/镜像）：作为底片性质落库供档案
+        # 检索/追溯。缺印字的处置分两种语义：
+        # - 单图评片（batch_no=None）：缺印字即转人工复核（确认底片身份）；
+        # - 批量评片（batch_no 非空）：缺印字**不**立即转复核，延迟到批次收尾
+        #   按批内印字占比裁决（Registry._apply_batch_stamp_policy）——大批底片
+        #   普遍无印字时豁免（缺印字是批次常态而非异常），占比达标才补标记。
+        # 任何异常已在 read_stamp 内降级，识别结论永不阻断评片主链路。
+        # （infra 配置段还含批量豁免字段，构造域层 StampCfg 时显式取识别相关项。）
+        _sc = reg.config.stamp
+        stamp = read_stamp(
+            eval_gray,
+            StampCfg(enabled=_sc.enabled, min_conf=_sc.min_conf, max_side=_sc.max_side),
+        )
+        stamp_deferred = batch_no is not None
+        stamp_need_review = bool(stamp.status == "missing" and not stamp_deferred)
+        if stamp_need_review:
+            basis = [
+                *basis,
+                "底片未识别到扫描日期/编号印字（正/镜像均未命中），需人工复核确认底片身份",
+            ]
+            need_review = True
+
         std_id = standard_id or reg.config.standard.default_id
         # 工业过渡路径：免责声明只依赖标准表（standard-level），与判定结果无关，
         # 故无论评级成功或熔断均统一生成（authorized_copy=false 时为强声明）。
@@ -456,6 +480,13 @@ class InspectionPipeline:
             "standard_version": std_version,
             # 文件内容摘要（批量查重/历史比对索引；单图路径未计算时为 None）
             "content_hash": content_sha256,
+            # 批量追溯归属 + 底片印字（扫描日期/编号）性质快照
+            "batch_no": batch_no,
+            "stamp_status": stamp.status,
+            "stamp_text": stamp.text,
+            "stamp_orientation": stamp.orientation,
+            "stamp_confidence": stamp.confidence,
+            "stamp_need_review": stamp_need_review,
         }
         # per_defect_grade 与 detections 按序对齐；长度不符说明 grader 契约被破坏，
         # 与其把级别错配到别的缺陷上（安全事故），不如整体退化为"无级别+需复核"。
@@ -551,7 +582,7 @@ class InspectionPipeline:
         dt = time.perf_counter() - t0
         _LOG.info(
             "inspection done image_id=%s level=%s defects=%d density_ok=%s iqi_pass=%s "
-            "evaluable=%s need_review=%s photo_mode=%s (%.1f ms)",
+            "evaluable=%s need_review=%s photo_mode=%s stamp=%s/%s (%.1f ms)",
             image_id,
             joint_level,
             len(quantified),
@@ -560,6 +591,8 @@ class InspectionPipeline:
             evaluable,
             need_review,
             photo_mode,
+            stamp.status,
+            stamp.orientation,
             dt * 1000,
         )
         return {
@@ -579,6 +612,7 @@ class InspectionPipeline:
             "disposition_label": disposition_label,
             "disposition_actions": disposition_actions,
             "pdf_path": pdf_path,
+            "stamp": stamp.summary(need_review=stamp_need_review),
         }
 
     def _gate_reject_store(self) -> GateRejectStore:

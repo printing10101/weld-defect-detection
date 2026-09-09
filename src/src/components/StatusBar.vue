@@ -43,18 +43,18 @@ function fmtTime(d: Date): string {
         class="lamp"
         :class="backend"
       />
-      {{ backend === "up" ? "就绪" : backend === "down" ? "后端未连接" : "正在连接后端" }}
+      {{ backend === "up" ? "系统就绪" : backend === "down" ? "推理服务未连接" : "正在连接推理服务" }}
     </div>
     <div class="cell sep">
-      后端 127.0.0.1:18773
+      服务端 127.0.0.1:18773
     </div>
     <div class="cell sep">
-      模型：<span
+      评定模型：<span
         :class="modelStatus === '就绪' ? 'ok' : 'warn'"
       >{{ modelStatus }}</span>
     </div>
     <div class="cell sep">
-      本地优先 · 数据不出机
+      本地化部署 · 数据不出机
     </div>
     <div class="spacer" />
     <div class="cell">

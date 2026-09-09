@@ -184,6 +184,12 @@ batch:
   dedup: bool                     # 批量上传查重：命中（批内/历史）则批次暂缓交人工复核
   max_retained_batches: int       # 内存保留终结批次上限（防长跑内存无界增长）
   max_retained_snapshot_files: int  # 磁盘快照保留上限（防 data/batch 磁盘无界增长）
+stamp:                            # 底片印字识别（扫描日期/编号，正/镜像）
+  enabled: bool                   # false=整体关闭（落库 stamp_status="off"）
+  min_conf: float                 # 命中日期/编号模式的最低 OCR 置信度
+  max_side: int                   # OCR 前长边上限（大底片降采样）
+  batch_flag_ratio: float         # 批内有印字占比低于该值 → 豁免缺印字人工复核
+  batch_flag_min: int             # 豁免规则适用的最小有效片数（小批量不豁免）
 backup:                           # S-12 备份增强
   interval_hours: float           # 自动备份间隔（小时）；0=关闭定期调度
   include_images: bool            # 备份是否纳入影像目录（逐文件 SM3 校验）

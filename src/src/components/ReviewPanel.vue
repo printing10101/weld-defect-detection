@@ -88,7 +88,7 @@ async function onAddDefect(): Promise<void> {
   if (r === null) return;
   const parts = newBox.value.split(/[,,\s]+/).filter(Boolean).map(Number);
   if (parts.length !== 4 || parts.some((v) => !Number.isFinite(v) || v < 0)) {
-    defectErr.value = "框坐标格式：x,y,w,h（非负数字）。";
+    defectErr.value = "检出框坐标格式应为 x,y,w,h（非负数字）。";
     return;
   }
   defectBusy.value = true;
@@ -99,7 +99,7 @@ async function onAddDefect(): Promise<void> {
       bbox_px: parts,
       reason: r,
     });
-    defectMsg.value = `已添加，综合级别 ${out.joint_level ?? "需人工"}（缺陷 ${out.defect_count}）`;
+    defectMsg.value = `已补录缺陷，综合评定级别 ${out.joint_level ?? "待人工评定"}（缺陷检出 ${out.defect_count} 处）`;
     await reloadDefects();
   } catch (e) {
     defectErr.value = toErrorMessage(e);
@@ -115,7 +115,7 @@ async function onEditClass(row: DefectRow, classId: number): Promise<void> {
   defectErr.value = null;
   try {
     const out = await editReviewDefect(row.id, { class_id: classId, reason: r });
-    defectMsg.value = `已修改类型，综合级别 ${out.joint_level ?? "需人工"}`;
+    defectMsg.value = `已改判缺陷类别，综合评定级别 ${out.joint_level ?? "待人工评定"}`;
     await reloadDefects();
   } catch (e) {
     defectErr.value = toErrorMessage(e);
@@ -141,7 +141,7 @@ async function onDeleteDefectConfirmed(): Promise<void> {
   defectErr.value = null;
   try {
     const out = await deleteReviewDefect(row.id, r);
-    defectMsg.value = `已删除，综合级别 ${out.joint_level ?? "需人工"}（缺陷 ${out.defect_count}）`;
+    defectMsg.value = `已删除缺陷记录，综合评定级别 ${out.joint_level ?? "待人工评定"}（缺陷检出 ${out.defect_count} 处）`;
     await reloadDefects();
   } catch (e) {
     defectErr.value = toErrorMessage(e);
@@ -154,7 +154,7 @@ async function onSubmit(): Promise<void> {
   error.value = null;
   outcome.value = null;
   if (!reviewer.value.trim()) {
-    error.value = "请填写评片员姓名/工号。";
+    error.value = "评片人员姓名/工号不能为空。";
     return;
   }
   submitting.value = true;
@@ -184,7 +184,7 @@ async function onSubmit(): Promise<void> {
       <span
         class="nm"
         style="color: var(--amber)"
-      >人工复核（初评/复评/仲裁）</span>
+      >人工复核（初评 / 复评 / 仲裁）</span>
       <span
         class="st"
         style="color: var(--amber)"
@@ -196,31 +196,31 @@ async function onSubmit(): Promise<void> {
           class="field grow"
           style="margin-top: 0"
         >
-          <label for="rv">评片员（当前登录账号）<span class="req">*</span></label>
+          <label for="rv">评片人员（当前登录账号）<span class="req">*</span></label>
           <input
             id="rv"
             v-model="reviewer"
             readonly
-            title="复核归属当前登录账号（三员分岗防冒名）"
+            title="复核记录归属当前登录账号（三员分岗防冒名）"
           >
         </div>
         <div
           class="field grow"
           style="margin-top: 0"
         >
-          <label for="rr">角色</label>
+          <label for="rr">复核角色</label>
           <select
             id="rr"
             v-model="role"
           >
             <option value="initial">
-              初评 initial
+              初评（initial）
             </option>
             <option value="secondary">
-              复评 secondary
+              复评（secondary）
             </option>
             <option value="arbitrator">
-              仲裁 arbitrator
+              仲裁（arbitrator）
             </option>
           </select>
         </div>
@@ -228,7 +228,7 @@ async function onSubmit(): Promise<void> {
           class="field grow"
           style="margin-top: 0"
         >
-          <label for="rl">复核综合级别（可选）</label>
+          <label for="rl">复核质量级别（选填）</label>
           <select
             id="rl"
             v-model="overallLevel"
@@ -252,7 +252,7 @@ async function onSubmit(): Promise<void> {
         </div>
       </div>
       <div class="field">
-        <label for="rn">备注（可选）</label>
+        <label for="rn">复核意见（选填）</label>
         <input
           id="rn"
           v-model="note"
@@ -265,10 +265,10 @@ async function onSubmit(): Promise<void> {
         :disabled="submitting"
         @click="onSubmit"
       >
-        {{ submitting ? "提交中…" : "提交复核" }}
+        {{ submitting ? "提交中…" : "提交复核结论" }}
       </button>
       <div class="section-h">
-        缺陷管理（增删改后自动重评级）
+        缺陷管理（增删改后系统自动重新评级）
       </div>
       <button
         class="btn"
@@ -286,7 +286,7 @@ async function onSubmit(): Promise<void> {
           <input
             id="dfr"
             v-model="reason"
-            placeholder="如：复核确认为裂纹 / 补录漏检气孔 / 确认为伪影像"
+            placeholder="如：复核确认为裂纹 / 补录漏检气孔 / 判定为伪影像"
           >
         </div>
         <table
@@ -294,7 +294,7 @@ async function onSubmit(): Promise<void> {
           class="dtable"
         >
           <thead>
-            <tr><th>类型</th><th>框 [x,y,w,h]</th><th>来源</th><th>操作</th></tr>
+            <tr><th>缺陷类型</th><th>检出框 [x,y,w,h]</th><th>来源</th><th>操作</th></tr>
           </thead>
           <tbody>
             <tr
@@ -317,7 +317,7 @@ async function onSubmit(): Promise<void> {
                 </select>
               </td>
               <td>{{ row.bbox_px.map((v: number) => Math.round(v)).join(", ") }}</td>
-              <td>{{ row.source === "manual" ? "人工" : "检测" }}</td>
+              <td>{{ row.source === "manual" ? "人工补录" : "系统检出" }}</td>
               <td>
                 <button
                   class="btn danger"
@@ -335,7 +335,7 @@ async function onSubmit(): Promise<void> {
           v-else
           class="lede"
         >
-          该影像暂无缺陷记录。
+          该影像暂无缺陷检出记录。
         </div>
         <div class="row">
           <div class="field">
@@ -354,7 +354,7 @@ async function onSubmit(): Promise<void> {
             </select>
           </div>
           <div class="field grow">
-            <label for="dfb">框坐标 x,y,w,h（像素）</label>
+            <label for="dfb">检出框坐标 x,y,w,h（像素）</label>
             <input
               id="dfb"
               v-model="newBox"
@@ -367,7 +367,7 @@ async function onSubmit(): Promise<void> {
             :disabled="defectBusy"
             @click="onAddDefect"
           >
-            添加缺陷
+            补录缺陷
           </button>
         </div>
         <div
@@ -397,37 +397,37 @@ async function onSubmit(): Promise<void> {
         class="kv"
       >
         <div class="k">
-          一致性 consensus
+          对评一致性（consensus）
         </div>
         <div class="v">
-          {{ outcome.consensus ? "达成共识" : "未达成" }}
+          {{ outcome.consensus ? "已达成" : "未达成" }}
         </div>
         <div class="k">
-          κ 系数
+          一致性系数 κ
         </div>
         <div class="v">
           {{ outcome.kappa.toFixed(3) }}
         </div>
         <div class="k">
-          阶段
+          复核阶段
         </div>
         <div class="v">
           {{ outcome.stage }}
         </div>
         <div class="k">
-          最终级别
+          最终质量级别
         </div>
         <div class="v">
           {{ outcome.joint_level ?? "—" }}
         </div>
         <div class="k">
-          需仲裁
+          是否需仲裁
         </div>
         <div class="v">
           {{ outcome.needs_arbitration ? "是" : "否" }}
         </div>
         <div class="k">
-          复核次数
+          累计复核次数
         </div>
         <div class="v">
           {{ outcome.review_count }}
@@ -438,7 +438,7 @@ async function onSubmit(): Promise<void> {
   <ConfirmDialog
     :open="deleteTarget !== null"
     title="删除缺陷确认"
-    message="将删除该缺陷记录并触发重新评级、重出报告；操作入审计链且不可撤销。确定删除？"
+    message="删除该缺陷记录后将触发重新评级并重新签发报告；本操作记入审计链，不可撤销。确认删除？"
     confirm-text="删除"
     danger
     @confirm="onDeleteDefectConfirmed"

@@ -16,6 +16,17 @@
       CopyFiles /SILENT "$INSTDIR\data" "$APPDATA\com.scandetection.sd"
       DetailPrint "已迁移旧版业务数据到 %APPDATA%\com.scandetection.sd\data"
   sd_post_done:
+  ; 字节码预编译（首启加速）：壳侧以 PYTHONPYCACHEPREFIX=%TEMP%\ScanDetection\pycache
+  ; 运行后端（缓存不进安装目录，卸载清单干净）。安装期按同一前缀预编译一次，
+  ; 首次启动即免去全量源码重编译（重依赖导入从分钟级降到秒级）。
+  ; 预编译失败不阻断安装——首次启动自会边导入边编译。
+  IfFileExists "$INSTDIR\python_embed\python.exe" 0 sd_precomp_done
+    CreateDirectory "$TEMP\ScanDetection"
+    DetailPrint "正在预编译 Python 字节码（约 1~2 分钟，加速首次启动）…"
+    nsExec::ExecToLog 'cmd /c set PYTHONPYCACHEPREFIX=$TEMP\ScanDetection\pycache&& "$INSTDIR\python_embed\python.exe" -m compileall -q "$INSTDIR\backend" "$INSTDIR\python_embed\Lib\site-packages"'
+    Pop $0
+    DetailPrint "字节码预编译结束（退出码 $0，非零不影响使用）"
+  sd_precomp_done:
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL

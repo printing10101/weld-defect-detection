@@ -79,6 +79,10 @@ def _test_env(auth_table: Path) -> None:
     os.environ.setdefault("SCAN_GATE__ALLOW_8BIT", "true")
     # 留档目录同步隔离（默认 data/rejects 相对安装根目录，会写进项目 data/）
     os.environ.setdefault("SCAN_GATE__REJECTS_DIR", str(_TMP_ROOT / "rejects"))
+    # 底片印字识别（0011）：合成夹具均无日期/编号印字，单图路径"缺印字转复核"
+    # 会打翻既有 need_review 断言——测试默认关闭（落库 stamp_status="off"），
+    # 真实链路由 test_stamp.py 专项覆盖（显式开启 config.stamp.enabled）。
+    os.environ.setdefault("SCAN_STAMP__ENABLED", "false")
     # 静态加密本地密钥文件同步隔离（默认 CWD 相对 data/.crypto_key，会写进
     # 项目 data/ 且跨测试共享密钥状态）；各测试可用 monkeypatch 覆盖做专项。
     os.environ.setdefault("SCAN_CRYPTO_KEY_FILE", str(_TMP_ROOT / "crypto_key"))

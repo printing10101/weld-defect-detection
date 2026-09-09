@@ -6,11 +6,12 @@
  * 即看，停留本页时新到影像自动上屏，无需重新选文件。
  * 数据诚实性：仅显示用户真实上传/选择的影像，不预置任何样例。
  */
-import { onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import FilmViewer from "../components/FilmViewer.vue";
 import { imagePreviewUrl } from "../services/api";
 import { IMAGE_ACCEPT } from "../services/imageFormats";
 import { useViewerFilmsStore, type ViewerFilm } from "../stores/viewerFilms";
+import { stampBadge } from "../utils/filmStamp";
 import type { Transform } from "../types/api";
 
 const store = useViewerFilmsStore();
@@ -84,7 +85,7 @@ function loadFromArchive(): void {
   const id = archiveId.value.trim();
   archiveErr.value = null;
   if (!id) {
-    archiveErr.value = "请输入影像编号（可在档案检索中复制）。";
+    archiveErr.value = "请输入影像编号（可在「检测档案」中复制）。";
     return;
   }
   setPane("A", { url: imagePreviewUrl(id), name: `档案影像 ${id}`, owned: false });
@@ -116,28 +117,58 @@ function clear(which: "A" | "B"): void {
 function extOf(name: string): string {
   return (name.split(".").pop() ?? "?").toUpperCase();
 }
+
+/* ── 批量检测标注：有问题的底片由批量流程回填缺陷框，这里下发到查看器叠加
+ * 显示；无问题底片无标注条目，查看器不画任何框。 ── */
+const paneAAnnotations = computed(() => store.annotationsOf(paneA.value?.filmId));
+const paneBAnnotations = computed(() => store.annotationsOf(paneB.value?.filmId));
+
+function annotCount(filmId: number): number {
+  return store.annotationsOf(filmId)?.boxes.length ?? 0;
+}
+
+/* ── 底片印字性质（扫描日期/编号，正/镜像）：批量完成后由 BatchView 回填进
+ * store，这里在主片文件名行与缩略图上展示；无回填数据（单张上传未识别）不显示。 ── */
+const paneAStamp = computed(() => stampBadge(store.stampOf(paneA.value?.filmId)));
+
+function thumbStamp(filmId: number) {
+  const info = store.stampOf(filmId);
+  if (!info) return null;
+  return stampBadge(info);
+}
 </script>
 
 <template>
   <div>
     <h1 class="title-zine">
-      底片查看
+      底片观察
     </h1>
     <div class="lede">
-      单张/批量上传的影像自动同步到这里；缩放 / 平移 / 旋转 / 镜像 / 正反片转换 / 窗位窗宽 / 锐化 / 浮雕
+      单幅/批量导入的影像自动同步至本工作区；支持缩放、平移、旋转、镜像、正反片（反相）转换、窗宽窗位调节、锐化与浮雕增强
       （DB50/T 1807 §6.1.5）；快捷键：+ − r R i f 1 0 方向键
     </div>
     <div class="viewer-controls">
       <button @click="pick('A')">
-        {{ paneA ? "更换" : "选择" }}主片…
+        {{ paneA ? "更换" : "载入" }}主片…
       </button>
       <span
         v-if="paneA"
         class="fname"
-      >{{ paneA.name }} <a
-        href="#"
-        @click.prevent="clear('A')"
-      >移除</a></span>
+      >{{ paneA.name }}
+        <em
+          v-if="paneAStamp"
+          class="fstamp"
+          :class="`fstamp-${paneAStamp.cls}`"
+          :title="paneAStamp.title"
+        >{{ paneAStamp.label }}</em>
+        <em
+          v-if="paneAAnnotations"
+          class="fdef"
+        >检出缺陷 {{ paneAAnnotations.boxes.length }} 处（已标注）</em>
+        <a
+          href="#"
+          @click.prevent="clear('A')"
+        >移除</a></span>
       <input
         v-model="archiveId"
         class="aid"
@@ -145,7 +176,7 @@ function extOf(name: string): string {
         @keyup.enter="loadFromArchive"
       >
       <button @click="loadFromArchive">
-        从档案加载
+        从检测档案载入
       </button>
       <span
         v-if="archiveErr"
@@ -159,12 +190,12 @@ function extOf(name: string): string {
       </button>
       <template v-if="dualMode">
         <button @click="pick('B')">
-          {{ paneB ? "更换" : "选择" }}对比片…
+          {{ paneB ? "更换" : "载入" }}对比片…
         </button>
         <label class="chk"><input
           v-model="synced"
           type="checkbox"
-        >联动</label>
+        >视图联动</label>
       </template>
     </div>
 
@@ -174,7 +205,7 @@ function extOf(name: string): string {
       class="strip-wrap"
     >
       <div class="strip-head">
-        已同步影像 {{ store.count }} 张<span class="faint">（来自单张/批量上传，最新在前）</span>
+        已同步影像 {{ store.count }} 幅<span class="faint">（来自单幅/批量导入，最新优先）</span>
         <a
           href="#"
           class="clear"
@@ -201,10 +232,21 @@ function extOf(name: string): string {
             <span
               v-else
               class="noimg"
-              title="WebView 无法直接解码该格式，点击加载会提示先经后端转档"
+              title="该格式需经后端转档后预览（WebView 不支持直接解码）"
             >{{ extOf(f.name) }}</span>
           </span>
           <span class="tname">{{ f.name }}</span>
+          <span
+            v-if="thumbStamp(f.id)"
+            class="tstamp"
+            :class="`tstamp-${thumbStamp(f.id)!.cls}`"
+            :title="thumbStamp(f.id)!.title"
+          >{{ thumbStamp(f.id)!.label }}</span>
+          <span
+            v-if="annotCount(f.id) > 0"
+            class="tdef"
+            title="批量检出缺陷，上屏后叠加标注框"
+          >缺陷 {{ annotCount(f.id) }}</span>
           <button
             v-if="dualMode"
             class="tb"
@@ -227,14 +269,16 @@ function extOf(name: string): string {
     <div :class="dualMode ? 'dual' : 'single'">
       <FilmViewer
         :src="paneA?.url ?? null"
-        :label="paneA?.name || '未加载影像'"
+        :label="paneA?.name || '未载入影像'"
+        :annotations="paneAAnnotations"
         :sync-transform="synced ? lastTransform : null"
         @transform-changed="onTransform"
       />
       <FilmViewer
         v-if="dualMode"
         :src="paneB?.url ?? null"
-        :label="paneB?.name || '未加载对比片'"
+        :label="paneB?.name || '未载入对比片'"
+        :annotations="paneBAnnotations"
         :sync-transform="synced ? lastTransform : null"
         @transform-changed="onTransform"
       />
@@ -261,6 +305,65 @@ function extOf(name: string): string {
 .fname a {
   color: #2c5aa0;
   margin-left: 4px;
+}
+.fname .fdef {
+  font-style: normal;
+  color: #b03030;
+  margin: 0 6px 0 8px;
+  font-weight: 600;
+}
+.fstamp {
+  font-style: normal;
+  margin: 0 0 0 8px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.fstamp-ok {
+  background: rgba(42, 143, 74, 0.14);
+  color: #1e7a3d;
+}
+.fstamp-warn {
+  background: rgba(204, 51, 51, 0.12);
+  color: #b03030;
+  font-weight: 600;
+}
+.fstamp-muted {
+  background: rgba(120, 140, 180, 0.15);
+  color: #6a7b99;
+}
+.tstamp {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tstamp-ok {
+  background: rgba(42, 143, 74, 0.9);
+  color: #fff;
+}
+.tstamp-warn {
+  background: rgba(176, 48, 48, 0.92);
+  color: #fff;
+}
+.tstamp-muted {
+  background: rgba(120, 140, 180, 0.5);
+  color: #fff;
+}
+.tdef {
+  display: inline-block;
+  margin-top: 3px;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(176, 48, 48, 0.92);
+  color: #fff;
+  white-space: nowrap;
 }
 .chk {
   font-size: 12px;

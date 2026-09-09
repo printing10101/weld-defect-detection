@@ -51,8 +51,8 @@ describe("BatchProgress", () => {
   it("渲染逐任务状态标签与级别", () => {
     const w = mount(BatchProgress, { props: { status: makeStatus() } });
     expect(w.text()).toContain("a.png");
-    expect(w.text()).toContain("完成");
-    expect(w.text()).toContain("处理中");
+    expect(w.text()).toContain("已完成");
+    expect(w.text()).toContain("评定中");
     expect(w.text()).toContain("级别 II");
   });
 
@@ -109,9 +109,42 @@ describe("BatchProgress", () => {
 
   it("归档入口始终可用并发出 archive", async () => {
     const w = mount(BatchProgress, { props: { status: makeStatus() } });
-    const archive = w.findAll("button").find((b) => b.text().includes("档案检索"));
+    const archive = w.findAll("button").find((b) => b.text().includes("检测档案"));
     expect(archive).toBeTruthy();
     await archive!.trigger("click");
     expect(w.emitted("archive")).toHaveLength(1);
+  });
+
+  // 批量标注约定：有缺陷的底片红标「缺陷 N 处」，无缺陷底片不标注
+  it("检出缺陷的任务红标缺陷数，无缺陷任务不标注", () => {
+    const status = makeStatus({
+      tasks: [
+        {
+          task_id: "t1",
+          image_name: "a.png",
+          status: "done",
+          error: null,
+          image_id: "i1",
+          report_id: "r1",
+          joint_level: "III",
+          need_review: false,
+          defect_count: 3,
+        },
+        {
+          task_id: "t2",
+          image_name: "b.png",
+          status: "done",
+          error: null,
+          image_id: "i2",
+          report_id: "r2",
+          joint_level: "I",
+          need_review: false,
+          defect_count: 0,
+        },
+      ],
+    });
+    const w = mount(BatchProgress, { props: { status } });
+    expect(w.text()).toContain("缺陷 3 处");
+    expect(w.text()).not.toContain("缺陷 0 处");
   });
 });

@@ -23,11 +23,11 @@ const operator = computed(() => workspace.operator);
 const helpModal = ref<"none" | "shortcuts" | "about">("none");
 
 const TABS: { id: ViewId; label: string }[] = [
-  { id: "journey", label: "单张检测" },
-  { id: "batch", label: "批量检测" },
-  { id: "archive", label: "档案检索" },
+  { id: "journey", label: "单幅评定" },
+  { id: "batch", label: "批量评定" },
+  { id: "archive", label: "检测档案" },
   { id: "device", label: "设备标定" },
-  { id: "viewer", label: "底片查看" },
+  { id: "viewer", label: "底片观察" },
   { id: "std-eval", label: "系统评价" },
 ];
 function goto(v: ViewId): void {
@@ -35,7 +35,7 @@ function goto(v: ViewId): void {
 }
 
 function editOperator(): void {
-  const name = window.prompt("操作员姓名（用于报告签名与审计留痕）", operator.value);
+  const name = window.prompt("检测人员姓名（用于报告签署与审计追溯）", operator.value);
   if (name === null) return; // 取消
   workspace.setOperator(name);
 }
@@ -159,11 +159,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             <tbody>
               <tr><td>打开影像</td><td>Ctrl+O</td></tr>
               <tr><td>批量导入</td><td>Ctrl+Shift+O</td></tr>
-              <tr><td>单张检测</td><td>Ctrl+1</td></tr>
-              <tr><td>批量检测</td><td>Ctrl+2</td></tr>
-              <tr><td>档案检索</td><td>Ctrl+3</td></tr>
+              <tr><td>单幅评定</td><td>Ctrl+1</td></tr>
+              <tr><td>批量评定</td><td>Ctrl+2</td></tr>
+              <tr><td>检测档案</td><td>Ctrl+3</td></tr>
               <tr><td>设备标定</td><td>Ctrl+4</td></tr>
-              <tr><td>底片查看</td><td>Ctrl+5</td></tr>
+              <tr><td>底片观察</td><td>Ctrl+5</td></tr>
               <tr><td>系统评价</td><td>Ctrl+6</td></tr>
               <tr><td>退出</td><td>Alt+F4</td></tr>
             </tbody>
@@ -178,11 +178,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             射线焊缝缺陷智能检测系统
           </p>
           <p class="ver">
-            版本 0.1.0 · 本地优先
+            版本 0.1.0 · 本地化部署
           </p>
           <p class="ver">
-            依据 NB/T47013.2-2015 进行焊缝缺陷智能评定<br>
-            检测数据全程本地处理，不联网上传
+            依据 NB/T 47013.2-2015 执行焊缝缺陷智能评定<br>
+            检测数据全程本地化处理，不经外部网络传输
           </p>
         </div>
         <div class="d-foot">

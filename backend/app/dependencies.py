@@ -280,9 +280,59 @@ class Registry:
             batch_dir=_resolve_path(str(Path(self.config.paths.data_dir) / "batch")),
             max_retained_batches=self.config.batch.max_retained_batches,
             max_retained_snapshot_files=self.config.batch.max_retained_snapshot_files,
+            on_finished=self._apply_batch_stamp_policy,
         )
         bm._load_existing()
         return bm
+
+    def _apply_batch_stamp_policy(self, batch_id: str, results: list[dict]) -> dict | None:
+        """批次收尾的底片印字占比裁决（缺印字复核的批量豁免规则）。
+
+        用户规则：大批底片普遍没有日期/编号印字时（哪怕个别有），缺印字是
+        批次常态而非异常，不再逐张转人工复核；已识别到的印字仍照常落库供查阅。
+        - 批内有效片（present+missing）数 ≥ stamp.batch_flag_min 且有印字占比
+          < stamp.batch_flag_ratio → 豁免（不动库，仅记审计与批次摘要）；
+        - 否则（占比达标或小批量）→ 把缺印字影像补上复核标记（延迟合并）。
+        返回摘要 dict（写入批次快照随 status 下发）；无可裁决数据返回 None。
+        """
+        stamps = [r.get("stamp") or {} for r in results if isinstance(r, dict)]
+        evaluated = [s for s in stamps if s.get("status") in ("present", "missing")]
+        if not evaluated:
+            return None
+        present = sum(1 for s in evaluated if s.get("status") == "present")
+        ratio = present / len(evaluated)
+        cfg = self.config.stamp
+        suppressed = len(evaluated) >= cfg.batch_flag_min and ratio < cfg.batch_flag_ratio
+        flagged = 0
+        if suppressed:
+            _LOG.info(
+                "batch %s stamp policy: suppressed (%d/%d present < %.0f%%)",
+                batch_id,
+                present,
+                len(evaluated),
+                cfg.batch_flag_ratio * 100,
+            )
+        else:
+            flagged = self.repository.flag_missing_stamps(batch_id)
+        summary = {
+            "evaluated": len(evaluated),
+            "present": present,
+            "ratio": round(ratio, 3),
+            "suppressed": suppressed,
+            "flagged": flagged,
+        }
+        try:
+            self.repository.append_audit(
+                actor="system",
+                action="batch_stamp_policy",
+                object_type="batch",
+                object_id=batch_id,
+                before=None,
+                after=summary,
+            )
+        except Exception as exc:  # noqa: BLE001 - 审计失败不影响裁决结果
+            _LOG.warning("batch_stamp_policy 审计落库失败: %s", exc)
+        return summary
 
     def _build_syncer(self):
         """装配端边云同步适配器：按 SyncCfg.kind 选择 local / http。

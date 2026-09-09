@@ -25,11 +25,11 @@ const running = () => props.status === "running";
   <div>
     <div class="proc-head">
       <div>
-        <span style="font-size: 11px; color: var(--ink-faint)">已耗时</span>
+        <span style="font-size: 11px; color: var(--ink-faint)">已运行</span>
         <span class="clock">{{ fmt(elapsedMs) }}</span>
       </div>
       <div class="expect">
-        预计 15–30 秒 · 请求进行中，请勿关闭
+        预计耗时 15–30 秒 · 评定进行中，请勿关闭窗口
       </div>
     </div>
 
@@ -42,7 +42,7 @@ const running = () => props.status === "running";
       >
         <span class="idx">{{ String(i + 1).padStart(2, "0") }}</span>
         <span class="nm">{{ name }}</span>
-        <span class="st">{{ running() ? "请求中" : "失败" }}</span>
+        <span class="st">{{ running() ? "执行中" : "失败" }}</span>
       </div>
     </div>
 
@@ -50,16 +50,16 @@ const running = () => props.status === "running";
       v-if="running()"
       class="tip"
     >
-      <span class="spin" />正在向后端提交影像并等待真实处理结果…
+      <span class="spin" />正在向本地推理服务提交底片并等待评定结果…
     </p>
     <p
       v-else
       class="tip"
     >
-      <span style="color: var(--signal)">✕ 处理失败：{{ errorMessage }}</span>
+      <span style="color: var(--signal)">✕ 评定失败：{{ errorMessage }}</span>
     </p>
     <div class="leave">
-      你可以在等待时切换到「档案检索」查看历史；本次结果会自动归档到本地。
+      等待期间可切换至「检测档案」查阅历史记录；评定结果将自动归档至本地数据库。
     </div>
 
     <button
@@ -68,7 +68,7 @@ const running = () => props.status === "running";
       type="button"
       @click="emit('retry')"
     >
-      ← 返回重试
+      ← 返回并重试
     </button>
   </div>
 </template>

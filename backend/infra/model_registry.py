@@ -36,14 +36,31 @@ def _resolve(p: str) -> str:
     依次尝试 安装根 → backend 包根（打包布局下权重随 backend 资源分发在
     ``<安装根>/backend/models/weights``，仅试安装根会漏扫注册表）；均未命中时
     锚定安装根返回确定路径，报错时给出期望位置而非随 CWD 漂移的相对路径。
+
+    锚点选择优先"含权重文件的目录"而非"仅存在的目录"：旧版打包曾把
+    ``<安装根>/models/weights`` 留成空目录，`exists()` 恒真会让注册表永远
+    扫描空目录（mark_active_by_uri 反复告警"权重目录中未找到"）；含
+    _SUFFIXES 权重文件的锚点才是真正的权重目录。
     """
     if os.path.isabs(p):
         return p
+
+    def _contains_weights(d: Path) -> bool:
+        try:
+            return d.is_dir() and any(
+                child.suffix.lower() in _SUFFIXES for child in d.iterdir()
+            )
+        except OSError:
+            return False
+
+    fallback: str | None = None
     for anchor in (_INSTALL_ROOT, _BACKEND_ROOT):
         candidate = anchor / p
-        if candidate.exists():
+        if _contains_weights(candidate):
             return str(candidate)
-    return str(_INSTALL_ROOT / p)
+        if fallback is None and candidate.exists():
+            fallback = str(candidate)
+    return fallback if fallback is not None else str(_INSTALL_ROOT / p)
 
 
 @dataclass

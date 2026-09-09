@@ -73,6 +73,15 @@ class ImageRecord(Base):
     classification_basis: Mapped[str | None] = mapped_column(String(256), default=None)
     # 影像文件内容摘要（SHA256 hex，批量查重/历史比对索引）；历史数据迁移后为 NULL
     content_hash: Mapped[str | None] = mapped_column(String(64), default=None, index=True)
+    # 底片印字（扫描日期/编号）识别快照（0011）：作为底片性质供档案检索/追溯。
+    # status: present=识别到 | missing=未识别到 | unavailable=引擎不可用 | off=未启用
+    stamp_status: Mapped[str | None] = mapped_column(String(16), default=None)
+    stamp_text: Mapped[str | None] = mapped_column(String(128), default=None)
+    # normal=正向 | mirrored=镜像（背面扫描）；仅 present 时有值
+    stamp_orientation: Mapped[str | None] = mapped_column(String(8), default=None)
+    stamp_confidence: Mapped[float | None] = mapped_column(Float, default=None)
+    # 缺印字触发的复核标记：单图即时判定；批量场景延迟到批次收尾按印字占比裁决后回填
+    stamp_need_review: Mapped[bool] = mapped_column(default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 

@@ -41,23 +41,18 @@ onUnmounted(() => {
   <LoginView v-if="route.name === 'login'" />
   <AppShell v-else />
 
-  <!-- 全局状态横幅：离线（红）优先于模型加载中（琥珀）；恢复后自动隐藏（§优化 F18） -->
+  <!-- 全局状态横幅：离线（红）优先于模型加载中（琥珀）；恢复后自动隐藏（§优化 F18）。
+       登录页同样显示——冷启动导入阶段（/health 不可达）用户停在登录页，
+       没有横幅会误以为"后端没启动"。 -->
   <transition name="fade">
-    <div
-      v-if="backend.backendDown && route.name !== 'login'"
-      class="offline-banner"
-      role="alert"
-    >
+    <div v-if="backend.backendDown" class="offline-banner" role="alert">
       <span class="dot" />
-      后端正在启动或未连接，正在自动重试…（首次启动加载模型可能需要 1~2 分钟）
+      推理服务正在启动或未连接，系统自动重试中…（冷启动需导入推理依赖，可能需要
+      1~3 分钟，请保持窗口开启）
     </div>
-    <div
-      v-else-if="backend.modelLoading && route.name !== 'login'"
-      class="offline-banner loading"
-      role="status"
-    >
+    <div v-else-if="backend.modelLoading" class="offline-banner loading" role="status">
       <span class="dot" />
-      模型加载中，检测功能稍后可用（浏览档案不受影响）…
+      评定模型加载中，评定功能稍后可用（档案查阅不受影响）…
     </div>
   </transition>
 </template>

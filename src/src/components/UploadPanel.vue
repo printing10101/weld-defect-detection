@@ -33,11 +33,11 @@ const isDicom = computed(() => {
 function onPick(picked: File): void {
   const ext = picked.name.split(".").pop()?.toLowerCase() ?? "";
   if (!(FILE_EXTS as readonly string[]).includes(ext)) {
-    fileErr.value = `不支持 .${ext}：请提供 DICOM(.dcm) 或常见图像格式（JPG/PNG/BMP/GIF/WebP/TIFF/HEIC 等）。`;
+    fileErr.value = `不支持的格式 .${ext}：请提供 DICOM(.dcm) 或常见图像格式（JPG/PNG/BMP/GIF/WebP/TIFF/HEIC 等）。`;
     return;
   }
   if (picked.size > MAX_BYTES) {
-    fileErr.value = `文件 ${(picked.size / 1024 / 1024).toFixed(1)}MB 超过 50MB 上限，请压缩后重试。`;
+    fileErr.value = `文件 ${(picked.size / 1024 / 1024).toFixed(1)}MB 超过 50MB 上限，请压缩后重新导入。`;
     return;
   }
   fileErr.value = null;
@@ -68,11 +68,11 @@ const inputEl = ref<HTMLInputElement | null>(null);
 function onSubmit(): void {
   thicknessErr.value = null;
   if (!file.value) {
-    fileErr.value = "请先选择影像文件。";
+    fileErr.value = "请先导入射线底片影像。";
     return;
   }
   if (!baseMetalThicknessMm.value.trim()) {
-    thicknessErr.value = "母材厚度 T 必填（评级依据）；不填则评级将被锁定。";
+    thicknessErr.value = "母材公称厚度 T 为必填项（分级评定依据）；缺省时级别评定将被锁定。";
     return;
   }
   const fd = new FormData();
@@ -123,7 +123,7 @@ defineExpose({ reset });
     <div class="guide">
       <div class="g">
         <div class="n">
-          一 · 准备底片
+          一 · 底片导入
         </div>
         <div class="t">
           拖入或选择射线底片。支持 DICOM(.dcm) 及常见图像格式（JPG/PNG/BMP/GIF/WebP/TIFF/HEIC 等）。
@@ -131,18 +131,18 @@ defineExpose({ reset });
       </div>
       <div class="g">
         <div class="n">
-          二 · 填写参数
+          二 · 工艺参数录入
         </div>
         <div class="t">
-          像素标定有默认值；母材厚度 T 是评级依据，必填。缺省时仅出图谱、评级锁定。
+          空间像素标定有默认值；母材公称厚度 T 为分级评定必备参数。缺省时仅输出缺陷图谱，级别评定锁定。
         </div>
       </div>
       <div class="g">
         <div class="n">
-          三 · 查看报告
+          三 · 评定报告
         </div>
         <div class="t">
-          提交后等待真实处理（15–30 秒），得到级别结论、缺陷解读与操作建议。
+          提交后由本地推理流水线评定（约 15–30 秒），输出质量级别结论、缺陷解读与处置建议。
         </div>
       </div>
     </div>
@@ -156,7 +156,7 @@ defineExpose({ reset });
           <span class="chip on">HEIC/AVIF</span>
         </div>
         <div class="hint">
-          常见图像与 DICOM 均可导入，自动转为灰度处理。文件 ≤ 50MB。
+          常见图像与 DICOM 均可导入，系统自动转换为灰度影像处理。单文件 ≤ 50MB。
         </div>
         <div
           class="drop"
@@ -165,10 +165,10 @@ defineExpose({ reset });
           @drop="onDrop"
         >
           <div class="big">
-            拖入底片，或点击选择
+            拖入射线底片至此处，或点击选择文件
           </div>
           <div class="hint">
-            影像只在本机处理，不上传任何外部服务器
+            影像全程本机处理，不经任何外部网络传输
           </div>
         </div>
         <input
@@ -206,24 +206,24 @@ defineExpose({ reset });
 
       <div class="grow">
         <div class="field">
-          <label for="spacing">像素标定（mm/px）</label>
+          <label for="spacing">空间像素标定（mm/px）</label>
           <input
             id="spacing"
             v-model="pixelSpacingMm"
           >
           <div class="why">
-            默认 0.1000 mm/px；若底片带标尺可覆盖。用于把像素尺寸换算为真实当量。
+            默认 0.1000 mm/px；底片带影像标尺时可覆盖。用于将像素尺寸换算为缺陷实际当量。
           </div>
         </div>
         <div class="field">
-          <label for="thick">母材厚度 T（mm）<span class="req">*</span></label>
+          <label for="thick">母材公称厚度 T（mm）<span class="req">*</span></label>
           <input
             id="thick"
             v-model="baseMetalThicknessMm"
             placeholder="如 20"
           >
           <div class="why">
-            评级必须（NB/T47013.2 按 T 分档评定区与限值）。
+            分级评定必备（NB/T 47013.2 依 T 划定评定区与各级限值）。
           </div>
           <div
             v-if="thicknessErr"
@@ -233,7 +233,7 @@ defineExpose({ reset });
           </div>
         </div>
         <div class="field">
-          <label for="wp">工件号（可选）</label>
+          <label for="wp">工件编号（选填）</label>
           <input
             id="wp"
             v-model="workpieceNo"
@@ -241,7 +241,7 @@ defineExpose({ reset });
           >
         </div>
         <div class="field">
-          <label for="wn">焊口编号（可选）</label>
+          <label for="wn">焊缝编号（选填）</label>
           <input
             id="wn"
             v-model="weldNo"
@@ -254,7 +254,7 @@ defineExpose({ reset });
           :disabled="!file"
           @click="onSubmit"
         >
-          开始检测 →
+          提交评定 →
         </button>
       </div>
     </div>

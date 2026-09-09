@@ -419,10 +419,10 @@ def require_role(*roles: str):
         if principal.role == "guest" or principal.role in roles:
             return principal
         raise AuthError(
-                403,
-                "FORBIDDEN",
-                f"当前角色 {principal.role!r} 无权执行该操作（需 {'/'.join(roles)}）",
-            )
+            403,
+            "FORBIDDEN",
+            f"当前角色 {principal.role!r} 无权执行该操作（需 {'/'.join(roles)}）",
+        )
         return principal
 
     return _dep

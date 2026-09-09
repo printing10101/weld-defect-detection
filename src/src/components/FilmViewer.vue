@@ -10,11 +10,15 @@
  * 渲染管线：源图 → 旋转/镜像 → 灰度 LUT（反相/亮度/对比度/窗宽窗位）→
  * 卷积（锐化/浮雕）→ 结果缓存（滤波/姿态/分辨率档任一变化才重算，缩放/平移
  * 零开销；重建分辨率按显示所需降档，≥1:1 放大保持全分辨率）。
+ * 缺陷标注：传入 annotations 时（批量检测"有问题"的底片）在处理画布上叠加
+ * 红色缺陷框 + 类别/置信度标签，随缩放/旋转/镜像联动；无标注底片不叠加。
  * 说明：浏览器 webview 不解码 TIFF/DICOM，此类影像请先经后端预处理接口转为
  * PNG/JPG 预览格式（或使用已入库影像的预览 URL）。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import type { Transform } from "../types/api";
+import { DEFECT_CLASS_LABELS } from "../types/api";
+import type { FilmAnnotations, Transform } from "../types/api";
+import { filmBBoxToProcessedRect, type OverlayPose } from "../utils/annotationOverlay";
 
 const props = withDefaults(
   defineProps<{
@@ -23,8 +27,11 @@ const props = withDefaults(
     syncTransform?: Transform | null;
     height?: string;
     label?: string;
+    /** 批量检测回填的缺陷标注（bbox 为原图像素坐标）；
+     * null/undefined = 无标注（无问题底片不叠加任何框）。 */
+    annotations?: FilmAnnotations | null;
   }>(),
-  { syncTransform: null, height: "62vh", label: "" },
+  { syncTransform: null, height: "62vh", label: "", annotations: null },
 );
 
 const emit = defineEmits<{
@@ -117,7 +124,7 @@ watch(
     };
     el.onerror = () => {
       if (props.src !== mySrc) return;
-      imgErr.value = "影像加载失败（TIFF/DICOM 请先用后端转换为 PNG/JPG 预览格式）";
+      imgErr.value = "影像载入失败（TIFF/DICOM 格式请先经后端转档为 PNG/JPG 预览格式）";
       img.value = null;
     };
     el.src = src;
@@ -136,6 +143,15 @@ watch(filterKey, () => {
   processedKey = ""; // 失效
   scheduleRender();
 });
+
+// 缺陷标注变化 → 标注烧录在处理画布上，须失效重建（随下一次 render 重画）
+watch(
+  () => props.annotations,
+  () => {
+    processedKey = "";
+    scheduleRender();
+  },
+);
 
 // 外部同步变换下发（双片对比）
 watch(
@@ -179,6 +195,63 @@ function applyConvolution(data: ImageData, kernel: number[], divisor: number, of
       }
     }
   }
+}
+
+/** 原图像素 bbox → 处理画布矩形（换算数学在 utils/annotationOverlay，可单测） */
+function drawAnnotations(
+  ctx: CanvasRenderingContext2D,
+  natW: number,
+  natH: number,
+  rot: number,
+  w: number,
+  h: number,
+  factor: number,
+): void {
+  const ann = props.annotations;
+  if (!ann || ann.boxes.length === 0) return;
+  // bbox 基准是后端记录的原图尺寸，与浏览器解码尺寸差异（EXIF/转档）按比例回正
+  const sx = natW / Math.max(1, ann.imageW);
+  const sy = natH / Math.max(1, ann.imageH);
+  const pose: OverlayPose = {
+    natW,
+    natH,
+    rot,
+    w,
+    h,
+    factor,
+    flipH: flipH.value,
+    flipV: flipV.value,
+  };
+  const minSide = Math.min(w, h);
+  const lw = Math.max(1.5, minSide / 400);
+  const fontPx = Math.max(12, Math.min(30, Math.round(minSide / 30)));
+  ctx.save();
+  ctx.lineJoin = "round";
+  ctx.textBaseline = "top";
+  ctx.font = `600 ${fontPx}px system-ui, "Segoe UI", sans-serif`;
+  for (const d of ann.boxes) {
+    const r = filmBBoxToProcessedRect(d.bbox, sx, sy, pose);
+    ctx.strokeStyle = "#ff453a";
+    ctx.lineWidth = lw;
+    ctx.strokeRect(r.x, r.y, Math.max(r.w, lw), Math.max(r.h, lw));
+    const label =
+      `${DEFECT_CLASS_LABELS[d.classId] ?? "缺陷"} ${Math.round(d.confidence * 100)}%` +
+      (d.needReview ? " · 待复核" : "");
+    const padX = fontPx * 0.35;
+    const padY = fontPx * 0.22;
+    const chipW = ctx.measureText(label).width + padX * 2;
+    const chipH = fontPx + padY * 2;
+    // 标签优先放框上方，贴顶时退回框内；贴右缘时左移防裁切
+    let chipY = r.y - chipH - lw;
+    if (chipY < 2) chipY = r.y + lw;
+    let chipX = r.x;
+    if (chipX + chipW > w - 2) chipX = w - 2 - chipW;
+    ctx.fillStyle = "rgba(155, 22, 12, 0.85)";
+    ctx.fillRect(chipX, chipY, chipW, chipH);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(label, chipX + padX, chipY + padY);
+  }
+  ctx.restore();
 }
 
 function rebuildProcessed(): void {
@@ -236,6 +309,7 @@ function rebuildProcessed(): void {
     applyConvolution(imageData, [-2, -1, 0, -1, 1, 1, 0, 1, 2], 1, 128);
   }
   ctx.putImageData(imageData, 0, 0);
+  drawAnnotations(ctx, natW, natH, rot, w, h, factor);
   processedKey = expectedKey();
 }
 
@@ -498,43 +572,43 @@ onBeforeUnmount(() => {
         －
       </button>
       <button
-        title="适应屏幕（f）"
+        title="适应窗口（f）"
         @click="fit()"
       >
         适应
       </button>
       <button
-        title="1:1 尺寸（1）"
+        title="1:1 实际像素尺寸（1）"
         @click="zoom1to1()"
       >
         1:1
       </button>
       <button
-        title="适应屏幕的 2 倍"
+        title="适应比例的 2 倍放大"
         @click="zoomToFitFactor(2)"
       >
         2×
       </button>
       <button
-        title="适应屏幕的 4 倍（查看细节）"
+        title="适应比例的 4 倍放大（细节判读）"
         @click="zoomToFitFactor(4)"
       >
         4×
       </button>
       <button
-        title="适应屏幕的 8 倍"
+        title="适应比例的 8 倍放大"
         @click="zoomToFitFactor(8)"
       >
         8×
       </button>
       <button
-        title="逆时针旋转（R）"
+        title="逆时针旋转 90°（R）"
         @click="rotate(-1)"
       >
         ↺
       </button>
       <button
-        title="顺时针旋转（r）"
+        title="顺时针旋转 90°（r）"
         @click="rotate(1)"
       >
         ↻
@@ -554,21 +628,21 @@ onBeforeUnmount(() => {
         ⇅
       </button>
       <button
-        title="正反片转换（i）"
+        title="正反片转换 / 反相（i）"
         :class="{ on: invert }"
         @click="invert = !invert"
       >
         ◐
       </button>
       <button
-        title="窗位窗宽"
+        title="窗宽窗位调节（灰度映射）"
         :class="{ on: winEnabled }"
         @click="toggleWin"
       >
         窗
       </button>
       <button
-        title="还原（0）"
+        title="还原初始视图与滤波参数（0）"
         @click="reset()"
       >
         还原
@@ -596,7 +670,7 @@ onBeforeUnmount(() => {
         v-else-if="!img"
         class="fv-hint"
       >
-        {{ props.label || "未加载影像" }}
+        {{ props.label || "未载入影像" }}
       </div>
       <div
         v-else-if="props.label"

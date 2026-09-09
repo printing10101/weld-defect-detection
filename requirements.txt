@@ -35,3 +35,5 @@ python-multipart==0.0.32
 alembic==1.19.1
 # iPhone/iPad HEIC/HEIF 影像解码（image_loader 回退链）
 pillow-heif==1.5.0
+# 底片印字（扫描日期/编号）OCR（domain/stamp.py，懒加载；缺失时降级 unavailable）
+rapidocr-onnxruntime==1.2.3

@@ -24,6 +24,7 @@
         "languages": ["SimpChinese", "English"],
         "displayLanguageSelector": true,
         "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
         "installerHooks": "./windows/installer-hooks.nsh"
       }
     },

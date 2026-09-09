@@ -1,8 +1,10 @@
 // ScanDetection Tauri 入口（打包版，Tauri v2）。
 // 启动流程：
 //   1. 在 setup 阶段于后台启动后端（uvicorn，监听 127.0.0.1:18773）；
-//   2. 后端冷启动（首次运行需导入重依赖并加载 ONNX 模型，叠加杀毒扫描）可能超过
-//      60s，等待上限放宽到 180s；窗口不阻塞显示，前端会自动轮询 /health 直到就绪；
+//   2. 后端冷启动（重依赖导入 + ONNX 模型加载，叠加杀毒实时扫描与冷盘缓存）
+//      可能超过 60s 甚至数分钟；监督线程持续探测 /health，就绪即注入 IPC 令牌
+//      ——注入不设截止时间，后端多晚就绪都能补上（杜绝"令牌永远缺失 → 前端
+//      全部 401 → 用户以为后端没启动"的静默故障）；
 //   3. 前端（已构建的 Vue SPA）通过绝对地址 http://127.0.0.1:18773/api/v1 调用后端。
 //
 // 目录布局约定：
@@ -28,9 +30,13 @@ use std::time::Duration;
 use tauri::Manager;
 
 const BACKEND_PORT: u16 = 18773;
-/// 后端冷启动耗时上限：实测首次运行（重依赖导入 + 模型加载 + Defender 扫描）
-/// 可超过 60s，放宽到 180s 避免误报“后端未响应”。
+/// 单轮就绪等待上限：仅约束 wait_for_backend_ready 的单次轮询窗口（超时后
+/// 监督循环仍会持续探测并在就绪后注入令牌，见 run_supervisor 的补注入分支），
+/// 不再是"超时即放弃注入"的硬截止。
 const BACKEND_STARTUP_TIMEOUT_SECS: u64 = 180;
+/// 崩溃循环退避阈值：子进程拉起后存活不足该时长即死亡（端口被占/缺依赖秒退）
+/// 时，重启前先退避一轮，避免秒级重生风暴。
+const BACKEND_CRASH_BACKOFF_SECS: u64 = 8;
 
 const SUPERVISOR_CHECK_INTERVAL_MS: u64 = 2000;
 
@@ -86,11 +92,14 @@ fn main() {
                     BACKEND_PORT,
                     BACKEND_STARTUP_TIMEOUT_SECS,
                     &supervisor_stop,
+                    Some(&launch_slot),
                 );
                 if ready {
-                    // C-17：后端就绪（端口可连 = lifespan 完成）后注入 IPC 一次性令牌。
+                    // C-17：后端就绪（/health 200）后注入 IPC 一次性令牌。
                     inject_ipc_token(&handle, &user_data_dir);
                 }
+                // 就绪与否都进入监督循环：未就绪（含"等待超时但进程仍在导入"）
+                // 时循环会持续探测，就绪即补注入令牌（见 run_supervisor）。
 
                 // 进入存活监控/自愈循环（含看门狗重启标记消费）。
                 let marker = user_data_dir.join("data").join("restart_required");
@@ -103,6 +112,7 @@ fn main() {
                     app_root,
                     python,
                     user_data_dir,
+                    ready, // 初始注入状态：就绪=已注入；未就绪=循环内补注入
                 );
             });
             Ok(())
@@ -267,10 +277,18 @@ fn build_uvicorn_command(
     // 数据目录重定向（打包版）：后端把 data/ 前缀路径落到 <用户数据目录>/data
     //（db/影像/报告/IPC 令牌/主密钥），与壳侧 resolve_data_dir 保持同源。
     cmd.env("SCANDETECTION_USER_DATA_DIR", user_data_dir);
-    // 禁止写 .pyc：运行期生成的字节码不在卸载器清单里，会残留在安装目录
-    //（卸载后 $INSTDIR 不干净）。每次启动重新编译的代价（约 1~3s）远小于
-    // 残留物带来的"卸载不干净"观感与合规审计负担。
-    cmd.env("PYTHONDONTWRITEBYTECODE", "1");
+    // 字节码缓存重定向（TEMP）：嵌入态 Python 若简单粗暴地禁写 .pyc
+    // （PYTHONDONTWRITEBYTECODE=1），则每次启动都要为全部依赖（cv2/numpy/
+    // fastapi/onnxruntime 等数百个模块）重新源码编译字节码，叠加杀毒实时
+    // 扫描后冷启动导入可达数分钟，且每次启动都慢。PYTHONPYCACHEPREFIX 把
+    // __pycache__ 统一放到 %TEMP%/ScanDetection/pycache：首次启动编译一次、
+    // 后续启动直接复用缓存，导入降到秒级；缓存不在安装目录，卸载器清单
+    // 依旧干净（保留原动机）。
+    let pycache = std::env::temp_dir()
+        .join("ScanDetection")
+        .join("pycache");
+    let _ = std::fs::create_dir_all(&pycache);
+    cmd.env("PYTHONPYCACHEPREFIX", &pycache);
     match backend_log_stdio() {
         Some((out, err)) => {
             cmd.stdout(out).stderr(err);
@@ -319,16 +337,20 @@ fn try_spawn_backend(
     }
 }
 
-/// 轮询后端就绪，直到超时或 stop 置位（应用退出中）。
+/// 轮询后端就绪，直到超时、stop 置位（应用退出中）或子进程提前死亡。
 ///
 /// 就绪判定不是裸 TCP 连通——那会把"任意占用 18773 的进程"（残留孤儿后端/
 /// 第三方程序）误判为自家后端就绪，把可能失配的 IPC 令牌注入前端、掩盖
 /// 真正的启动故障。这里在 TCP 可连后进一步请求 /api/v1/health 校验 HTTP 200。
+///
+/// `child_slot`：提供时每轮探测同时检查子进程是否已退出（启动期崩溃/端口
+/// 占用秒退）——已死立即返回 false 交由监督循环快速重启，不空等满超时。
 fn wait_for_backend_ready_stoppable(
     host: &str,
     port: u16,
     timeout_secs: u64,
     stop: &AtomicBool,
+    child_slot: Option<&Arc<Mutex<Option<Child>>>>,
 ) -> bool {
     let addr = format!("{}:{}", host, port);
     let deadline = Duration::from_secs(timeout_secs);
@@ -341,9 +363,27 @@ fn wait_for_backend_ready_stoppable(
             println!("[ScanDetection] backend ready on {}", addr);
             return true;
         }
+        if let Some(slot) = child_slot {
+            let dead = match slot.lock() {
+                Ok(mut guard) => match guard.as_mut() {
+                    Some(c) => !matches!(c.try_wait(), Ok(None)),
+                    None => true, // 无子进程句柄：spawn 失败，等待无意义
+                },
+                Err(_) => true, // 锁毒化：视作死亡
+            };
+            if dead {
+                eprintln!(
+                    "[ScanDetection] backend process exited before becoming ready; supervisor will restart it"
+                );
+                return false;
+            }
+        }
         if start.elapsed() > deadline {
+            // 单轮等待窗口到期。子进程可能仍在导入（冷启动可达数分钟）：
+            // 此处返回 false 不再代表放弃——监督循环会继续探测并在就绪后
+            // 补注入 IPC 令牌。
             eprintln!(
-                "[ScanDetection] 等待后端超时（{}s），前端可能暂时无法连接 API。",
+                "[ScanDetection] backend not ready after {}s (still importing?); keep probing in supervisor loop",
                 timeout_secs
             );
             return false;
@@ -377,7 +417,10 @@ fn probe_backend_health(addr: &str) -> bool {
 /// 1. 消费看门狗标记文件 `data/restart_required`（后端内存超阈值写的优雅重启请求）；
 /// 2. 用 `try_wait` 轮询后端子进程——若已退出（崩溃/被杀/人为终止）则自动重启，
 ///    并重新注入新生成的一次性 IPC 令牌（后端重启会刷新令牌，需重注入避免 401）；
-/// 3. 按 `check_interval_ms` 周期循环，`stop` 置位（窗口销毁）时退出并回收子进程。
+/// 3. **令牌补注入**：子进程存活但尚未注入令牌（冷启动导入超过单轮等待窗口、
+///    或首次注入失败）时，持续探测 /health，就绪即注入——后端多晚就绪前端
+///    都能恢复，杜绝"后端其实活着、前端却永远 401"的静默故障；
+/// 4. 按 `check_interval_ms` 周期循环，`stop` 置位（窗口销毁）时退出并回收子进程。
 ///
 /// 说明：Tauri 进程在 main() 返回时随宿主退出，本线程会在该时机被打断；正常
 /// 关机路径由 on_window_event 直接 kill + 置位 stop 兜底，避免后端子进程残留。
@@ -391,8 +434,11 @@ fn run_supervisor(
     app_root: PathBuf,
     python: PathBuf,
     user_data_dir: PathBuf,
+    mut injected: bool,
 ) {
     let interval = Duration::from_millis(check_interval_ms.max(200));
+    let addr = format!("127.0.0.1:{}", BACKEND_PORT);
+    let mut last_spawn = std::time::Instant::now();
     while !stop.load(Ordering::SeqCst) {
         // 1) 消费看门狗优雅重启标记（存在即触发一次重启）。
         let marker_restart = if marker_path.exists() {
@@ -427,6 +473,19 @@ fn run_supervisor(
             if stop.load(Ordering::SeqCst) {
                 break;
             }
+            // 崩溃循环退避：拉起后极短时间即死亡（端口冲突/缺依赖秒退）时，
+            // 先退避再重启，避免秒级重生风暴；正常长存后崩溃不受影响。
+            if last_spawn.elapsed() < Duration::from_secs(BACKEND_CRASH_BACKOFF_SECS) {
+                let mut remaining = Duration::from_secs(BACKEND_CRASH_BACKOFF_SECS);
+                while remaining > Duration::ZERO && !stop.load(Ordering::SeqCst) {
+                    let step = remaining.min(Duration::from_millis(200));
+                    thread::sleep(step);
+                    remaining -= step;
+                }
+                if stop.load(Ordering::SeqCst) {
+                    break;
+                }
+            }
             // 3) 回收旧句柄 → 重新拉起 → 等就绪 → 重注入令牌。
             {
                 if let Ok(mut guard) = child_slot.lock() {
@@ -437,15 +496,24 @@ fn run_supervisor(
                 }
             }
             try_spawn_backend(&child_slot, &app_root, &python, &user_data_dir);
+            last_spawn = std::time::Instant::now();
+            injected = false;
             let ready = wait_for_backend_ready_stoppable(
                 "127.0.0.1",
                 BACKEND_PORT,
                 BACKEND_STARTUP_TIMEOUT_SECS,
                 &stop,
+                Some(&child_slot),
             );
             if ready {
                 inject_ipc_token(&handle, &user_data_dir); // 后端重启用新令牌，重注入 WebView
+                injected = true;
             }
+        } else if !injected && probe_backend_health(&addr) {
+            // 令牌补注入：子进程存活但尚未注入（单轮等待超时后仍在导入/首次
+            // 注入失败）。就绪即注入，之后不再探测。
+            inject_ipc_token(&handle, &user_data_dir);
+            injected = true;
         }
 
         // 4) 分片睡眠：周期内也能及时响应 stop（应用退出）。

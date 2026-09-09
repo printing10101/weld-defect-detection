@@ -164,9 +164,7 @@ def test_batch_dedup_against_history() -> None:
         assert dup["history"]["image_id"] == first_image_id
 
         # 全部跳过：批次直接完成，未重复出片
-        r = client.post(
-            f"/api/v1/batch/{second['batch_id']}/dedup/resolve", json={"decisions": []}
-        )
+        r = client.post(f"/api/v1/batch/{second['batch_id']}/dedup/resolve", json={"decisions": []})
         assert r.status_code == 200
         assert r.json() == {"ok": True, "skipped": 1, "kept": 0}
         st = client.get(f"/api/v1/batch/{second['batch_id']}").json()

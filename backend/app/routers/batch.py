@@ -53,9 +53,26 @@ class BatchTaskOut(BaseModel):
     report_id: str | None = None
     joint_level: str | None = None
     need_review: bool | None = None
+    # 检出缺陷数：前端据此只对"有问题"的底片拉取缺陷框做标注（None=未执行/旧快照）
+    defect_count: int | None = None
+    # 底片印字（扫描日期/编号）识别结论快照（None=未执行/旧快照）
+    stamp_status: str | None = None
+    stamp_text: str | None = None
+    stamp_orientation: str | None = None
+    stamp_need_review: bool | None = None
     content_sha256: str | None = None
     dup_kind: str | None = None
     dup_ref: str | None = None
+
+
+class BatchStampSummaryOut(BaseModel):
+    """批次收尾的印字占比裁决摘要（豁免/补标结论，前端展示用）。"""
+
+    evaluated: int
+    present: int
+    ratio: float
+    suppressed: bool
+    flagged: int
 
 
 class BatchStatusOut(BaseModel):
@@ -69,6 +86,7 @@ class BatchStatusOut(BaseModel):
     progress: float  # 0..1
     tasks: list[BatchTaskOut]
     duplicates: list[BatchDuplicateOut] = []
+    stamp_summary: BatchStampSummaryOut | None = None
 
 
 class CancelOut(BaseModel):
@@ -329,6 +347,7 @@ def batch_status(
     tasks = []
     for t in batch["tasks"]:
         result = t.get("result") or {}
+        stamp = result.get("stamp") or {}
         tasks.append(
             BatchTaskOut(
                 task_id=t["task_id"],
@@ -339,6 +358,11 @@ def batch_status(
                 report_id=result.get("report_id"),
                 joint_level=result.get("joint_level"),
                 need_review=bool(result.get("need_review")) if result else None,
+                defect_count=result.get("defect_count"),
+                stamp_status=stamp.get("status"),
+                stamp_text=stamp.get("text"),
+                stamp_orientation=stamp.get("orientation"),
+                stamp_need_review=stamp.get("need_review"),
                 content_sha256=t.get("content_sha256"),
                 dup_kind=t.get("dup_kind"),
                 dup_ref=t.get("dup_ref"),
@@ -346,6 +370,7 @@ def batch_status(
         )
     total = max(1, batch["total"])
     progress = min(1.0, (batch["done"] + batch["failed"] + batch["cancelled"]) / total)
+    stamp_summary = batch.get("stamp_summary")
     return BatchStatusOut(
         batch_id=batch["batch_id"],
         status=batch["status"],
@@ -357,6 +382,7 @@ def batch_status(
         progress=round(progress, 3),
         tasks=tasks,
         duplicates=[BatchDuplicateOut(**d) for d in batch.get("duplicates", [])],
+        stamp_summary=BatchStampSummaryOut(**stamp_summary) if stamp_summary else None,
     )
 
 
