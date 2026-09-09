@@ -4,8 +4,8 @@
   "method": "per_class_temperature_ece_grid_cv2",
   "data": {
     "dirs": [
-      "D:\\扫描检测软件\\data\\training\\val",
-      "D:\\扫描检测软件\\data\\training\\test"
+      "D:\\<project>\\data\\training\\val",
+      "D:\\<project>\\data\\training\\test"
     ],
     "n_images": 136,
     "n_pairs": 719
