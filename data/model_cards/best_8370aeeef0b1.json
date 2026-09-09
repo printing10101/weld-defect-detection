@@ -13,7 +13,7 @@
     },
     "ece_uncalibrated": 0.2699,
     "calibration": {
-      "file": "D:\\扫描检测软件\\models\\weights\\best.calibration.json",
+      "file": "D:\\<project>\\models\\weights\\best.calibration.json",
       "temperatures": {
         "0": 0.25,
         "1": 0.25,
@@ -81,7 +81,7 @@
     }
   },
   "data_distribution": {
-    "source_dir": "D:\\扫描检测软件\\data\\training\\test",
+    "source_dir": "D:\\<project>\\data\\training\\test",
     "domain": "synthetic",
     "n_images": 125,
     "gt_total": 713,

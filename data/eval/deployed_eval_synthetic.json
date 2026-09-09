@@ -1,8 +1,8 @@
 {
-  "model": "D:\\扫描检测软件\\models\\weights\\best.onnx",
+  "model": "D:\\<project>\\models\\weights\\best.onnx",
   "model_id": "best::8370aeeef0b1",
   "domain": "synthetic",
-  "data_dir": "D:\\扫描检测软件\\data\\training\\test",
+  "data_dir": "D:\\<project>\\data\\training\\test",
   "n_images": 125,
   "conf": 0.25,
   "iou": 0.5,
@@ -130,7 +130,7 @@
     }
   },
   "calibration": {
-    "file": "D:\\扫描检测软件\\models\\weights\\best.calibration.json",
+    "file": "D:\\<project>\\models\\weights\\best.calibration.json",
     "temperatures": {
       "0": 0.25,
       "1": 0.25,

@@ -1,5 +1,5 @@
 {
-  "model": "C:\\Users\\Lenovo\\Desktop\\扫描检测软件\\models\\weights\\best.onnx",
+  "model": "D:\\<project>\\models\\weights\\best.onnx",
   "n_images": 165,
   "class_conf": {
     "0": 0.3,
