@@ -119,3 +119,23 @@ data/sync/
 data/active/
 data/model_registry.json
 data/eval/.gate_work/
+
+
+# === 公开仓安全边界（2026-09 审计后加固）===
+# 本机绝对路径
+C:\Users\Lenovo/**
+D:\扫描检测软件/**
+D:\灵境制造/**
+D:\铸型工坊/**
+# 高校/第三方官方全文（版权）
+backend/app/syllabus/handbooks/
+# 无关攻防技能包与爬虫
+.trae/
+github可用skill/
+_zip_inspect/
+**/crawl_judgments.py
+# 真实案件/密钥
+data/real_judgments/
+*.pem
+*.key
+!**/*.example
