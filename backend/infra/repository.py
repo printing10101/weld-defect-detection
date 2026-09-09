@@ -134,6 +134,30 @@ class InspectionRepository:
             rec = session.get(ReportRecord, report_id)
             return self._report_to_dict(rec) if rec is not None else None
 
+    def flag_missing_stamps(self, batch_no: str) -> int:
+        """批次印字占比达标：把批内缺印字影像补上复核标记，返回补标张数。
+
+        批量场景的 need_review 延迟合并（只增不减）：逐图落库时缺印字**不**
+        置 need_review，由批次收尾的印字占比裁决（Registry._apply_batch_stamp_policy）
+        决定是否调用本方法；合并语义与判定/质量告警一致——只把 False 翻成 True，
+        绝不撤销其它来源（评级熔断/黑度/IQI）已置的复核标记。已复核过的影像
+        （stamp_need_review 已 True）不重复处理。
+        """
+        with Session(self._engine) as session, session.begin():
+            rows = list(
+                session.scalars(
+                    select(ImageRecord).where(
+                        ImageRecord.batch_no == batch_no,
+                        ImageRecord.stamp_status == "missing",
+                        ImageRecord.stamp_need_review.is_(False),
+                    )
+                )
+            )
+            for rec in rows:
+                rec.stamp_need_review = True
+                rec.need_review = True
+            return len(rows)
+
     def find_images_by_hashes(self, hashes: list[str]) -> dict[str, list[dict[str, Any]]]:
         """按文件内容哈希查历史影像（批量查重用）：返回 hash → 命中摘要列表。
 
@@ -764,6 +788,11 @@ class InspectionRepository:
             "secret_level": int(rec.secret_level or 0),
             "classification_basis": rec.classification_basis,
             "content_hash": rec.content_hash,
+            "stamp_status": rec.stamp_status,
+            "stamp_text": rec.stamp_text,
+            "stamp_orientation": rec.stamp_orientation,
+            "stamp_confidence": rec.stamp_confidence,
+            "stamp_need_review": bool(rec.stamp_need_review),
             "created_at": _fmt_dt(rec.created_at),
         }
 

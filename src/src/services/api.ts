@@ -105,7 +105,7 @@ async function rawRequest<T>(path: string, init: RequestInit, timeoutMs = REQUES
     throw new ApiRequestError(
       0,
       "BACKEND_UNREACHABLE",
-      "无法连接后端，请确认本地服务已启动（默认 127.0.0.1:18773）",
+      "无法连接本地推理服务，请确认服务已启动（默认地址 127.0.0.1:18773）",
       null,
     );
   } finally {

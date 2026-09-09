@@ -18,7 +18,7 @@ const step = computed<1 | 2 | 3>(() => (phase.value === "upload" ? 1 : phase.val
 
 function onFileChanged(f: File | null): void {
   setFile(f);
-  // 选片即同步到底片查看（reset 走 null，不入库）
+  // 选片即同步到底片观察（reset 走 null，不入库）
   if (f) viewerFilms.add([f]);
 }
 function onSubmit(fd: FormData): void {
@@ -36,10 +36,10 @@ function onSubmit(fd: FormData): void {
         class="title-zine"
         data-t="开始一次检测"
       >
-        开始一次检测
+        新建单幅评定任务
       </h1>
       <div class="lede">
-        选择影像 → 本地流水线处理 → 生成评定报告（数据全程本地处理）
+        导入射线底片 → 本地推理流水线评定 → 签发评片报告（数据全程本地化处理）
       </div>
       <UploadPanel
         @file-changed="onFileChanged"
@@ -53,10 +53,10 @@ function onSubmit(fd: FormData): void {
         class="title-zine"
         data-t="正在处理"
       >
-        正在处理
+        自动评定进行中
       </h1>
       <div class="lede">
-        影像已提交至本地流水线，正在推理评定
+        底片已提交至本地推理流水线，正在执行缺陷检出与标准符合性评定
       </div>
       <PipelineTrack
         status="running"
@@ -71,10 +71,10 @@ function onSubmit(fd: FormData): void {
         class="title-zine"
         data-t="处理失败"
       >
-        处理失败
+        评定任务失败
       </h1>
       <div class="lede">
-        本次检测失败，可重试或更换影像
+        本次评定未完成，可重试或更换底片后重新提交
       </div>
       <PipelineTrack
         status="error"

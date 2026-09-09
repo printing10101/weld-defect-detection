@@ -154,7 +154,7 @@ async function onVerify(): Promise<void> {
       class="title-zine"
       data-t="评片报告"
     >
-      评片报告
+      射线检测评片报告
     </h1>
     <div class="lede">
       报告编号 {{ result.report_id }} · 影像编号 {{ result.image_id }}
@@ -164,21 +164,21 @@ async function onVerify(): Promise<void> {
     <DispositionPanel :result="result" />
 
     <div class="section-h">
-      <span class="no">影像</span>送检原始影像（来自你上传的文件）
+      <span class="no">影像</span>送检原始底片（用户导入原图，未经标注）
     </div>
     <div class="compare">
       <div class="plate">
         <img
           v-if="sourceUrl"
           :src="sourceUrl"
-          :alt="fileName ?? '上传影像'"
+          :alt="fileName ?? '导入影像'"
         >
         <span
           v-else
           class="ph"
         >影像不可用</span>
         <div class="cap">
-          {{ fileName ?? "上传文件" }} · 未标注
+          {{ fileName ?? "导入文件" }} · 未标注
         </div>
       </div>
       <div class="plate">
@@ -192,15 +192,15 @@ async function onVerify(): Promise<void> {
             class="ph"
             style="display: grid; place-items: center; min-height: 160px; color: var(--accent); font-size: 11px"
           >
-            检测标注影像见 PDF 报告 →
+            缺陷标注影像详见 PDF 报告 →
           </span>
-          <div class="cap">打开 PDF/A 报告（含缺陷标注与明细）</div>
+          <div class="cap">打开 PDF/A 归档报告（含缺陷标注与检出明细）</div>
         </a>
       </div>
     </div>
 
     <div class="section-h">
-      <span class="no">结果</span>本次检测结果
+      <span class="no">结果</span>本次评定结果
     </div>
     <div class="kv">
       <div class="k">
@@ -214,17 +214,17 @@ async function onVerify(): Promise<void> {
         {{ result.image_id }}
       </div>
       <div class="k">
-        缺陷数量
+        缺陷检出数
       </div><div class="v">
         {{ result.defect_count }} 处
       </div>
       <div class="k">
-        可评片性
+        评片质量判定
       </div><div class="v">
-        {{ result.evaluable ? "可评片" : "不可评片（影像质量不达标）" }}
+        {{ result.evaluable ? "底片质量合格，可评定" : "不可评片（底片质量不满足评定要求）" }}
       </div>
       <div class="k">
-        综合级别
+        质量级别（综合评定）
       </div><div class="v">
         {{ result.joint_level ?? "（待复核/未输出）" }}
       </div>
@@ -234,7 +234,7 @@ async function onVerify(): Promise<void> {
       v-if="result.need_review"
       class="section-h"
     >
-      <span class="no">复核</span>人工复核（M7 闭环）
+      <span class="no">复核</span>人工复核（初评 / 复评 / 仲裁）
     </div>
     <ReviewPanel
       v-if="result.need_review"
@@ -243,7 +243,7 @@ async function onVerify(): Promise<void> {
     />
 
     <div class="section-h">
-      <span class="no">建议</span>接下来可以做什么
+      <span class="no">处置</span>后续操作
     </div>
     <div class="acts">
       <button
@@ -252,10 +252,10 @@ async function onVerify(): Promise<void> {
         @click="openPdf"
       >
         <div class="a">
-          导出 PDF/A
+          导出 PDF/A 报告
         </div>
         <div class="d">
-          下载归档合规报告（含缺陷标注、判定依据与明细）
+          下载符合归档要求的检测报告（含缺陷标注、判定依据与检出明细）
         </div>
       </button>
       <button
@@ -264,10 +264,10 @@ async function onVerify(): Promise<void> {
         @click="emit('archive')"
       >
         <div class="a">
-          查看档案
+          查阅检测档案
         </div>
         <div class="d">
-          在档案检索中查看该影像的归档记录与统计
+          在检测档案中查看该影像的归档记录与统计信息
         </div>
       </button>
       <button
@@ -276,10 +276,10 @@ async function onVerify(): Promise<void> {
         @click="emit('reset')"
       >
         <div class="a">
-          重新检测
+          新建评定任务
         </div>
         <div class="d">
-          返回上传步骤，提交下一份底片
+          返回底片导入步骤，提交下一份待检底片
         </div>
       </button>
       <button
@@ -289,10 +289,10 @@ async function onVerify(): Promise<void> {
         @click="onVerify"
       >
         <div class="a">
-          {{ verifying ? "校验中…" : "验证数字签名" }}
+          {{ verifying ? "校验中…" : "校验报告数字签名" }}
         </div>
         <div class="d">
-          比对报告内容指纹与签发记录，防篡改（§7.2）
+          比对报告内容指纹与签发记录，验证报告完整性与防篡改性（§7.2）
         </div>
       </button>
       <button
@@ -302,10 +302,10 @@ async function onVerify(): Promise<void> {
         @click="openExport"
       >
         <div class="a">
-          回流训练池
+          样本回流（主动学习）
         </div>
         <div class="d">
-          人工复核确认缺陷 → 标注回流主动学习训练池（§5.5 持续学习闭环）
+          经人工复核确认的缺陷标注回流至主动学习训练样本库（§5.5 持续学习闭环）
         </div>
       </button>
     </div>
@@ -317,34 +317,34 @@ async function onVerify(): Promise<void> {
     >
       <div class="modal">
         <h3 class="m-title">
-          回流训练池 · 人工复核确认
+          主动学习样本回流 · 人工确认
         </h3>
         <p
           v-if="loadingDets"
           class="hint"
         >
-          加载缺陷明细…
+          正在载入缺陷检出明细…
         </p>
         <p
           v-else-if="detsErr"
           class="err show"
         >
-          ⚠ 加载失败：{{ detsErr }}
+          ⚠ 载入失败：{{ detsErr }}
         </p>
         <template v-else-if="dets">
           <p class="stat">
             影像 <b>{{ dets.image_stem }}</b> · {{ dets.image_w }}×{{ dets.image_h }}px ·
-            共 {{ dets.defects.length }} 处缺陷。勾选需回流的样本，必要时改判类别后确认。
+            共检出 {{ dets.defects.length }} 处缺陷。请勾选需回流的样本，必要时对类别进行人工改判后确认。
           </p>
           <table class="exp">
             <thead>
               <tr>
                 <th>回流</th>
-                <th>原类别</th>
+                <th>检出类别</th>
                 <th>人工改判</th>
                 <th>置信度</th>
-                <th>不确定性</th>
-                <th>状态</th>
+                <th>不确定度</th>
+                <th>复核状态</th>
               </tr>
             </thead>
             <tbody>
@@ -365,7 +365,7 @@ async function onVerify(): Promise<void> {
                     class="ov"
                   >
                     <option :value="-1">
-                      不改判（{{ DEFECT_LABELS[r.class_id] }}）
+                      维持原判（{{ DEFECT_LABELS[r.class_id] }}）
                     </option>
                     <option
                       v-for="(lbl, i) in DEFECT_LABELS"
@@ -401,7 +401,7 @@ async function onVerify(): Promise<void> {
               :disabled="!canExport"
               @click="confirmExport"
             >
-              {{ exporting ? "回流中…" : `确认回流（${selectedCount}）` }}
+              {{ exporting ? "回流中…" : `确认回流（${selectedCount} 项）` }}
             </button>
             <button
               class="btn ghost"
@@ -415,7 +415,7 @@ async function onVerify(): Promise<void> {
             v-if="exportResult"
             class="ok-msg"
           >
-            ✓ 已回流训练池，当前共 <b>{{ exportResult.total_in_pool }}</b> 个样本（数据版本指纹
+            ✓ 已回流至主动学习训练样本库，当前共 <b>{{ exportResult.total_in_pool }}</b> 个样本（数据集版本指纹
             <code>{{ exportResult.fingerprint ?? "—" }}</code>）
           </div>
           <div
@@ -434,24 +434,24 @@ async function onVerify(): Promise<void> {
       :class="verifyStateClass"
     >
       <template v-if="verifyResult.valid === true">
-        ✓ 签名有效（签发者：{{ verifyResult.signer ?? "—" }}）
+        ✓ 数字签名校验通过（签发者：{{ verifyResult.signer ?? "—" }}）
       </template>
       <template v-else-if="verifyResult.valid === false">
-        ⚠ 签名无效或被篡改（{{ verifyResult.reason ?? "内容指纹不匹配" }}）
+        ⚠ 数字签名无效或报告内容已被篡改（{{ verifyResult.reason ?? "内容指纹不匹配" }}）
       </template>
       <template v-else>
-        — 该报告未签署数字签名（{{ verifyResult.reason ?? "无签发记录" }}）
+        — 本报告未附数字签名（{{ verifyResult.reason ?? "无签发记录" }}）
       </template>
     </div>
     <div
       v-if="verifyError"
       class="err show"
     >
-      ⚠ 校验失败：{{ verifyError }}
+      ⚠ 签名校验请求失败：{{ verifyError }}
     </div>
 
     <div class="sig">
-      签字：____________　免责：本报告由系统自动生成，仅供质量追溯参考；需复核或不可评片时，结论不作为正式评片依据。
+      评片人签署：____________　声明：本报告由系统自动生成，仅供质量追溯参考；状态为「待人工复核」或「不可评片」时，不作为正式评片结论依据。
     </div>
   </div>
 </template>

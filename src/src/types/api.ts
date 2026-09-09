@@ -56,6 +56,15 @@ export interface HealthResponse {
 /** 顶层视图（菜单栏/工具栏/标签页导航目标） */
 export type ViewId = "journey" | "archive" | "batch" | "device" | "viewer" | "std-eval";
 
+/** 底片印字（扫描日期/编号）识别结论快照（镜像 ReportOut.stamp / run_inspection 结果） */
+export interface FilmStampOut {
+  status: "present" | "missing" | "unavailable" | "off";
+  text: string | null;
+  orientation: "normal" | "mirrored" | null;
+  confidence: number | null;
+  need_review: boolean;
+}
+
 /** POST /api/v1/report → ReportOut */
 export interface ReportOut {
   report_id: string;
@@ -72,6 +81,8 @@ export interface ReportOut {
   /** readonly：useJourney 的 readonly 深度只读化后保持可赋值 */
   disposition_actions: readonly string[];
   pdf_url: string;
+  /** 底片印字性质快照（重新生成模式无 fresh 识别结果时为 null） */
+  stamp?: FilmStampOut | null;
 }
 
 /** GET /api/v1/records → items[]（镜像 repository._image_to_dict） */
@@ -96,6 +107,12 @@ export interface RecordItem {
   /** C-10 密级：0=非密 1=内部 2=秘密 3=机密 */
   secret_level: number;
   classification_basis: string | null;
+  /** 底片印字（扫描日期/编号）性质快照（历史数据/未启用时为 null） */
+  stamp_status?: string | null;
+  stamp_text?: string | null;
+  stamp_orientation?: "normal" | "mirrored" | null;
+  stamp_confidence?: number | null;
+  stamp_need_review?: boolean;
   created_at: string | null;
 }
 
@@ -141,12 +158,12 @@ export interface ReviewOut {
  * 仅作处理中视图的流程说明，进度/状态一律来自真实请求）。
  */
 export const PIPELINE_STAGES: readonly string[] = [
-  "影像加载",
-  "影像质量校验（黑度 + IQI）",
-  "缺陷检测 + 当量量化",
-  "标准判定（NB/T47013.2）",
-  "落库归档",
-  "生成报告（PDF/A）",
+  "底片影像加载",
+  "影像质量校验（黑度 D · 像质计 IQI）",
+  "缺陷检出与当量测定",
+  "标准符合性判定（NB/T 47013.2）",
+  "检测数据归档",
+  "评片报告签发（PDF/A）",
 ] as const;
 
 
@@ -239,9 +256,25 @@ export interface BatchTaskOut {
   report_id: string | null;
   joint_level: string | null;
   need_review: boolean | null;
+  /** 检出缺陷数（null=未执行或旧批次快照无此字段） */
+  defect_count?: number | null;
+  /** 底片印字（扫描日期/编号）识别结论（null=未执行或旧批次快照） */
+  stamp_status?: string | null;
+  stamp_text?: string | null;
+  stamp_orientation?: "normal" | "mirrored" | null;
+  stamp_need_review?: boolean | null;
   content_sha256?: string | null;
   dup_kind?: "history" | "batch" | null;
   dup_ref?: string | null;
+}
+
+/** 批次收尾的印字占比裁决摘要（缺印字复核的批量豁免结论） */
+export interface BatchStampSummary {
+  evaluated: number;
+  present: number;
+  ratio: number;
+  suppressed: boolean;
+  flagged: number;
 }
 
 /** GET /api/v1/batch/{id} → BatchStatusOut */
@@ -256,6 +289,7 @@ export interface BatchStatusOut {
   progress: number;
   tasks: BatchTaskOut[];
   duplicates?: BatchDuplicateItem[];
+  stamp_summary?: BatchStampSummary | null;
 }
 
 /** 人工查重复核的单项决定：skip=跳过不检测 | keep=人工确认后仍检测 */
@@ -382,6 +416,24 @@ export interface Transform {
   rotation: number;
   flipH: boolean;
   flipV: boolean;
+}
+
+/** 底片查看器的单条缺陷标注框（批量检测完成后回填，bbox 为原图像素坐标） */
+export interface FilmAnnotationBox {
+  id: string;
+  classId: number;
+  bbox: [number, number, number, number];
+  confidence: number;
+  /** 该缺陷本身被标记为需人工复核 */
+  needReview: boolean;
+}
+
+/** 一幅底片的标注集合：imageW/H 为检测时后端记录的原图尺寸（坐标换算基准） */
+export interface FilmAnnotations {
+  imageW: number;
+  imageH: number;
+  reportId: string;
+  boxes: FilmAnnotationBox[];
 }
 
 /** POST /api/v1/review/{image_id}/defects、PATCH/DELETE /api/v1/review/defects/{id} → 缺陷行 */

@@ -1,14 +1,14 @@
 <script setup lang="ts">
-/** 三步旅程指示器：01 上传 → 02 处理 → 03 报告（步骤由真实旅程阶段驱动）。 */
+/** 三步旅程指示器：01 底片导入 → 02 自动评定 → 03 报告签发（步骤由真实旅程阶段驱动）。 */
 defineProps<{ current: 1 | 2 | 3 }>();
 
-const STEPS = ["上传", "处理", "报告"] as const;
+const STEPS = ["底片导入", "自动评定", "报告签发"] as const;
 </script>
 
 <template>
   <div
     class="stepper"
-    aria-label="检测旅程步骤"
+    aria-label="评定流程步骤"
   >
     <template
       v-for="(label, i) in STEPS"

@@ -14,6 +14,7 @@ import ConfirmDialog from "../components/ConfirmDialog.vue";
 import {
   cancelBatch,
   getBatchStatus,
+  getReportDetections,
   listBatches,
   resolveBatchDuplicates,
   retryBatch,
@@ -23,7 +24,7 @@ import type { BatchDuplicateItem, BatchStatusOut, BatchSummaryOut } from "../typ
 
 const emit = defineEmits<{ archive: [] }>();
 
-// 批量选片即时汇入「底片查看」（store 负责去重与 Blob 回收）
+// 批量选片即时汇入「底片观察」（store 负责去重与 Blob 回收）
 const viewerFilms = useViewerFilmsStore();
 
 const MAX_PER_BATCH = 100;
@@ -118,6 +119,7 @@ async function fetchStatusOnce(id: string): Promise<void> {
     if (token !== fetchToken) return; // 已切走（切换/新提交都会使代次失效）
     status.value = s;
     phase.value = "result";
+    void enrichAnnotations(s);
   } catch {
     /* 忽略 */
   }
@@ -139,11 +141,11 @@ function pickFiles(list: FileList | null): void {
     if ((EXTS as readonly string[]).includes(ext)) accepted.push(f);
   }
   if (accepted.length === 0) {
-    submitError.value = "所选文件/文件夹中没有支持的影像（DICOM .dcm / JPG / PNG / BMP / GIF / WebP / TIFF / HEIC 等）。";
+    submitError.value = "所选文件/文件夹中未包含受支持的影像格式（DICOM .dcm / JPG / PNG / BMP / GIF / WebP / TIFF / HEIC 等）。";
     return;
   }
   if (accepted.length > MAX_PER_BATCH) {
-    submitError.value = `单批最多 ${MAX_PER_BATCH} 张，当前 ${accepted.length} 张，请分批。`;
+    submitError.value = `单批上限 ${MAX_PER_BATCH} 幅，当前已选 ${accepted.length} 幅，请分批提交。`;
     return;
   }
   files.value = accepted;
@@ -155,7 +157,7 @@ const fileSummary = () => {
   const n = files.value.length;
   if (n === 0) return "";
   const mb = files.value.reduce((s, f) => s + f.size, 0) / 1024 / 1024;
-  return `${n} 张 · ${mb.toFixed(1)} MB`;
+  return `${n} 幅 · ${mb.toFixed(1)} MB`;
 };
 
 function openFilePicker(): void {
@@ -170,11 +172,11 @@ function openDirPicker(): void {
 function onSubmit(): void {
   submitError.value = null;
   if (files.value.length === 0) {
-    submitError.value = "请先选择底片文件或文件夹。";
+    submitError.value = "请先导入底片文件或文件夹。";
     return;
   }
   if (!baseMetalThicknessMm.value.trim()) {
-    submitError.value = "母材厚度 T 必填（评级依据）。";
+    submitError.value = "母材公称厚度 T 为必填项（分级评定依据）。";
     return;
   }
   const fd = new FormData();
@@ -273,6 +275,63 @@ function fallbackDups(s: BatchStatusOut): BatchDuplicateItem[] {
     }));
 }
 
+/* ── 批量结果 → 底片标注 ──
+ * 批量上传的约定：有问题的底片（检出缺陷 > 0）在「底片观察」中叠加红色缺陷框，
+ * 没有问题的底片不做任何标注。缺陷框来自真实检测记录（report/detections），
+ * 按文件名匹配汇入查看工作区的同一张底片；判定与拉取每个报告只做一次。 */
+const annotFetched = new Set<string>(); // 已判定/已拉取的 report_id（含"确认无缺陷"，防重复请求）
+
+async function enrichAnnotations(s: BatchStatusOut): Promise<void> {
+  for (const t of s.tasks ?? []) {
+    if (t.status !== "done" || !t.report_id || annotFetched.has(t.report_id)) continue;
+    annotFetched.add(t.report_id);
+    // "有问题"判定：检出缺陷数 > 0。defect_count 缺失（旧批次快照）时退回
+    // "有报告即拉取"，由返回的缺陷清单为空与否决定是否标注。
+    if (t.defect_count != null && t.defect_count <= 0 && !t.need_review) continue;
+    void fetchAnnotations(t.report_id, t.image_name);
+  }
+}
+
+/* ── 批量结果 → 底片印字性质回填 ──
+ * 任务完成后把印字识别快照（日期/编号、正/镜像）按文件名匹配进查看工作区，
+ * 「底片观察」页即可查阅每张底片的这一性质；无印字底片同样回填（展示"无印字"）。 */
+function enrichStamps(s: BatchStatusOut): void {
+  for (const t of s.tasks ?? []) {
+    if (t.status !== "done" || !t.stamp_status) continue;
+    const film = viewerFilms.films.find((f) => f.name === t.image_name);
+    if (!film || viewerFilms.stampOf(film.id)) continue; // 已移除或已回填
+    viewerFilms.setStamp(film.id, {
+      status: t.stamp_status,
+      text: t.stamp_text ?? null,
+      orientation: t.stamp_orientation ?? null,
+      needReview: t.stamp_need_review === true,
+    });
+  }
+}
+
+async function fetchAnnotations(reportId: string, imageName: string): Promise<void> {
+  try {
+    const det = await getReportDetections(reportId);
+    if (det.defects.length === 0) return; // 确认无缺陷：保持无标注
+    const film = viewerFilms.films.find((f) => f.name === imageName);
+    if (!film) return; // 底片已被移除/驱逐，或本机会话中无对应上传文件
+    viewerFilms.setAnnotations(film.id, {
+      imageW: det.image_w,
+      imageH: det.image_h,
+      reportId,
+      boxes: det.defects.map((d) => ({
+        id: d.id,
+        classId: d.class_id,
+        bbox: d.bbox,
+        confidence: d.confidence,
+        needReview: d.need_review,
+      })),
+    });
+  } catch {
+    /* 单张标注拉取失败不影响批次流程与轮询（影像仍可正常查看） */
+  }
+}
+
 async function tick(id: string): Promise<void> {
   try {
     const s = await getBatchStatus(id);
@@ -282,6 +341,8 @@ async function tick(id: string): Promise<void> {
     status.value = s;
     pollErrorCount.value = 0;
     backendDown.value = false;
+    void enrichAnnotations(s); // 逐任务完成后即时回填标注（有问题才标注）
+    enrichStamps(s); // 逐任务完成后即时回填印字性质（正/镜像/无印字）
     if (s.status === "awaiting_review") {
       // 查重暂缓批（历史入口进入/轮询途中发现）：停止轮询，转人工复核
       stopPolling();
@@ -373,12 +434,12 @@ onUnmounted(() => {
   <div>
     <h1
       class="title-zine"
-      data-t="批量检测"
+      data-t="批量评定"
     >
-      批量检测
+      批量评定
     </h1>
     <div class="lede">
-      多底片/文件夹批量检测，支持异步队列、进度查看与历史批次
+      多幅底片/整卷文件夹批量评定，支持异步队列调度、实时进度监视与历史批次管理
     </div>
 
     <!-- 阶段1：选择文件与参数 -->
@@ -386,26 +447,26 @@ onUnmounted(() => {
       <div class="guide">
         <div class="g">
           <div class="n">
-            一 · 导入底片
+            一 · 底片导入
           </div>
           <div class="t">
-            选择多个文件或整个文件夹（DICOM 及常见图像格式均可），单批 ≤ {{ MAX_PER_BATCH }} 张。
+            支持多选文件或整卷文件夹导入（DICOM 及常见图像格式），单批上限 {{ MAX_PER_BATCH }} 幅。
           </div>
         </div>
         <div class="g">
           <div class="n">
-            二 · 公共参数
+            二 · 公共工艺参数
           </div>
           <div class="t">
-            母材厚度 T 必填，应用到批内所有底片；不合格底片默认强制出片并标记「需复核」。
+            母材公称厚度 T 为必填项，统一应用于批内全部底片；像质不合格底片默认强制出片并标记「待人工复核」。
           </div>
         </div>
         <div class="g">
           <div class="n">
-            三 · 异步执行
+            三 · 异步批量执行
           </div>
           <div class="t">
-            提交后立即返回批次号，多 worker 并行推理，页面实时显示进度。
+            提交后即返回批次编号，多推理进程并行调度，界面实时刷新进度。
           </div>
         </div>
       </div>
@@ -419,17 +480,17 @@ onUnmounted(() => {
             <span class="chip on">HEIC/AVIF</span>
           </div>
           <div class="hint">
-            文件夹导入会递归收集子目录影像；非影像文件自动跳过。
+            文件夹导入将递归收集子目录中的影像；非影像文件自动跳过。
           </div>
           <div
             class="drop"
             @click="openFilePicker"
           >
             <div class="big">
-              拖入请点此：选择底片文件
+              点击选择底片文件
             </div>
             <div class="hint">
-              支持 Ctrl/Shift 多选；影像只在本机处理
+              支持 Ctrl/Shift 多选；影像全程本机处理，不经外部网络传输
             </div>
           </div>
           <input
@@ -445,7 +506,7 @@ onUnmounted(() => {
             class="btn ghost"
             @click="openDirPicker"
           >
-            或选择整个文件夹…
+            或导入整个文件夹…
           </button>
           <input
             id="pick-dir"
@@ -476,28 +537,28 @@ onUnmounted(() => {
 
         <div class="grow">
           <div class="field">
-            <label for="spacing">像素标定（mm/px）</label>
+            <label for="spacing">空间像素标定（mm/px）</label>
             <input
               id="spacing"
               v-model="pixelSpacingMm"
             >
             <div class="why">
-              默认 0.1000 mm/px；用于把像素尺寸换算为真实当量。
+              默认 0.1000 mm/px；用于将像素尺寸换算为缺陷实际当量。
             </div>
           </div>
           <div class="field">
-            <label for="thick">母材厚度 T（mm）<span class="req">*</span></label>
+            <label for="thick">母材公称厚度 T（mm）<span class="req">*</span></label>
             <input
               id="thick"
               v-model="baseMetalThicknessMm"
               placeholder="如 20"
             >
             <div class="why">
-              评级必须（NB/T47013.2 按 T 分档评定区与限值），应用到批内所有底片。
+              分级评定必备（NB/T 47013.2 依 T 划定评定区与各级限值），统一应用于批内全部底片。
             </div>
           </div>
           <div class="field">
-            <label for="wp">工件号（可选）</label>
+            <label for="wp">工件编号（选填）</label>
             <input
               id="wp"
               v-model="workpieceNo"
@@ -505,7 +566,7 @@ onUnmounted(() => {
             >
           </div>
           <div class="field">
-            <label for="wn">焊口编号（可选）</label>
+            <label for="wn">焊缝编号（选填）</label>
             <input
               id="wn"
               v-model="weldNo"
@@ -517,7 +578,7 @@ onUnmounted(() => {
               v-model="force"
               type="checkbox"
             >
-            强制出片（不合格底片标记「需复核」并继续，不阻断整批）
+            强制出片（像质不合格底片标记「待人工复核」并继续处理，不阻断整批流程）
           </label>
           <button
             class="btn"
@@ -525,7 +586,7 @@ onUnmounted(() => {
             :disabled="files.length === 0 || submitting"
             @click="onSubmit"
           >
-            {{ submitting ? "提交中…" : "提交批量检测 →" }}
+            {{ submitting ? "提交中…" : "提交批量评定 →" }}
           </button>
         </div>
       </div>
@@ -535,12 +596,12 @@ onUnmounted(() => {
     <div v-else-if="phase === 'dedup'">
       <div class="sec-label">
         批次 {{ activeBatchId ? activeBatchId.slice(0, 8) : "" }}
-        <span class="sec-state hold">待查重复核</span>
+        <span class="sec-state hold">待重复性核查</span>
       </div>
       <div class="dedup-box">
         <div class="dd-head">
-          检测到 <b>{{ duplicates.length }}</b> 个重复文件（与批内其他影像或历史已检影像内容完全相同）。
-          请逐项确认处理方式；未重复的影像不受影响，将在确认后立即开始检测。
+          检出 <b>{{ duplicates.length }}</b> 幅重复底片（与批内其他影像或历史已检影像内容指纹完全一致）。
+          请逐项确认处置方式；非重复影像不受影响，确认后立即开始评定。
         </div>
         <div class="dd-list">
           <div
@@ -558,7 +619,7 @@ onUnmounted(() => {
                   :class="d.kind"
                 >{{ d.kind === "history" ? "与历史已检影像重复" : "批内重复" }}</span>
                 <template v-if="d.kind === 'batch'">
-                  与本批「{{ d.duplicate_of }}」内容相同
+                  与本批「{{ d.duplicate_of }}」内容一致
                 </template>
                 <template v-else-if="d.history">
                   首检 {{ d.history.image_id.slice(0, 8) }}
@@ -582,7 +643,7 @@ onUnmounted(() => {
                 :class="{ on: (dupDecisions[d.task_id] ?? 'skip') === 'keep' }"
                 @click="setDecision(d.task_id, 'keep')"
               >
-                仍检测
+                强制评定
               </button>
             </div>
           </div>
@@ -600,9 +661,9 @@ onUnmounted(() => {
             class="btn ghost"
             @click="setAllDecisions('keep')"
           >
-            全部仍检测
+            全部强制评定
           </button>
-          <span class="dd-hint">跳过的文件不重复检测、不出报告；仍检测的会正常评片归档。</span>
+          <span class="dd-hint">跳过的底片不重复评定、不出具报告；强制评定的底片正常评片并归档。</span>
           <button
             type="button"
             class="btn"
@@ -610,14 +671,14 @@ onUnmounted(() => {
             style="margin-left: auto"
             @click="onDedupConfirm"
           >
-            {{ resolving ? "提交中…" : `确认并继续（跳过 ${skipCount} · 仍检测 ${keepCount}）→` }}
+            {{ resolving ? "提交中…" : `确认并继续（跳过 ${skipCount} · 强制评定 ${keepCount}）→` }}
           </button>
           <button
             type="button"
             class="btn ghost dd-danger"
             @click="onCancel"
           >
-            放弃整批
+            取消整批
           </button>
         </div>
         <div
@@ -635,7 +696,7 @@ onUnmounted(() => {
         v-if="backendDown"
         class="err show"
       >
-        ⚠ 后端无响应，已暂停进度轮询。<button
+        ⚠ 推理服务无响应，已暂停进度轮询。<button
           class="btn link"
           type="button"
           @click="retryConnection"
@@ -655,7 +716,7 @@ onUnmounted(() => {
         <span
           v-else
           class="sec-state fin"
-        >已结束</span>
+        >已完结</span>
       </div>
       <BatchProgress
         v-if="status"
@@ -674,14 +735,14 @@ onUnmounted(() => {
           class="btn"
           @click="reset()"
         >
-          新批次 →
+          新建批次 →
         </button>
         <button
           type="button"
           class="btn ghost"
           @click="emit('archive')"
         >
-          去档案检索
+          查阅检测档案
         </button>
       </div>
     </div>
@@ -710,16 +771,16 @@ onUnmounted(() => {
             {{ row.done }}/{{ row.total }}<em
               v-if="row.failed"
               class="h-fail"
-            > 败{{ row.failed }}</em>
+            > 失败{{ row.failed }}</em>
           </span>
           <span
             class="h-status"
             :class="row.status"
           >{{
             row.status === "finished"
-              ? "完成"
+              ? "已完成"
               : row.status === "awaiting_review"
-                ? "待查重复核"
+                ? "待重复性核查"
                 : "进行中"
           }}</span>
         </button>
@@ -729,7 +790,7 @@ onUnmounted(() => {
   <ConfirmDialog
     :open="cancelConfirmOpen"
     title="取消批次确认"
-    message="取消后该批次未处理的影像将停止处理，已完成结果保留；失败/取消的任务之后可重试。确定取消？"
+    message="取消后，该批次尚未处理的底片将停止评定，已完成的结果予以保留；失败/已取消的任务后续可重试。确认取消？"
     confirm-text="取消批次"
     danger
     @confirm="onCancelConfirmed"

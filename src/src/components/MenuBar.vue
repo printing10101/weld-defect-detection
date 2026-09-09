@@ -24,10 +24,10 @@ const emit = defineEmits<{ action: [id: string] }>();
 // 工作区名映射（表驱动：三元链漏分支时 viewer/std-eval 等页会错显示成"设备标定"）。
 // 键与 ViewId（types/api.ts）一致。
 const WORKSPACE_NAMES: Record<string, string> = {
-  journey: "单张检测",
-  batch: "批量检测",
-  archive: "档案检索",
-  viewer: "底片查看",
+  journey: "单幅评定",
+  batch: "批量评定",
+  archive: "检测档案",
+  viewer: "底片观察",
   "std-eval": "系统评价",
   device: "设备标定",
 };
@@ -50,8 +50,8 @@ const MENUS: Menu[] = [
     id: "file",
     label: "文件",
     items: [
-      { id: "open-image", label: "打开影像…", shortcut: "Ctrl+O" },
-      { id: "open-batch", label: "批量导入…", shortcut: "Ctrl+Shift+O" },
+      { id: "open-image", label: "打开射线影像…", shortcut: "Ctrl+O" },
+      { id: "open-batch", label: "批量导入底片…", shortcut: "Ctrl+Shift+O" },
       { id: "sep1", label: "", separator: true },
       { id: "exit", label: "退出", shortcut: "Alt+F4" },
     ],
@@ -60,18 +60,18 @@ const MENUS: Menu[] = [
     id: "view",
     label: "视图",
     items: [
-      { id: "view-journey", label: "单张检测", shortcut: "Ctrl+1" },
-      { id: "view-batch", label: "批量检测", shortcut: "Ctrl+2" },
-      { id: "view-archive", label: "档案检索", shortcut: "Ctrl+3" },
+      { id: "view-journey", label: "单幅评定", shortcut: "Ctrl+1" },
+      { id: "view-batch", label: "批量评定", shortcut: "Ctrl+2" },
+      { id: "view-archive", label: "检测档案", shortcut: "Ctrl+3" },
       { id: "view-device", label: "设备标定", shortcut: "Ctrl+4" },
-      { id: "view-viewer", label: "底片查看", shortcut: "Ctrl+5" },
+      { id: "view-viewer", label: "底片观察", shortcut: "Ctrl+5" },
       { id: "view-std-eval", label: "系统评价", shortcut: "Ctrl+6" },
     ],
   },
   {
     id: "tools",
     label: "工具",
-    items: [{ id: "operator", label: "操作员设置…" }],
+    items: [{ id: "operator", label: "检测人员信息…" }],
   },
   {
     id: "help",
@@ -161,7 +161,7 @@ onBeforeUnmount(() => document.removeEventListener("click", onDocClick));
     <div class="spacer" />
     <!-- 右侧：当前工作区指示（AutoCAD 顶栏上下文信息） -->
     <div class="ctx">
-      工作区：{{
+      当前工作区：{{
         WORKSPACE_NAMES[activeView] ?? "设备标定"
       }}
     </div>
@@ -175,7 +175,7 @@ onBeforeUnmount(() => document.removeEventListener("click", onDocClick));
         type="button"
         class="logout"
         @click="logout"
-      >登出</button>
+      >注销</button>
     </div>
   </div>
 </template>

@@ -49,7 +49,7 @@ async function submitLogin(): Promise<void> {
     return;
   }
   if (!privateKeyText.value) {
-    error.value = "请选择私钥证书文件（管理员签发的 .key/.pem 文本）";
+    error.value = "请选择私钥证书文件（管理员签发的 .key / .pem 文本）";
     return;
   }
   busy.value = true;
@@ -57,7 +57,7 @@ async function submitLogin(): Promise<void> {
     await auth.login(usernameInput.value.trim(), privateKeyText.value);
     onLoggedOut();
   } catch (e) {
-    error.value = e instanceof ApiRequestError ? e.message : "登录失败，请重试";
+    error.value = e instanceof ApiRequestError ? e.message : "鉴权失败，请重试";
   } finally {
     busy.value = false;
   }
@@ -66,7 +66,7 @@ async function submitLogin(): Promise<void> {
 async function submitBootstrap(): Promise<void> {
   error.value = "";
   if (!bootUsername.value.trim()) {
-    error.value = "请输入引导账号名";
+    error.value = "请输入初始化账号名";
     return;
   }
   busy.value = true;
@@ -78,7 +78,7 @@ async function submitBootstrap(): Promise<void> {
     // 保存后可手动收起。
     usernameInput.value = out.username;
   } catch (e) {
-    error.value = e instanceof ApiRequestError ? e.message : "引导失败";
+    error.value = e instanceof ApiRequestError ? e.message : "账号初始化失败";
   } finally {
     busy.value = false;
   }
@@ -96,7 +96,7 @@ function copyBootKey(): void {
       @submit.prevent="submitLogin"
     >
       <h1 class="title">射线焊缝缺陷智能检测系统</h1>
-      <p class="subtitle">三员身份认证（SM2 挑战-响应）</p>
+      <p class="subtitle">三员分岗身份认证（SM2 挑战—响应协议）</p>
 
       <label class="field">
         <span>账号名</span>
@@ -109,7 +109,7 @@ function copyBootKey(): void {
       </label>
 
       <label class="field">
-        <span>私钥证书文件</span>
+        <span>SM2 私钥证书文件</span>
         <input
           type="file"
           accept=".key,.pem,.txt,.json"
@@ -126,14 +126,14 @@ function copyBootKey(): void {
         type="submit"
         :disabled="busy"
       >
-        {{ busy ? "登录中…" : "登 录" }}
+        {{ busy ? "正在鉴权…" : "登 录" }}
       </button>
 
       <button
         class="guest"
         type="button"
         @click="enterAsGuest"
-      >访客模式（免登录浏览全部功能）</button>
+      >访客模式（免鉴权进入，操作以访客身份审计）</button>
 
       <p
         v-if="error"
@@ -146,17 +146,17 @@ function copyBootKey(): void {
         :open="showBootstrap"
         @toggle="showBootstrap = ($event.target as HTMLDetailsElement).open"
       >
-        <summary>首次启动？创建第一个账号（引导窗口）</summary>
+        <summary>首次部署？初始化系统账号（引导窗口）</summary>
         <template v-if="!bootPrivateKey">
           <label class="field">
-            <span>引导账号名</span>
+            <span>初始化账号名</span>
             <input
               v-model="bootUsername"
               type="text"
             >
           </label>
           <label class="field">
-            <span>角色（一人一岗）</span>
+            <span>岗位角色（一人一岗，三员分立）</span>
             <select v-model="bootRole">
               <option value="sysadmin">系统管理员</option>
               <option value="secadmin">安全保密管理员</option>
@@ -167,11 +167,11 @@ function copyBootKey(): void {
             type="button"
             :disabled="busy"
             @click="submitBootstrap"
-          >创建账号并签发软证书</button>
+          >创建账号并签发 SM2 软证书</button>
         </template>
         <template v-else>
           <p class="warn">
-            请立即保存私钥（仅本次展示，系统不留存）：
+            请立即妥善保存私钥（仅此一次展示，系统不留存副本）：
             <button
               type="button"
               @click="copyBootKey"

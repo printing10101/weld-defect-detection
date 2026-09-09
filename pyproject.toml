@@ -28,6 +28,7 @@ dependencies = [
     #   Windows 缺 GTK/Pango 实测不可用（2026-08-04 M6），v1 用 reportlab（全离线中文字体）
     "pypdf>=4.0",  # M7 PDF/A-1b 后处理（XMP + sRGB OutputIntent + 文档 ID）
     "pillow-heif>=1.0",  # HEIC 解码（image_loader 懒加载，缺失则该格式降级不可用）
+    "rapidocr-onnxruntime>=1.2",  # 底片印字（扫描日期/编号）OCR；缺失时该功能降级 unavailable
 ]
 
 [project.optional-dependencies]

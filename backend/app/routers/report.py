@@ -26,6 +26,16 @@ from backend.infra.fs import safe_resolve
 router = APIRouter(tags=["report"])
 
 
+class FilmStampOut(BaseModel):
+    """底片印字（扫描日期/编号）识别结论（run_inspection 结果快照）。"""
+
+    status: str  # present | missing | unavailable | off
+    text: str | None = None
+    orientation: str | None = None  # normal | mirrored
+    confidence: float | None = None
+    need_review: bool = False
+
+
 class ReportOut(BaseModel):
     report_id: str
     image_id: str
@@ -39,6 +49,8 @@ class ReportOut(BaseModel):
     disposition_label: str | None = None
     disposition_actions: list[str] = []
     pdf_url: str
+    # 底片印字性质快照（重新生成模式无 fresh 识别结果时为 None）
+    stamp: FilmStampOut | None = None
 
 
 class ReportDetectionsOut(BaseModel):
@@ -146,6 +158,7 @@ async def report(
         disposition_label=out.get("disposition_label"),
         disposition_actions=list(out.get("disposition_actions") or []),
         pdf_url=f"/api/v1/report/{out['report_id']}/pdf",
+        stamp=FilmStampOut(**out["stamp"]) if out.get("stamp") else None,
     )
 
 

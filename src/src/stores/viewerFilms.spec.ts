@@ -82,4 +82,73 @@ describe("viewerFilms store", () => {
     const revoked = vi.mocked(URL.revokeObjectURL).mock.calls.map((c) => c[0]);
     expect(revoked.length).toBe(1);
   });
+
+  // 批量标注约定：有问题的底片回填缺陷框，无问题底片无条目（不标注）
+  it("setAnnotations 回填缺陷标注，annotationsOf 按 id 取用", () => {
+    const s = useViewerFilmsStore();
+    s.add([makeFile("a.png"), makeFile("b.png")]);
+    const [a, b] = [s.films[0], s.films[1]];
+    expect(s.annotationsOf(a.id)).toBeNull(); // 未检出的底片无标注
+    s.setAnnotations(a.id, {
+      imageW: 100,
+      imageH: 80,
+      reportId: "r1",
+      boxes: [{ id: "d1", classId: 4, bbox: [10, 10, 20, 20], confidence: 0.9, needReview: false }],
+    });
+    expect(s.annotationsOf(a.id)?.boxes).toHaveLength(1);
+    expect(s.annotationsOf(b.id)).toBeNull(); // 无问题底片保持无标注
+    expect(s.annotationsOf(null)).toBeNull(); // 档案影像等无 filmId 的面板安全返回
+  });
+
+  it("remove/clear/驱逐时同步清除对应标注", () => {
+    const s = useViewerFilmsStore();
+    s.add([makeFile("a.png")]);
+    const film = s.films[0];
+    s.setAnnotations(film.id, {
+      imageW: 100,
+      imageH: 80,
+      reportId: "r1",
+      boxes: [{ id: "d1", classId: 0, bbox: [0, 0, 5, 5], confidence: 0.5, needReview: false }],
+    });
+    s.remove(film.id);
+    expect(s.annotationsOf(film.id)).toBeNull();
+
+    s.add([makeFile("b.png")]);
+    const b = s.films[0];
+    s.setAnnotations(b.id, { imageW: 1, imageH: 1, reportId: "r2", boxes: [] });
+    s.clear();
+    expect(s.annotationsOf(b.id)).toBeNull();
+  });
+
+  // 批量印字性质回填：日期/编号（正/镜像）作为底片性质供查看页查阅
+  it("setStamp 回填印字性质，stampOf 按 id 取用", () => {
+    const s = useViewerFilmsStore();
+    s.add([makeFile("a.png"), makeFile("b.png")]);
+    const [a, b] = [s.films[0], s.films[1]];
+    expect(s.stampOf(a.id)).toBeNull(); // 未回填（单张上传未识别）安全返回
+    s.setStamp(a.id, {
+      status: "present",
+      text: "2023-08-12 No.0421",
+      orientation: "mirrored",
+      needReview: false,
+    });
+    expect(s.stampOf(a.id)).toMatchObject({ orientation: "mirrored", needReview: false });
+    expect(s.stampOf(b.id)).toBeNull();
+    expect(s.stampOf(null)).toBeNull();
+  });
+
+  it("remove/clear 时同步清除印字性质", () => {
+    const s = useViewerFilmsStore();
+    s.add([makeFile("a.png")]);
+    const film = s.films[0];
+    s.setStamp(film.id, { status: "missing", text: null, orientation: null, needReview: true });
+    s.remove(film.id);
+    expect(s.stampOf(film.id)).toBeNull();
+
+    s.add([makeFile("b.png")]);
+    const b = s.films[0];
+    s.setStamp(b.id, { status: "present", text: "0421", orientation: "normal", needReview: false });
+    s.clear();
+    expect(s.stampOf(b.id)).toBeNull();
+  });
 });

@@ -12,9 +12,9 @@ const emit = defineEmits<{
 }>();
 
 const VIEWS: { id: ViewId; label: string; icon: string }[] = [
-  { id: "journey", label: "单张检测", icon: "M4 3h16v14H4z M4 17l5-5 4 4 3-3 4 4" },
-  { id: "batch", label: "批量检测", icon: "M3 4h8v8H3z M13 4h8v8h-8z M3 14h8v8H3z M13 14h8v8h-8z" },
-  { id: "archive", label: "档案检索", icon: "M4 4h16v4H4z M4 10h16v10H4z M8 7h.01" },
+  { id: "journey", label: "单幅评定", icon: "M4 3h16v14H4z M4 17l5-5 4 4 3-3 4 4" },
+  { id: "batch", label: "批量评定", icon: "M3 4h8v8H3z M13 4h8v8h-8z M3 14h8v8H3z M13 14h8v8h-8z" },
+  { id: "archive", label: "检测档案", icon: "M4 4h16v4H4z M4 10h16v10H4z M8 7h.01" },
   { id: "device", label: "设备标定", icon: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M12 2v3 M12 19v3 M2 12h3 M19 12h3" },
 ];
 </script>
@@ -26,7 +26,7 @@ const VIEWS: { id: ViewId; label: string; icon: string }[] = [
       <button
         type="button"
         class="big"
-        title="选择单张影像提交检测 (Ctrl+O)"
+        title="导入单幅射线底片并提交评定 (Ctrl+O)"
         @click="emit('action', 'open-image')"
       >
         <svg
@@ -38,7 +38,7 @@ const VIEWS: { id: ViewId; label: string; icon: string }[] = [
       <button
         type="button"
         class="big"
-        title="多底片/文件夹批量检测 (Ctrl+Shift+O)"
+        title="多幅底片/整卷文件夹批量导入评定 (Ctrl+Shift+O)"
         @click="emit('action', 'open-batch')"
       >
         <svg
@@ -71,14 +71,14 @@ const VIEWS: { id: ViewId; label: string; icon: string }[] = [
 
     <div class="spacer" />
 
-    <!-- 右侧：操作员（点击修改，审计留痕入口） -->
+    <!-- 右侧：检测人员（点击修改，报告签署与审计追溯入口） -->
     <button
       type="button"
       class="operator"
-      title="点击修改操作员姓名（用于报告签名与审计留痕）"
+      title="点击修改检测人员姓名（用于报告签署与审计追溯）"
       @click="emit('action', 'operator')"
     >
-      操作员：{{ operator }}
+      检测人员：{{ operator }}
     </button>
   </div>
 </template>

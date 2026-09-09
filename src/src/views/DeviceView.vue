@@ -88,17 +88,17 @@ async function doCalibrate(): Promise<void> {
   info.value = null;
   if (!selectedId.value) return;
   if (!calCalibrator.value.trim()) {
-    error.value = "标定员必填。";
+    error.value = "标定人员不能为空。";
     return;
   }
   const spacing = Number(calPixelSpacing.value);
   if (!Number.isFinite(spacing) || spacing <= 0) {
-    error.value = "实测像素标定必须为正数。";
+    error.value = "实测像素标定值必须为正数。";
     return;
   }
   const refSpacing = calRefSpacing.value.trim() ? Number(calRefSpacing.value) : null;
   if (refSpacing !== null && (!Number.isFinite(refSpacing) || refSpacing <= 0)) {
-    error.value = "参考像素标定必须为正数。";
+    error.value = "标定件参考值必须为正数。";
     return;
   }
   const density = calDensity.value.trim() ? Number(calDensity.value) : null;
@@ -117,7 +117,7 @@ async function doCalibrate(): Promise<void> {
     calNotes.value = "";
     await selectDevice(selectedId.value);
     await refreshList();
-    info.value = "标定已记录。";
+    info.value = "标定记录已保存。";
   } catch (e) {
     error.value = toErrorMessage(e);
   }
@@ -139,24 +139,24 @@ onMounted(() => {
       设备标定
     </h1>
     <div class="lede">
-      检测设备注册与像素标定管理，跨设备一致性判定（偏差 ≤ 5% 达标）
+      检测设备台账与空间像素标定管理，支持跨设备一致性核查（相对偏差 ≤ 5% 判定达标）
     </div>
 
     <div class="guide">
       <div class="g">
         <div class="n">
-          一 · 注册设备
+          一 · 设备登记
         </div>
         <div class="t">
-          登记检测设备（名称/型号/序列号），作为标定档案主体。
+          登记检测设备信息（名称/型号/出厂编号），作为标定档案主体。
         </div>
       </div>
       <div class="g">
         <div class="n">
-          二 · 标定录入
+          二 · 标定值录入
         </div>
         <div class="t">
-          实测像素标定与标定件参考值比对，系统计算相对偏差：≤5% 达标，超差标记「over」。
+          实测像素标定与标定件参考值比对，系统自动计算相对偏差：≤5% 判定达标，超差标记「over」。
         </div>
       </div>
       <div class="g">
@@ -164,7 +164,7 @@ onMounted(() => {
           三 · 一致性档案
         </div>
         <div class="t">
-          每次标定留档（操作员/时间/偏差），跨设备筛查前可核对设备状态。
+          每次标定均留档（标定人员/时间/偏差），批量筛查前可核对设备状态。
         </div>
       </div>
     </div>
@@ -183,10 +183,10 @@ onMounted(() => {
     </div>
 
     <div class="row">
-      <!-- 左：设备列表 + 注册 -->
+      <!-- 左：设备列表 + 登记 -->
       <div class="grow">
         <div class="section-h">
-          设备
+          设备台账
         </div>
         <div class="dev-list">
           <button
@@ -215,7 +215,7 @@ onMounted(() => {
             v-if="devices.length === 0"
             class="hint"
           >
-            尚未注册设备。
+            暂无已登记设备。
           </div>
         </div>
 
@@ -223,7 +223,7 @@ onMounted(() => {
           class="section-h"
           style="margin-top: 18px"
         >
-          注册设备
+          设备登记
         </div>
         <div class="field">
           <label for="dn">设备名称 <span class="req">*</span></label>
@@ -242,7 +242,7 @@ onMounted(() => {
           >
         </div>
         <div class="field">
-          <label for="ds">序列号</label>
+          <label for="ds">出厂编号</label>
           <input
             id="ds"
             v-model="regSerial"
@@ -261,7 +261,7 @@ onMounted(() => {
           type="button"
           @click="doRegister"
         >
-          注册设备 →
+          登记设备 →
         </button>
       </div>
 
@@ -276,12 +276,12 @@ onMounted(() => {
             class="cal-status"
             :class="detail.calibration_count ? 'has' : ''"
           >
-            标定 {{ detail.calibration_count }} 次
+            累计标定 {{ detail.calibration_count }} 次
             <template v-if="lastCal()">
               · 最近 {{ lastCal()!.calibrated_at }} 由 {{ lastCal()!.calibrator }}
               <span :class="lastCal()!.status === 'over' ? 'over' : 'ok'">
                 （{{ lastCal()!.status === "over" ? "超差 over" : "达标 ok" }}，
-                偏差 {{ lastCal()!.deviation_pct ?? "—" }}%）
+                相对偏差 {{ lastCal()!.deviation_pct ?? "—" }}%）
               </span>
             </template>
           </div>
@@ -290,15 +290,15 @@ onMounted(() => {
             class="section-h"
             style="margin-top: 16px"
           >
-            录入标定
+            录入标定值
           </div>
           <div class="field">
-            <label for="cal1">标定员（当前登录账号）<span class="req">*</span></label>
+            <label for="cal1">标定人员（当前登录账号）<span class="req">*</span></label>
             <input
               id="cal1"
               v-model="calCalibrator"
               readonly
-              title="标定归属当前登录账号（三员分岗防冒名）"
+              title="标定记录归属当前登录账号（三员分岗防冒名）"
             >
           </div>
           <div class="field">
@@ -309,7 +309,7 @@ onMounted(() => {
               placeholder="如 0.1000"
             >
             <div class="why">
-              该设备的实测标定值；检测提交时作为像素标定默认参考。
+              本设备实测空间标定值；提交检测任务时作为像素标定的默认参考。
             </div>
           </div>
           <div class="field">
@@ -320,11 +320,11 @@ onMounted(() => {
               placeholder="如 0.1000"
             >
             <div class="why">
-              跨设备一致性基准；填后自动计算相对偏差并判定 ≤5%。
+              跨设备一致性核查基准；填写后自动计算相对偏差并按 ≤5% 判定。
             </div>
           </div>
           <div class="field">
-            <label for="cal4">黑度校验值（可选）</label>
+            <label for="cal4">黑度 D 校验值（选填）</label>
             <input
               id="cal4"
               v-model="calDensity"
@@ -343,7 +343,7 @@ onMounted(() => {
             type="button"
             @click="doCalibrate"
           >
-            记录标定 →
+            保存标定记录 →
           </button>
 
           <div
@@ -379,7 +379,7 @@ onMounted(() => {
               v-if="detail.calibrations.length === 0"
               class="hint"
             >
-              尚无标定记录。
+              暂无标定记录。
             </div>
           </div>
         </template>
@@ -388,7 +388,7 @@ onMounted(() => {
           class="hint"
           style="margin-top: 20px"
         >
-          从左侧选择设备查看档案，或先注册一台设备。
+          请从左侧选择设备查看标定档案，或先登记设备。
         </div>
       </div>
     </div>

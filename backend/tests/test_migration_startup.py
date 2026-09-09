@@ -16,7 +16,8 @@ from backend.infra.migrate import ensure_migrations
 # + 0004（删除 users 表：移除用户/认证系统，改操作员姓名机制）
 # + 0005（defects 复核留痕）+ 0006（gate_rejects 不合格底片留档台账）
 # + 0010（images.content_hash 影像内容摘要：批量上传查重）
-_HEAD = "0010_image_content_hash"
+# + 0011（images.stamp_* 底片印字识别快照：扫描日期/编号，正/镜像）
+_HEAD = "0011_film_stamp"
 
 
 def test_migrate_fresh_db_creates_tables(tmp_path) -> None:

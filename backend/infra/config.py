@@ -530,6 +530,26 @@ class BatchCfg(BaseModel):
     # 保留有 retry 价值（failed/cancelled 可断点续跑）的批次，running/新建批次恒保留。
 
 
+class StampCfg(BaseModel):
+    """底片印字识别配置（扫描日期/编号，正/镜像）。
+
+    enabled            : false=整体关闭（落库 stamp_status="off"，不参与复核）。
+    min_conf           : 命中日期/编号模式所需的最低 OCR 识别置信度（保守防误判）。
+    max_side           : OCR 前长边上限（大底片等比降采样，控推理耗时）。
+    batch_flag_ratio   : 批量豁免阈值——批内有效片中「有印字占比」低于该值时，
+                         视为该批底片普遍无印字，缺印字不再逐张转人工复核
+                         （已识别到的印字仍照常记录，供查阅）。
+    batch_flag_min     : 豁免规则的适用批量下限：批内有效片少于该数时缺印字
+                         仍然逐张转人工复核（小批量缺印字是真实异常）。
+    """
+
+    enabled: bool = True
+    min_conf: float = 0.6
+    max_side: int = 1800
+    batch_flag_ratio: float = 0.5
+    batch_flag_min: int = 4
+
+
 class BackupCfg(BaseModel):
     """备份策略配置（S-12 备份增强）。
 
@@ -621,6 +641,7 @@ class AppConfig(BaseSettings):
     gate: GateCfg = GateCfg()
     observability: ObservabilityCfg = ObservabilityCfg()
     batch: BatchCfg = BatchCfg()
+    stamp: StampCfg = StampCfg()
     backup: BackupCfg = BackupCfg()
     watchdog: WatchdogCfg = WatchdogCfg()
     disk_space: DiskSpaceCfg = DiskSpaceCfg()

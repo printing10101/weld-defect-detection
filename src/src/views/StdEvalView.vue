@@ -98,7 +98,7 @@ async function savePersonnel(): Promise<void> {
     const out = await putStdPersonnel(collectPeople());
     qualified.value = out.qualified;
     issues.value = out.issues;
-    msg.value = out.qualified ? "资质校验通过。" : "已保存，但存在资质问题（见下方列表）。";
+    msg.value = out.qualified ? "资质校验通过。" : "已保存，但存在资质问题（详见下方列表）。";
   } catch (e) {
     err.value = toErrorMessage(e);
   } finally {
@@ -122,8 +122,8 @@ async function buildRecord(): Promise<void> {
       record_name: recordName.value.trim() || "std_record",
     });
     msg.value = record.value.grading.official
-      ? "记录表已生成（正式分级结论）。"
-      : "记录表已生成（资质或 FRR 未满足，仅参考值）。";
+      ? "附录 A 记录表已生成（正式分级结论）。"
+      : "附录 A 记录表已生成（人员资质或 FRR 未满足要求，分级数据仅作参考）。";
   } catch (e) {
     err.value = toErrorMessage(e);
   } finally {
@@ -228,8 +228,8 @@ const levelMarks = computed(() => {
   <div>
     <h1 class="title-zine">系统评价（DB50/T 1807-2025）</h1>
     <div class="lede">
-      先用命令行产出指标：python -m backend.evaluation.run_std_eval --img-dir … --label-dir … --model …；
-      本页录入资质并生成附录A 记录表。
+      先经命令行产出评价指标：python -m backend.evaluation.run_std_eval --img-dir … --label-dir … --model …；
+      本页用于检测人员资质录入与附录 A 记录表生成。
     </div>
 
     <div class="section-h">
@@ -264,7 +264,7 @@ const levelMarks = computed(() => {
           </select>
         </div>
         <div class="field">
-          <label for="spv">有效期（可选）</label>
+          <label for="spv">证书有效期（选填）</label>
           <input
             id="spv"
             v-model="pValid"
@@ -316,16 +316,16 @@ const levelMarks = computed(() => {
         :disabled="busy"
         @click="savePersonnel"
       >
-        保存资质
+        保存并校验资质
       </button>
       <span
         v-if="qualified === true"
         class="ok show"
-      >校验通过</span>
+      >资质校验通过</span>
     </div>
 
     <div class="section-h">
-      <span class="no">2</span>记录表信息
+      <span class="no">2</span>记录表基本信息
     </div>
     <div class="panel">
       <div class="row">
@@ -345,7 +345,7 @@ const levelMarks = computed(() => {
           >
         </div>
         <div class="field">
-          <label for="sed">开发单位</label>
+          <label for="sed">研制单位</label>
           <input
             id="sed"
             v-model="developer"
@@ -385,7 +385,7 @@ const levelMarks = computed(() => {
           </select>
         </div>
         <div class="field">
-          <label for="ser">记录名</label>
+          <label for="ser">记录表编号</label>
           <input
             id="ser"
             v-model="recordName"
@@ -398,7 +398,7 @@ const levelMarks = computed(() => {
         :disabled="busy"
         @click="buildRecord"
       >
-        生成记录表
+        生成附录 A 记录表
       </button>
       <a
         v-if="record"
@@ -418,15 +418,15 @@ const levelMarks = computed(() => {
         <table class="dtable">
           <tbody>
             <tr>
-              <th>KDR（重点关注）</th>
+              <th>KDR（关键缺陷检出率）</th>
               <td>{{ pct(record.metrics.kdr) }}（严格口径 {{ pct(record.metrics.kdr_strict) }}）</td>
-              <th>WDR（综合）</th>
+              <th>WDR（综合检出率）</th>
               <td>{{ pct(record.metrics.wdr) }}（{{ pct(record.metrics.wdr_strict) }}）</td>
             </tr>
             <tr>
-              <th>TDR（正检率）</th>
+              <th>TDR（正确检出率）</th>
               <td>{{ pct(record.metrics.tdr) }}（{{ pct(record.metrics.tdr_strict) }}）</td>
-              <th>FRR（底片误报率）</th>
+              <th>FRR（整片误报率）</th>
               <td>{{ pct(record.metrics.frr) }}（{{ pct(record.metrics.frr_strict) }}）</td>
             </tr>
             <tr>
@@ -445,7 +445,7 @@ const levelMarks = computed(() => {
               </td>
             </tr>
             <tr>
-              <th>逐类指标</th>
+              <th>逐类别指标</th>
               <td colspan="3">
                 TDRn：{{ record.metrics.tdr_row }}<br>
                 FDRn：{{ record.metrics.fdr_row }}<br>
@@ -465,20 +465,20 @@ const levelMarks = computed(() => {
     </template>
 
     <div class="section-h">
-      <span class="no">4</span>评价历史与等级曲线（E-15）
+      <span class="no">4</span>评价历史与分级曲线
     </div>
     <div class="panel">
       <div
         v-if="historyErr"
         class="err show"
       >
-        历史档案读取失败：{{ historyErr }}
+        评价历史读取失败：{{ historyErr }}
       </div>
       <div
         v-else-if="history.length === 0"
         class="hint"
       >
-        暂无评价历史：先用 CLI 产出指标或生成记录表，历史会自动聚合到这里。
+        暂无评价历史 —— 先经 CLI 产出指标或生成记录表，历史记录将自动汇聚至此。
       </div>
       <template v-else>
         <svg
@@ -548,7 +548,7 @@ const levelMarks = computed(() => {
           <span class="key key-tdr">TDR</span>
           <span class="key key-wdr">WDR</span>
           <span class="key key-frr">FRR</span>
-          <span class="key key-lvl">L1-L4=系统分级</span>
+          <span class="key key-lvl">L1–L4 = 系统分级</span>
           <span class="key">共 {{ history.length }} 条评价记录</span>
         </div>
       </template>

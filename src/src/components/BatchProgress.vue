@@ -1,14 +1,15 @@
 <script setup lang="ts">
 /** 批量进度面板：进度条 + 计数 + 逐任务状态 + 取消/重试操作。 */
+import { stampBadge } from "../utils/filmStamp";
 import type { BatchStatusOut } from "../types/api";
 
 defineProps<{ status: BatchStatusOut }>();
 const emit = defineEmits<{ cancel: []; retry: []; archive: [] }>();
 
 const TASK_STATUS_LABEL: Record<string, string> = {
-  pending: "等待",
-  running: "处理中",
-  done: "完成",
+  pending: "排队中",
+  running: "评定中",
+  done: "已完成",
   failed: "失败",
   cancelled: "已取消",
 };
@@ -23,10 +24,25 @@ const STATUS_BADGE: Record<string, string> = {
 
 /** 批次级状态标签（awaiting_review = 查重命中，等人工复核）。 */
 const BATCH_STATUS_LABEL: Record<string, string> = {
-  running: "处理中",
-  awaiting_review: "待查重复核",
-  finished: "已结束",
+  running: "评定中",
+  awaiting_review: "待重复性核查",
+  finished: "已完结",
 };
+
+/** 逐任务印字徽标（无识别数据的旧快照返回 null，不占位）。 */
+function stampOf(t: BatchStatusOut["tasks"][number]) {
+  return t.status === "done" ? stampBadge(t) : null;
+}
+
+/** 印字占比裁决摘要文案（批次收尾后展示豁免/补标结论）。 */
+function stampSummaryLine(status: BatchStatusOut): string {
+  const s = status.stamp_summary;
+  if (!s) return "";
+  const base = `底片印字：${s.present}/${s.evaluated} 张识别到日期/编号印字（${Math.round(s.ratio * 100)}%）`;
+  return s.suppressed
+    ? `${base} —— 该批普遍无印字，缺印字已按规则豁免人工复核`
+    : `${base} —— 缺印字底片已转人工复核 ${s.flagged} 张`;
+}
 </script>
 
 <template>
@@ -41,7 +57,7 @@ const BATCH_STATUS_LABEL: Record<string, string> = {
       <div class="bp-meta">
         <span class="bp-pct">{{ Math.round(status.progress * 100) }}%</span>
         <span class="bp-counts">
-          完成 {{ status.done }} / {{ status.total }}
+          已完成 {{ status.done }} / {{ status.total }}
           <em
             v-if="status.failed"
             class="bp-fail"
@@ -52,12 +68,12 @@ const BATCH_STATUS_LABEL: Record<string, string> = {
           v-if="status.status === 'running'"
           class="bp-est"
         >
-          预计剩余 ≈ {{ status.estimated_sec }}s
+          预计剩余 ≈ {{ status.estimated_sec }} 秒
         </span>
         <span
           v-else
           class="bp-fin"
-        >{{ BATCH_STATUS_LABEL[status.status] ?? "已结束" }}</span>
+        >{{ BATCH_STATUS_LABEL[status.status] ?? "已完结" }}</span>
       </div>
     </div>
 
@@ -74,16 +90,29 @@ const BATCH_STATUS_LABEL: Record<string, string> = {
         <span
           v-if="t.joint_level"
           class="bp-level"
-        >级别 {{ t.joint_level }}</span>
+        >评定级别 {{ t.joint_level }}</span>
         <span
           v-else-if="t.need_review"
           class="bp-rev"
-        >需复核</span>
+        >待人工复核</span>
+        <!-- 有问题的底片显式红标缺陷数；无缺陷底片不标注 -->
+        <span
+          v-if="t.status === 'done' && (t.defect_count ?? 0) > 0"
+          class="bp-defect"
+          title="该底片检出缺陷，已在「底片观察」中叠加标注框"
+        >缺陷 {{ t.defect_count }} 处</span>
         <span
           v-if="t.dup_kind"
           class="bp-dup"
-          :title="t.dup_kind === 'history' ? `与历史影像 ${t.dup_ref ?? ''} 内容重复` : `与批内 ${t.dup_ref ?? ''} 内容重复`"
+          :title="t.dup_kind === 'history' ? `与历史影像 ${t.dup_ref ?? ''} 内容指纹重复` : `与批内 ${t.dup_ref ?? ''} 内容指纹重复`"
         >重复</span>
+        <!-- 底片印字性质（扫描日期/编号，正/镜像）：识别到展示内容徽标，缺印字按复核状态标色 -->
+        <span
+          v-if="stampOf(t)"
+          class="bp-stamp"
+          :class="`stamp-${stampOf(t)!.cls}`"
+          :title="stampOf(t)!.title"
+        >{{ stampOf(t)!.label }}</span>
         <span
           class="badge"
           :class="STATUS_BADGE[t.status] ?? 'badge-muted'"
@@ -97,6 +126,13 @@ const BATCH_STATUS_LABEL: Record<string, string> = {
         >⚠ {{ t.error }}</span>
       </div>
     </div>
+
+    <p
+      v-if="status.stamp_summary"
+      class="bp-stamp-summary"
+    >
+      {{ stampSummaryLine(status) }}
+    </p>
 
     <div class="bp-ops">
       <button
@@ -113,14 +149,14 @@ const BATCH_STATUS_LABEL: Record<string, string> = {
         class="btn"
         @click="emit('retry')"
       >
-        重试失败 {{ status.failed }} 项 →
+        重试失败任务（{{ status.failed }} 项）→
       </button>
       <button
         type="button"
         class="btn ghost"
         @click="emit('archive')"
       >
-        去档案检索
+        查阅检测档案
       </button>
     </div>
   </div>
@@ -200,6 +236,15 @@ const BATCH_STATUS_LABEL: Record<string, string> = {
 .bp-rev {
   color: #b08000;
 }
+.bp-defect {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(204, 51, 51, 0.12);
+  color: #b03030;
+  font-weight: 600;
+  white-space: nowrap;
+}
 .bp-dup {
   font-size: 11px;
   padding: 2px 8px;
@@ -207,6 +252,33 @@ const BATCH_STATUS_LABEL: Record<string, string> = {
   background: rgba(214, 134, 21, 0.16);
   color: #b06a10;
   white-space: nowrap;
+}
+.bp-stamp {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stamp-ok {
+  background: rgba(42, 143, 74, 0.14);
+  color: #1e7a3d;
+}
+.stamp-warn {
+  background: rgba(204, 51, 51, 0.12);
+  color: #b03030;
+  font-weight: 600;
+}
+.stamp-muted {
+  background: rgba(120, 140, 180, 0.15);
+  color: #6a7b99;
+}
+.bp-stamp-summary {
+  margin: 0;
+  font-size: 12px;
+  color: #5a6b8a;
 }
 .badge {
   flex: none;

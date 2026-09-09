@@ -41,7 +41,9 @@ class BatchItem:
     image_name: str | None = None  # 展示用原始文件名（缺省取路径 basename）
     cleanup_dir: Path | None = None  # 批次专属暂存目录（任务完成后整体清理，P1-3）
     content_sha256: str | None = None  # 文件内容摘要（查重索引 + 落库 content_hash）
-    dup_kind: str | None = None  # 重复类型：history=与历史已检影像重复 | batch=批内重复 | None=不重复
+    dup_kind: str | None = (
+        None  # 重复类型：history=与历史已检影像重复 | batch=批内重复 | None=不重复
+    )
     dup_ref: str | None = None  # 重复对象描述：批内原文件名或历史 image_id（复核界面展示）
     dup_history: dict[str, Any] | None = None  # kind=history 时的历史影像摘要（复核界面展示）
 
@@ -79,6 +81,7 @@ class BatchManager:
         batch_dir: str | Path,
         max_retained_batches: int = 50,
         max_retained_snapshot_files: int = 200,
+        on_finished=None,
     ) -> None:
         self._pipeline_factory = pipeline_factory
         self._workers = max(1, workers)
@@ -87,6 +90,10 @@ class BatchManager:
         self._batch_dir.mkdir(parents=True, exist_ok=True)
         self._max_retained = max(1, int(max_retained_batches))
         self._max_snapshot_files = max(1, int(max_retained_snapshot_files))
+        # 批次收尾钩子（可选）：签名 (batch_id, done_results) -> dict | None。
+        # Registry 借此实现底片印字占比裁决（缺印字复核的批量豁免），BatchManager
+        # 本身不感知仓储/配置——依赖倒置，与 pipeline_factory 同一装配模式。
+        self._on_finished = on_finished
         self._pool = ThreadPoolExecutor(max_workers=self._workers, thread_name_prefix="batch")
         self._closed = False
         self._lock = threading.Lock()
@@ -105,6 +112,10 @@ class BatchManager:
         if not items:
             raise ValueError("batch 至少需要一张影像")
         batch_id = uuid.uuid4().hex
+        # 底片归属批次号（images.batch_no）：印字复核的批量豁免按批次结算，
+        # 须在任务快照（复制 options）前注入，retry 重跑时同样携带。
+        for item in items:
+            item.options.setdefault("batch_no", batch_id)
         tasks = [
             BatchTaskState(
                 task_id=uuid.uuid4().hex,
@@ -372,7 +383,27 @@ class BatchManager:
         if all(t["status"] in terminal for t in batch["tasks"]):
             batch["status"] = "finished"
             batch["finished_at"] = fmt_naive_utc()
+            self._run_finish_hook(batch)
             self._cleanup_staging(batch)
+
+    def _run_finish_hook(self, batch: dict) -> None:
+        """批次终态时执行收尾钩子（印字占比裁决等），fail-soft。
+
+        摘要写入批次快照（batch["stamp_summary"]）随 status 接口下发；钩子异常
+        不掩盖批次本身的成功终态，仅日志留痕。
+        """
+        if self._on_finished is None:
+            return
+        done_results = [
+            t["result"] for t in batch.get("tasks", []) if t["status"] == "done" and t.get("result")
+        ]
+        try:
+            summary = self._on_finished(batch["batch_id"], done_results)
+        except Exception as exc:  # noqa: BLE001 - 收尾钩子失败不改变批次终态
+            _LOG.exception("batch finish hook failed batch=%s: %s", batch["batch_id"], exc)
+            return
+        if summary:
+            batch["stamp_summary"] = summary
 
     def _cleanup_staging(self, batch: dict) -> None:
         """批次终态后清理上传暂存目录（P1-3：防 data/tmp 持续增长）。
