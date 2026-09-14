@@ -7,7 +7,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$pkgDir = "$env:LOCALAPPDATA\射线焊缝缺陷智能检测系统"   # Tauri NSIS installMode=currentUser 默认目录（= productName）
+# electron-builder NSIS per-user 默认安装目录：%LOCALAPPDATA%\Programs\<executableName>
+#（executableName 固定为 ASCII 的 ScanDetection，避免中文路径的编码隐患）
+$pkgDir = "$env:LOCALAPPDATA\Programs\ScanDetection"
 $dataDir = "$env:APPDATA\com.scandetection.sd"
 
 Write-Host "==> [0/6] 预检：18773 端口必须空闲（残留孤儿后端会造成假 PASS）" -ForegroundColor Cyan
@@ -29,16 +31,17 @@ if ($proc.ExitCode -ne 0) { throw "静默安装失败 exit=$($proc.ExitCode)" }
 if (-not (Test-Path "$pkgDir\ScanDetection.exe")) { throw "安装后未找到主程序" }
 Write-Host "    已安装到 $pkgDir"
 
-Write-Host "==> [2/6] 验证文件布局（壳/后端/嵌入Python/模型目录）" -ForegroundColor Cyan
+Write-Host "==> [2/6] 验证文件布局（壳/后端/嵌入Python/模型目录，extraResources 在 resources/ 下）" -ForegroundColor Cyan
 foreach ($p in @(
     "$pkgDir\ScanDetection.exe",
-    "$pkgDir\backend\app\main.py",
-    "$pkgDir\backend\configs\default.yaml",
-    "$pkgDir\backend\infra",
-    "$pkgDir\backend\models\weights",
-    "$pkgDir\python_embed\python.exe",
-    "$pkgDir\python_embed\Lib\site-packages\uvicorn",
-    "$pkgDir\python_embed\Lib\site-packages\onnxruntime"
+    "$pkgDir\resources\app.asar",
+    "$pkgDir\resources\backend\app\main.py",
+    "$pkgDir\resources\backend\configs\default.yaml",
+    "$pkgDir\resources\backend\infra",
+    "$pkgDir\resources\backend\models\weights",
+    "$pkgDir\resources\python_embed\python.exe",
+    "$pkgDir\resources\python_embed\Lib\site-packages\uvicorn",
+    "$pkgDir\resources\python_embed\Lib\site-packages\onnxruntime"
 )) {
     if (-not (Test-Path $p)) { throw "布局缺失: $p" }
 }
@@ -73,7 +76,7 @@ try {
     Start-Sleep -Seconds 2
 }
 
-$uninstaller = "$pkgDir\uninstall.exe"
+$uninstaller = "$pkgDir\Uninstall ScanDetection.exe"   # electron-builder NSIS 卸载器命名
 if (-not (Test-Path $uninstaller)) { throw "卸载器缺失（$uninstaller）——卸载/数据保留断言不可跳过" }
 Write-Host "==> 静默卸载" -ForegroundColor Cyan
 $un = Start-Process -FilePath $uninstaller -ArgumentList "/S" -PassThru -Wait

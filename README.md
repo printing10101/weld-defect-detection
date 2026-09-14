@@ -42,7 +42,7 @@ TDR/底片误报率）、混淆矩阵、L1–L4 系统分级、漏检/误检/误
 ## 目录结构
 
 ```
-src/                  Tauri + Vue3/TS 前端
+src/                  Electron 桌面壳（src/electron）+ Vue3/TS 前端
 backend/
   app/                FastAPI 路由 + registry + 批量队列
   domain/             领域层：interfaces.py（接口契约）/ detect / preprocess /
@@ -99,10 +99,10 @@ backend/.venv/Scripts/python scripts/e2e_api_smoke.py --soak 120
 ## 构建安装包
 
 ```powershell
-# 一键打包（推荐）：供给/裁剪嵌入运行时 → 前端构建 → Tauri 打包 → 输出安装包路径
+# 一键打包（推荐）：供给/裁剪嵌入运行时 → 前端构建 → Electron 打包 → 输出安装包路径
 # src/python_embed 缺失时自动从 python.org 嵌入包 + 锁定依赖构建（CI 可复现）
 powershell -ExecutionPolicy Bypass -File scripts\build_installer.ps1
-# 产物：src/src-tauri/target/release/bundle/nsis/射线焊缝缺陷智能检测系统_0.1.0_x64-setup.exe
+# 产物：src\release\射线焊缝缺陷智能检测系统_0.1.0_x64-setup.exe
 ```
 
 - **运行入口（交付口径）**：安装包是本软件唯一的对外使用入口——安装后从
@@ -110,8 +110,9 @@ powershell -ExecutionPolicy Bypass -File scripts\build_installer.ps1
   浏览器访问本地服务）与 `stop_app.vbs` 是**开发调试用**启动器，仅限开发机
   自用，不随安装包分发、禁止作为交付物外发。
 
-- 安装包**离线自足**：内嵌 Python 运行时与全部后端依赖（fastapi/onnxruntime/
-  opencv/国密库等）、WebView2 离线安装器；目标机无需联网、无需管理员权限。
+- 安装包**离线自足**：内嵌 Chromium（Electron）、Python 运行时与全部后端依赖
+  （fastapi/onnxruntime/opencv/国密库等）；目标机无需联网、无需预装任何浏览器
+  运行时、无需管理员权限。
 - **模型权重**：打包前把训练产物放到 `backend/models/weights/best.onnx`
   （缺失时应用仍可安装运行，但自动退化为基线检测器并在界面标注降级）。
 - 裁剪后的 `src/python_embed` 不能再用于跑后端单测（pytest 已剔除），
