@@ -56,6 +56,8 @@ class ReviewOut(BaseModel):
     stage: str
     need_review: bool
     review_count: int
+    # 人工确认缺陷是否成功自动回流训练池（G21）；False 详见后端 ERROR 日志
+    training_pool_synced: bool
 
 
 @router.post("/review", response_model=ReviewOut)

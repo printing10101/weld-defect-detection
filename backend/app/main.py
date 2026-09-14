@@ -12,7 +12,7 @@ import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -21,6 +21,7 @@ from backend.app.auth import AuthError
 from backend.app.dependencies import get_registry
 from backend.app.routers import (
     active,
+    atlas,
     audit,
     auth,
     batch,
@@ -34,6 +35,7 @@ from backend.app.routers import (
     export,
     health,
     judge,
+    llm,
     measure,
     metrics,
     models,
@@ -115,7 +117,12 @@ async def lifespan(app: FastAPI):
             _LOG.info("schema migrations applied (version=%s)", version)
         except Exception as exc:  # noqa: BLE001 - 迁移失败不应阻止启动；create_all 兜底
             _LOG.warning("schema migration skipped (create_all fallback): %s", exc)
-        reg = get_registry()
+        try:
+            reg = get_registry()
+        except Exception:  # noqa: BLE001 - 装配失败不能无声：否则 /health 永卡
+            # starting，且每个业务请求都会各自重试完整构造（重复迁移+加载模型）。
+            _LOG.exception("registry assembly failed; dependent wiring skipped")
+            return
         # C-15：sync.kind 非 local（http/cloud）= 配置层显式选择了"数据出本机"，
         # 启动即落 high 级安全告警留痕（offline_mode=False 的持久证据链）。
         try:
@@ -212,6 +219,27 @@ async def lifespan(app: FastAPI):
                 _LOG.info("backup scheduler started (interval=%.2fh)", interval)
         except Exception as exc:  # noqa: BLE001 - 调度失败不阻断装配
             _LOG.warning("backup scheduler start failed: %s", exc)
+        # 本地大模型（llama.cpp）随软件启停：enabled 时后台拉起（独立线程，
+        # 不阻塞装配；模型缺失/启动失败仅降级留痕，/health 的 llm 字段可观测）。
+        # 加载方式由「本地大模型注册表」的选中项推导：选中本地 GGUF → managed
+        # （本进程拉起）；选中已有服务 → external（只连不拉起，不占额外显存）。
+        try:
+            lc = reg.config.llm
+            if lc.enabled:
+                from backend.infra.llm_registry import LlmRegistry
+                from backend.infra.llm_server import LlamaServerManager
+
+                reg.llm_registry = LlmRegistry(lc)
+                eff = reg.llm_registry.effective_llm_cfg(lc)
+                reg.llm_manager = LlamaServerManager(
+                    eff, resolve_config_path(reg.config.paths.data_dir) / "llm"
+                )
+                reg.llm_manager.start_async()
+                if lc.scan_on_startup:
+                    # 后台全盘扫描（默认关：不做开机全盘 IO）；结果落缓存供界面读取。
+                    reg.llm_registry.start_scan()
+        except Exception as exc:  # noqa: BLE001 - 拉起失败不阻断装配
+            _LOG.warning("llm server start failed: %s", exc)
         # P2-8：随主应用同进程拉起人工标注器（默认关；开启后主动学习闭环无需另开终端）。
         _start_annotator_if_enabled()
         _LOG.info("application startup complete (registry assembled)")
@@ -224,7 +252,11 @@ async def lifespan(app: FastAPI):
 
         reg = try_get_registry()
         if reg is not None:
-            reg.batch_manager.shutdown()
+            from fastapi.concurrency import run_in_threadpool
+
+            # shutdown(wait=True) 会等在跑评片结束（单张可达数十秒）：
+            # 放线程池执行，避免 lifespan 退出阶段冻结事件循环。
+            await run_in_threadpool(reg.batch_manager.shutdown)
             # S-09/S-12a：看门狗与备份调度线程一并优雅退出。
             if reg.watchdog is not None:
                 reg.watchdog.stop()
@@ -232,6 +264,9 @@ async def lifespan(app: FastAPI):
                 reg.disk_watchdog.stop()
             if reg.backup_scheduler is not None:
                 reg.backup_scheduler.stop()
+            # 本地大模型随软件退出回收（llama-server 进程 terminate→kill）。
+            if reg.llm_manager is not None:
+                reg.llm_manager.stop()
     except Exception as exc:  # noqa: BLE001 - 关停失败不应掩盖其它退出逻辑
         _LOG.warning("batch_manager shutdown skipped: %s", exc)
 
@@ -362,7 +397,9 @@ def create_app() -> FastAPI:
         report.router,
         records.router,
         models.router,
+        llm.router,
         audit.router,
+        atlas.router,
         active.router,
         evaluation.router,
         std_eval.router,
@@ -379,21 +416,25 @@ def create_app() -> FastAPI:
             app.include_router(router, prefix="/api/v1")
         else:
             app.include_router(router, prefix="/api/v1", dependencies=[Depends(get_principal)])
+
+    # 统一错误包注册在工厂内：create_app() 产出的每个实例（含测试实例）
+    # 行为一致——AppError/AuthError/校验错误/未捕获异常都走统一错误包。
+    app.add_exception_handler(AppError, _app_error_handler)
+    app.add_exception_handler(AuthError, _auth_error_handler)
+    app.add_exception_handler(RequestValidationError, _validation_handler)
+    app.add_exception_handler(Exception, _unhandled_handler)
+    _register_spa_routes(app)
     return app
-
-
-app = create_app()
 
 
 # ---------------------------------------------------------------------------
 # 统一错误包：领域异常 → 对应 HTTP 状态；校验错误 → 422；其余 → 500（不透传细节）。
+# （注册在 create_app() 内，见上；处理函数保持模块级以便复用与测试。）
 # ---------------------------------------------------------------------------
-@app.exception_handler(AppError)
-async def _app_error_handler(_: Request, exc: AppError) -> JSONResponse:
+def _app_error_handler(_: Request, exc: AppError) -> JSONResponse:
     return JSONResponse(_envelope(exc.code, str(exc)), status_code=exc.http_status)
 
 
-@app.exception_handler(AuthError)
 async def _auth_error_handler(request: Request, exc: AuthError) -> JSONResponse:
     # C-22 异常行为告警：越权访问（require_role 403）落安全告警留痕。
     # 401（未登录/会话失效）不告警——未认证请求高频且无身份可归责，避免刷屏。
@@ -427,7 +468,6 @@ def _record_unauthorized_access(request: Request, exc: AuthError) -> None:
         _LOG.warning("unauthorized_access 告警落库失败: %s", exc_)
 
 
-@app.exception_handler(RequestValidationError)
 async def _validation_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
     return JSONResponse(
         _envelope("VALIDATION_ERROR", "请求参数校验失败", exc.errors()),
@@ -435,7 +475,6 @@ async def _validation_handler(_: Request, exc: RequestValidationError) -> JSONRe
     )
 
 
-@app.exception_handler(Exception)
 async def _unhandled_handler(_: Request, exc: Exception) -> JSONResponse:
     _LOG.exception("unhandled exception")
     return JSONResponse(_envelope("INTERNAL", "服务器内部错误"), status_code=500)
@@ -445,6 +484,7 @@ async def _unhandled_handler(_: Request, exc: Exception) -> JSONResponse:
 # 静态前端托管（打包 / 浏览器启动回退模式）。
 # 当 dist 存在时，根路径与未命中静态文件的路由回退到 index.html（SPA）。
 # 仅当 dist 缺失（纯开发未构建）时跳过，避免影响 API。
+# 注册在 create_app() 内（工厂实例与生产实例行为一致）。
 # ---------------------------------------------------------------------------
 _DIST_CANDIDATES = [
     Path(__file__).resolve().parents[2] / "dist",  # 打包后：<安装目录>/dist
@@ -455,34 +495,37 @@ _DIST_CANDIDATES = [
 DIST = next((p for p in _DIST_CANDIDATES if p.is_dir()), None)
 
 
-@app.get("/")
-async def _serve_root():
-    if DIST is None:
-        return HTMLResponse(
-            "<h2>ScanDetection</h2><p>前端未构建（dist 缺失）。"
-            "请使用 Tauri 桌面端，或在开发模式下执行 <code>pnpm build</code>。</p>"
-        )
-    # index.html 禁缓存：内容散列命名的 assets 可长效缓存，但 index.html 必须每次
-    # 回源，否则前端重新构建后浏览器仍停留在旧 bundle（表现为新功能"看不到"）。
-    return FileResponse(DIST / "index.html", headers={"Cache-Control": "no-cache"})
+def _register_spa_routes(app: FastAPI) -> None:
+    @app.get("/")
+    async def _serve_root():
+        if DIST is None:
+            return HTMLResponse(
+                "<h2>ScanDetection</h2><p>前端未构建（dist 缺失）。"
+                "请使用 Tauri 桌面端，或在开发模式下执行 <code>pnpm build</code>。</p>"
+            )
+        # index.html 禁缓存：内容散列命名的 assets 可长效缓存，但 index.html 必须每次
+        # 回源，否则前端重新构建后浏览器仍停留在旧 bundle（表现为新功能"看不到"）。
+        return FileResponse(DIST / "index.html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/{full_path:path}")
+    async def _serve_spa(full_path: str):
+        # 不拦截 API 路由（已由上方路由器处理）。
+        if full_path.startswith("api/"):
+            return JSONResponse(_envelope("NOT_FOUND", "资源不存在"), status_code=404)
+        if DIST is None:
+            return JSONResponse(_envelope("NOT_FOUND", "资源不存在"), status_code=404)
+        # 防路径穿越：越界一律 404（手写 handler 必须显式校验，StaticFiles 已内置此防护）。
+        try:
+            candidate = safe_resolve(DIST, full_path)
+        except ValueError:
+            return JSONResponse(_envelope("NOT_FOUND", "资源不存在"), status_code=404)
+        if candidate.is_file():
+            return FileResponse(candidate)
+        index = DIST / "index.html"
+        if not index.is_file():
+            return JSONResponse(_envelope("NOT_FOUND", "资源不存在"), status_code=404)
+        # SPA 回退：未知前端路由交给 index.html 处理（同样禁缓存，理由见 _serve_root）。
+        return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
 
-@app.get("/{full_path:path}")
-async def _serve_spa(full_path: str):
-    # 不拦截 API 路由（已由上方路由器处理）。
-    if full_path.startswith("api/"):
-        raise HTTPException(status_code=404)
-    if DIST is None:
-        raise HTTPException(status_code=404)
-    # 防路径穿越：越界一律 404（手写 handler 必须显式校验，StaticFiles 已内置此防护）。
-    try:
-        candidate = safe_resolve(DIST, full_path)
-    except ValueError:
-        raise HTTPException(status_code=404) from None
-    if candidate.is_file():
-        return FileResponse(candidate)
-    index = DIST / "index.html"
-    if not index.is_file():
-        raise HTTPException(status_code=404)
-    # SPA 回退：未知前端路由交给 index.html 处理（同样禁缓存，理由见 _serve_root）。
-    return FileResponse(index, headers={"Cache-Control": "no-cache"})
+app = create_app()

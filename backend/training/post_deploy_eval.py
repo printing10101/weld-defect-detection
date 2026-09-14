@@ -121,7 +121,7 @@ def run_post_deploy_eval(
         expected_calibration_error,
         match_confidences,
     )
-    from backend.evaluation.harness import check_regression, detection_metrics
+    from backend.evaluation.harness import check_regression, detection_metrics, pod_curve
     from backend.evaluation.tracking import ExperimentTracker, build_model_card
 
     images_dir = data_dir / "images"
@@ -187,6 +187,9 @@ def run_post_deploy_eval(
 
     metrics = detection_metrics(all_preds, all_targets, iou_threshold=iou)
     ece = expected_calibration_error([c for c, _ in conf_pairs], [ok for _, ok in conf_pairs])
+    # POD（按缺陷尺寸的检出概率，NDT 可靠性口径）：回答"多大的缺陷开始漏"
+    # ——mAP/召回是聚合量，POD 曲线把可靠性落到尺寸轴上（MIL-HDBK-1823A）。
+    pod = pod_curve(all_preds, all_targets, iou_threshold=iou)
 
     mid = model_id_of(model_path)
     domain = domain_label(data_dir)
@@ -243,6 +246,7 @@ def run_post_deploy_eval(
         "iou": iou,
         "class_conf": {str(k): v for k, v in sorted(_CLASS_CONF.items())},
         "metrics": metrics,
+        "pod": pod,
         "ece": {k: ece[k] for k in ("n_samples", "ece", "mce", "verdict")},
         "metrics_uncalibrated": metrics_uncal,
         "ece_uncalibrated": {k: ece_uncal[k] for k in ("ece", "verdict")},
@@ -272,6 +276,8 @@ def run_post_deploy_eval(
             "mAP50": metrics["mAP50"],
             "recall": metrics["recall"],
             "precision": metrics["precision"],
+            "pod_overall": pod["overall"]["pod"],
+            "pod_bins": pod["bins"],
             "ece": ece["ece"],
             "ece_verdict": ece["verdict"],
             "ece_uncalibrated": ece_uncal["ece"],
@@ -287,7 +293,7 @@ def run_post_deploy_eval(
             "class_counts": class_counts,
         },
         limitations=_limitations_for(
-            domain, metrics, ece, calibration_active=bool(calibration_info)
+            domain, metrics, ece, pod=pod, calibration_active=bool(calibration_info)
         ),
         ethics=[
             "评级/评价输出仅为辅助参考，不构成法定无损检测结论（NB/T 47013 授权表未复核）",
@@ -326,6 +332,7 @@ def run_post_deploy_eval(
             f"  mAP50={metrics['mAP50']}  R={metrics['recall']}  "
             f"P={metrics['precision']}  ECE={ece['ece']} (passed={ece['verdict']['passed']})"
         )
+        print(f"  POD={pod['overall']['pod']} ({pod['overall']['n']} GT) 分箱: {pod['bins']}")
         if regression:
             print(f"  regression vs {regression['against']}: passed={regression['passed']}")
         print(f"  report -> {latest.name}  card+tracker 已更新")
@@ -336,6 +343,7 @@ def _limitations_for(
     domain: str,
     metrics: dict[str, Any],
     ece: dict[str, Any],
+    pod: dict[str, Any] | None = None,
     calibration_active: bool = False,
 ) -> list[str]:
     """按评估域如实生成模型卡局限——禁止把合成域指标冒充真实域性能。"""
@@ -363,6 +371,14 @@ def _limitations_for(
         )
     elif calibration_active:
         lim.append(f"ECE={ece['ece']}（逐类温度校准后达标）；校准表与权重指纹绑定，换权重须重拟合")
+    # POD 最小尺寸箱检出率偏低（且样本量足以支撑结论）→ 如实声明尺寸轴局限
+    if pod and pod["bins"]:
+        smallest = pod["bins"][0]
+        if smallest["n"] >= 10 and smallest["pod"] < 0.8:
+            lim.append(
+                f"特征长度 ≤{smallest['size_max_px']}px 的缺陷 POD={smallest['pod']}"
+                f"（n={smallest['n']}）：小缺陷漏检风险高，建议开启 Tiling 或提高扫描分辨率"
+            )
     lim.append("部署推理为 ONNX 路径：不确定性为单视角启发式 + TTA 集成近似（非 MC Dropout）")
     return lim
 

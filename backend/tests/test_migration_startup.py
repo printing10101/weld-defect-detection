@@ -17,7 +17,8 @@ from backend.infra.migrate import ensure_migrations
 # + 0005（defects 复核留痕）+ 0006（gate_rejects 不合格底片留档台账）
 # + 0010（images.content_hash 影像内容摘要：批量上传查重）
 # + 0011（images.stamp_* 底片印字识别快照：扫描日期/编号，正/镜像）
-_HEAD = "0011_film_stamp"
+# + 0013（defect_atlas 缺陷图谱样本库）
+_HEAD = "0013_defect_atlas"
 
 
 def test_migrate_fresh_db_creates_tables(tmp_path) -> None:

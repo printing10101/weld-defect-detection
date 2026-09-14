@@ -102,6 +102,10 @@ async function doCalibrate(): Promise<void> {
     return;
   }
   const density = calDensity.value.trim() ? Number(calDensity.value) : null;
+  if (density !== null && !Number.isFinite(density)) {
+    error.value = "黑度校验值必须为数字。";
+    return;
+  }
   try {
     await addCalibration(selectedId.value, {
       calibrator: calCalibrator.value.trim(),
@@ -280,7 +284,7 @@ onMounted(() => {
             <template v-if="lastCal()">
               · 最近 {{ lastCal()!.calibrated_at }} 由 {{ lastCal()!.calibrator }}
               <span :class="lastCal()!.status === 'over' ? 'over' : 'ok'">
-                （{{ lastCal()!.status === "over" ? "超差 over" : "达标 ok" }}，
+                （{{ lastCal()!.status === "over" ? "超差" : "达标" }}，
                 相对偏差 {{ lastCal()!.deviation_pct ?? "—" }}%）
               </span>
             </template>

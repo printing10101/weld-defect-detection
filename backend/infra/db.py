@@ -82,6 +82,10 @@ class ImageRecord(Base):
     stamp_confidence: Mapped[float | None] = mapped_column(Float, default=None)
     # 缺印字触发的复核标记：单图即时判定；批量场景延迟到批次收尾按印字占比裁决后回填
     stamp_need_review: Mapped[bool] = mapped_column(default=False, server_default="0")
+    # 报告补充信息（0012）：委托单位/工程名称/材质/工艺参数等《射线检测报告》
+    # 汇总表字段（键见 domain/report/meta_fields.py 白名单），随影像落库供
+    # 出片与重新出报告（regenerate）复用
+    report_meta: Mapped[dict | None] = mapped_column(JSON, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
@@ -119,6 +123,41 @@ class DefectRecord(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime, default=None
     )  # 软删除时间（复核删除不物理清除，供审计追溯）
+
+
+class DefectAtlasRecord(Base):
+    """缺陷图谱样本库（人工筛选沉淀的典型缺陷样本）。
+
+    与 defects 表的关系：defects 是"每一次检测的完整事实记录"（不可删改），
+    本表是**经人工挑选的示范样本**（供培训/比对/复核参考），发布动作显式
+    且留审计，撤销也是显式操作。一行对应一个源缺陷（defect_id 唯一索引），
+    crop 为从落盘影像裁出的缺陷局部 PNG（随 security.encrypt 静态加密）。
+    """
+
+    __tablename__ = "defect_atlas"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    defect_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # 源缺陷
+    image_id: Mapped[str] = mapped_column(
+        String(64), index=True
+    )  # 源影像（不设 FK：库独立于复核生命周期）
+    class_id: Mapped[int] = mapped_column(Integer, index=True)
+    joint_level: Mapped[str | None] = mapped_column(String(8), default=None, index=True)
+    bbox_px: Mapped[list | None] = mapped_column(JSON, default=None)  # 源影像坐标系 [x,y,w,h]
+    length_mm: Mapped[float | None] = mapped_column(Float, default=None)
+    width_mm: Mapped[float | None] = mapped_column(Float, default=None)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    source: Mapped[str | None] = mapped_column(
+        String(16), default=None
+    )  # 源缺陷来源：auto=检测器 | manual=人工添加
+    reviewed_by: Mapped[str | None] = mapped_column(String(64), default=None)  # 源缺陷复核人
+    workpiece_no: Mapped[str | None] = mapped_column(String(64), default=None)
+    weld_no: Mapped[str | None] = mapped_column(String(64), default=None)
+    standard_id: Mapped[str | None] = mapped_column(String(64), default=None)
+    crop_path: Mapped[str] = mapped_column(String(512))  # 缺陷局部图（密文/明文由加密开关决定）
+    note: Mapped[str | None] = mapped_column(Text, default=None)  # 入库理由/典型性说明
+    created_by: Mapped[str] = mapped_column(String(64))  # 发布人
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
 class ReportRecord(Base):

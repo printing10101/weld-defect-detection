@@ -15,6 +15,8 @@ import JourneyView from "../views/JourneyView.vue";
 import LoginView from "../views/LoginView.vue";
 import StdEvalView from "../views/StdEvalView.vue";
 import ViewerView from "../views/ViewerView.vue";
+import AdminView from "../views/AdminView.vue";
+import LlmView from "../views/LlmView.vue";
 
 /** 路由名与 ViewId 一一对应，AppShell 用 route.name 直接得到当前工作区。 */
 export const routes: RouteRecordRaw[] = [
@@ -26,6 +28,8 @@ export const routes: RouteRecordRaw[] = [
   { path: "/device", name: "device", component: DeviceView },
   { path: "/viewer", name: "viewer", component: ViewerView },
   { path: "/std-eval", name: "std-eval", component: StdEvalView },
+  { path: "/admin", name: "admin", component: AdminView },
+  { path: "/llm", name: "llm", component: LlmView },
 ];
 
 export function createAppRouter(history = createWebHashHistory()) {
@@ -52,7 +56,9 @@ export function routeNameToViewId(name: unknown): ViewId {
     name === "device" ||
     name === "journey" ||
     name === "viewer" ||
-    name === "std-eval"
+    name === "std-eval" ||
+    name === "admin" ||
+    name === "llm"
   ) {
     return name;
   }

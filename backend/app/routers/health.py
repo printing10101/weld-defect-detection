@@ -20,13 +20,25 @@ router = APIRouter(tags=["health"])
 def health_check(reg: Annotated[Registry | None, Depends(try_get_registry)]) -> dict:
     if reg is None:
         # registry 装配中（模型加载/迁移）：存活即应答，字段与就绪形态对齐。
+        # sync 适配器名如实从配置读取——此前硬编码 "local"，配置为 http/cloud
+        # 时启动窗口内监控会看到错误结论；配置不可得时如实标注 unknown。
+        guest_mode = False
+        try:
+            from backend.infra.config import load_config
+
+            cfg = load_config()
+            adapter = cfg.sync.kind
+            guest_mode = bool(cfg.auth.guest_mode)
+        except Exception:  # noqa: BLE001 - health 探针不因配置读取失败而 500
+            adapter = "unknown"
         return {
             "status": "starting",
             "degraded": False,
             "app_version": "0.1.0",
+            "guest_mode": guest_mode,
             "detector": "loading",
             "detector_degraded": False,
-            "sync": {"adapter": "local", "pending": 0},
+            "sync": {"adapter": adapter, "pending": 0},
             "uri": "",
             "backend": "",
             "active_version": None,

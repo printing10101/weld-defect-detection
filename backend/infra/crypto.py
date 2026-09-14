@@ -117,6 +117,36 @@ def local_key_file() -> Path:
     return resolve_data_path(_LOCAL_KEY_FILE_REL)
 
 
+def _migrate_legacy_local_key(legacy: Path, path: Path) -> None:
+    """把历史 CWD 相对密钥迁移到锚定后的目标位置。
+
+    同卷走 ``os.replace``（原子重命名，语义与历史一致）。**跨卷**时
+    ``os.replace`` 抛 ``WinError 17`` / ``EXDEV``——典型场景是安装目录在 C:
+    而用户数据目录（``SCANDETECTION_USER_DATA_DIR``）落在 D:。此时必须退化为
+    "独占复制 + 删源"，否则整条静态加密 provider 不可用，fail-closed 会
+    **拒绝一切影像副本落盘**，用户看到的现象是"软件突然不能评片"。
+
+    复制用 ``O_EXCL`` 独占创建，绝不覆盖并发进程刚生成的新密钥；源文件删除
+    失败只告警不影响正确性——目标已就位后，迁移分支下次启动自然跳过。
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        legacy.replace(path)
+        return
+    except OSError as exc:
+        _LOG.warning("历史密钥同卷重命名失败，退化为跨卷复制（%s）: %s", exc, legacy)
+    payload = legacy.read_bytes()
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(payload)
+        f.flush()
+        os.fsync(f.fileno())
+    try:
+        legacy.unlink()
+    except OSError as exc:
+        _LOG.warning("历史密钥已复制到新位置但源文件删除失败（不影响可用性）: %s", exc)
+
+
 def _load_or_create_local_key() -> bytes:
     """读取本地持久密钥文件；缺失则生成一次并写入（0600 尽力而为）。
 
@@ -148,12 +178,11 @@ def _load_or_create_local_key() -> bytes:
                 _LOG.warning("目标密钥文件已存在，跳过历史密钥迁移（防覆盖）: %s", path)
             else:
                 try:
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    legacy.replace(path)
-                    _LOG.warning("静态加密：已把历史 CWD 相对密钥文件迁移 %s → %s", legacy, path)
-                    return _load_or_create_local_key()
+                    _migrate_legacy_local_key(legacy, path)
                 except OSError as exc:
                     raise CryptoKeyError(f"历史密钥文件迁移失败 {legacy} → {path}: {exc}") from None
+                _LOG.warning("静态加密：已把历史 CWD 相对密钥文件迁移 %s → %s", legacy, path)
+                return _load_or_create_local_key()
     key = os.urandom(_KEY_BYTES)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -31,9 +31,15 @@ ultralytics==8.2.9
 onnxruntime==1.28.0
 reportlab==5.0.0
 pypdf==6.15.0
+# 报告页脚追溯二维码（infra/reporting/qrcode.py，G01；fail-soft，缺失降级不绘制）
+qrcode==8.2
 python-multipart==0.0.32
 alembic==1.19.1
 # iPhone/iPad HEIC/HEIF 影像解码（image_loader 回退链）
 pillow-heif==1.5.0
 # 底片印字（扫描日期/编号）OCR（domain/stamp.py，懒加载；缺失时降级 unavailable）
 rapidocr-onnxruntime==1.2.3
+# 影像解码（image_loader/PIL 回退链；此前靠传递依赖提供，显式声明）
+pillow==12.3.0
+# scripts/e2e_api_smoke.py RSS 盯测直接依赖（此前靠传递依赖提供）
+psutil==7.2.2

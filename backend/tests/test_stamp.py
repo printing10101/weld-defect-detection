@@ -14,13 +14,22 @@ from __future__ import annotations
 import tempfile
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
 import pytest
 
 from backend.app.batch_queue import BatchItem, BatchManager
-from backend.domain.stamp import StampCfg, StampResult, is_date_token, is_id_token, read_stamp
+from backend.domain.stamp import (
+    StampCfg,
+    StampResult,
+    filter_stamp_zone,
+    is_date_token,
+    is_id_token,
+    read_stamp,
+    read_stamp_aligned,
+)
 from backend.infra.repository import InspectionRepository
 
 # ---------------------------------------------------------------------------
@@ -129,6 +138,68 @@ def test_read_stamp_fail_soft_on_engine_error(monkeypatch: pytest.MonkeyPatch) -
     r = read_stamp(_stamped_film(), StampCfg())
     assert r.status == "unavailable"
     assert "engine exploded" in (r.note or "")
+
+
+# ---------------------------------------------------------------------------
+# 倒置/翻转方向 + 印字框 + 印字区过滤（E/A 修复的回归锚点）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("_ocr_engine")
+class TestStampOrientationsAndBoxes:
+    def test_rotated_film_text_recovered(self) -> None:
+        """180° 倒置（背面装反扫描）：文本必须可恢复——引擎 cls 纠正时走
+        正向通道（orientation=normal），无 cls 引擎则走 rotated 补试通道，
+        两条路径的用户可见语义一致（status=present 且文本正确）。"""
+        film = cv2.flip(_stamped_film(), -1)
+        r = read_stamp(film, StampCfg())
+        assert r.status == "present", r
+        assert r.text is not None and "2023-08-12" in r.text, r
+
+    def test_flipped_film_text_recovered(self) -> None:
+        """垂直翻转（翻面扫描）：同样必须恢复出印字文本。"""
+        film = cv2.flip(_stamped_film(), 0)
+        r = read_stamp(film, StampCfg())
+        assert r.status == "present", r
+        assert r.text is not None and "2023-08-12" in r.text, r
+
+    def test_normal_hit_carries_boxes_in_input_coords(self) -> None:
+        """命中印字时返回输入图坐标的包围框（供印字区误检过滤消费）。"""
+        film = _stamped_film()
+        r = read_stamp(film, StampCfg())
+        assert r.status == "present" and r.boxes, r
+        h, w = film.shape[:2]
+        for x0, y0, x1, y1 in r.boxes:
+            assert 0 <= x0 < x1 <= w and 0 <= y0 < y1 <= h
+
+    def test_read_stamp_aligned_maps_boxes_to_full_image(self) -> None:
+        """胶片区裁剪识别后，框应平移回整图坐标（与检测框同系）。"""
+        from types import SimpleNamespace
+
+        film_region = SimpleNamespace(x=100, y=200, w=1600, h=900)
+        crop = _stamped_film()
+        gray = np.full((900 + 200 + 100, 1600 + 100 + 300), 200, dtype=np.uint8)
+        gray[200 : 200 + 900, 100 : 100 + 1600] = crop
+        r = read_stamp_aligned(gray, StampCfg(), film=film_region)
+        assert r.status == "present" and r.boxes, r
+        # 全部框都应落在胶片区（含偏移后）范围内
+        for x0, y0, x1, y1 in r.boxes:
+            assert x0 >= 100 and y0 >= 200 and x1 <= 100 + 1600 and y1 <= 200 + 900
+
+
+def test_filter_stamp_zone() -> None:
+    """印字区误检过滤：中心落印字框外扩区 → 屏蔽；其余保留；空框全保留。"""
+
+    def det(x, y, w=10, h=10):
+        return SimpleNamespace(bbox=SimpleNamespace(x=x, y=y, w=w, h=h))
+
+    boxes = [[100.0, 100.0, 200.0, 140.0]]
+    kept, masked = filter_stamp_zone([det(150, 120), det(150, 134)], boxes)  # 框内+外扩边缘
+    assert len(masked) == 2 and not kept
+    kept, masked = filter_stamp_zone([det(150, 260), det(10, 10)], boxes)
+    assert not masked and len(kept) == 2
+    kept, masked = filter_stamp_zone([det(150, 120)], [])
+    assert len(kept) == 1 and not masked
 
 
 # ---------------------------------------------------------------------------

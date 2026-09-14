@@ -25,10 +25,10 @@ from pydantic import BaseModel, Field
 
 from backend.app.auth import Principal, get_principal
 from backend.app.dependencies import Registry, get_operator_name, get_registry
+from backend.app.routers._common import api_error
 from backend.app.routers.export import ensure_export_allowed
 from backend.domain.labeling.consensus import LabelBox, resolve_consensus
 from backend.evaluation.evidence import build_evidence
-from backend.evaluation.gate_rejects import GateRejectStore
 from backend.evaluation.qualification import (
     Personnel,
     check_personnel,
@@ -36,10 +36,16 @@ from backend.evaluation.qualification import (
     save_personnel,
 )
 from backend.evaluation.std_record import build_record
-from backend.infra.config import load_config, resolve_config_path
+from backend.infra.config import resolve_config_path
 from backend.infra.reporting.std_eval_record import build_record_pdf
 
 router = APIRouter(tags=["std-eval"])
+
+
+def _err(status: int, code: str, message: str) -> HTTPException:
+    """统一错误信封：detail={code,message}。纯字符串 detail 会使前端
+    （api.ts 只读 detail.code/.message）丢失全部错误原因。"""
+    return api_error(status, code, message)
 
 
 class PersonnelIn(BaseModel):
@@ -74,8 +80,10 @@ class RecordIn(BaseModel):
     consensus: dict[str, Any] | None = None
 
 
-def _personnel_path() -> Path:
-    return resolve_config_path(load_config().std_eval.personnel_path)
+def _personnel_path(reg: Registry) -> Path:
+    # 经 DI 的 reg.config 取值（可测试注入）；load_config() 每请求重读 YAML
+    # 且绕过测试 override，与全仓口径不一致。
+    return resolve_config_path(reg.config.std_eval.personnel_path)
 
 
 def _sanitize_record_name(name: str) -> str:
@@ -83,7 +91,9 @@ def _sanitize_record_name(name: str) -> str:
     未消毒可经 ..\\ 或绝对路径越界写/读任意文件。"""
     cleaned = (name or "").strip()
     if not cleaned or len(cleaned) > 128 or re.search(r"[^A-Za-z0-9_\-\u4e00-\u9fff]", cleaned):
-        raise HTTPException(422, f"record_name 仅允许中英文/数字/下划线/连字符: {name!r}")
+        raise _err(
+            422, "INVALID_RECORD_NAME", f"record_name 仅允许中英文/数字/下划线/连字符: {name!r}"
+        )
     return cleaned
 
 
@@ -97,40 +107,45 @@ def _eval_result_path(rel_path: str) -> Path:
 def _load_eval_result(rel_path: str) -> dict[str, Any]:
     p = _eval_result_path(rel_path)
     if not p.is_file():
-        raise HTTPException(
+        raise _err(
             404,
+            "EVAL_RESULT_NOT_FOUND",
             f"标准评价结果不存在: {rel_path}（先运行 python -m backend.evaluation.run_std_eval）",
         )
     try:
         payload = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        raise HTTPException(422, f"评价结果 JSON 解析失败: {rel_path}") from None
+        raise _err(422, "EVAL_RESULT_PARSE_FAILED", f"评价结果 JSON 解析失败: {rel_path}") from None
     if "result" not in payload:
-        raise HTTPException(422, "评价结果 JSON 缺少 result 字段")
+        raise _err(422, "EVAL_RESULT_MISSING_RESULT", "评价结果 JSON 缺少 result 字段")
     return payload
 
 
 @router.get("/std-eval/personnel")
-def get_personnel() -> dict[str, Any]:
-    people = load_personnel(_personnel_path())
+def get_personnel(reg: Annotated[Registry, Depends(get_registry)]) -> dict[str, Any]:
+    people = load_personnel(_personnel_path(reg))
     qual = check_personnel(people)
     return qual
 
 
 @router.put("/std-eval/personnel")
-def put_personnel(body: PersonnelListIn) -> dict[str, Any]:
+def put_personnel(
+    body: PersonnelListIn, reg: Annotated[Registry, Depends(get_registry)]
+) -> dict[str, Any]:
     if not body.people:
-        raise HTTPException(422, "people 不能为空")
+        raise _err(422, "EMPTY_PEOPLE", "people 不能为空")
     people = [Personnel(**p.model_dump()) for p in body.people]
-    save_personnel(people, _personnel_path())
+    save_personnel(people, _personnel_path(reg))
     return check_personnel(people)
 
 
 @router.post("/std-eval/record")
-def create_record(body: RecordIn) -> dict[str, Any]:
-    cfg = load_config().std_eval
+def create_record(
+    body: RecordIn, reg: Annotated[Registry, Depends(get_registry)]
+) -> dict[str, Any]:
+    cfg = reg.config.std_eval
     payload = _load_eval_result(body.eval_result_path)
-    people = load_personnel(_personnel_path())
+    people = load_personnel(_personnel_path(reg))
     result = payload["result"]
     record = build_record(
         result,
@@ -164,13 +179,17 @@ def get_record_pdf(
     record_name: str = "std_record",
 ) -> FileResponse:
     """附录A 记录表 PDF 导出（C-14 受控：需导出审批/令牌）。"""
-    ensure_export_allowed(f"std_eval:record_pdf:{record_name}", request, principal, reg)
-    cfg = load_config().std_eval
+    cfg = reg.config.std_eval
     record_name = _sanitize_record_name(record_name)
     out_dir = resolve_config_path(cfg.eval_dir)
     record_path = out_dir / f"{record_name}.json"
+    # 先查存在性再过导出门禁：避免"记录不存在仍核销一次性令牌"（令牌一次
+    # 一用，白烧后申请人须重新走审批）。存在性探测面限于已登录角色，可接受。
     if not record_path.is_file():
-        raise HTTPException(404, f"评价记录不存在: {record_name}（先 POST /std-eval/record）")
+        raise _err(
+            404, "RECORD_NOT_FOUND", f"评价记录不存在: {record_name}（先 POST /std-eval/record）"
+        )
+    ensure_export_allowed(f"std_eval:record_pdf:{record_name}", request, principal, reg)
     record = json.loads(record_path.read_text(encoding="utf-8"))
     pdf_path = build_record_pdf(record, out_dir / f"{record_name}.pdf")
     return FileResponse(pdf_path, filename=f"{record_name}.pdf", media_type="application/pdf")
@@ -209,7 +228,7 @@ def _consensus_verdict(result) -> dict[str, Any]:
 def post_consensus(body: ConsensusIn) -> dict[str, Any]:
     """提交三人标注（A/B/C 框+类型），返回仲裁结果（并集/作废清单/仲裁建议）。"""
     if not body.annotations:
-        raise HTTPException(422, "annotations 不能为空")
+        raise _err(422, "EMPTY_ANNOTATIONS", "annotations 不能为空")
     boxes = [
         LabelBox(
             annotator=a.annotator,
@@ -221,7 +240,7 @@ def post_consensus(body: ConsensusIn) -> dict[str, Any]:
     try:
         result = resolve_consensus(boxes, body.threshold)
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from None
+        raise _err(422, "INVALID_ANNOTATIONS", str(exc)) from None
     out = result.to_dict()
     out["arbitration"] = _consensus_verdict(result)
     return out
@@ -239,7 +258,7 @@ class EvidenceDefectIn(BaseModel):
 
 
 class EvidenceIn(BaseModel):
-    film_path: str  # 底片路径（绝对或相对 CWD）
+    film_path: str  # 底片路径（绝对路径，或相对**安装根**——resolve_config_path 口径，非 CWD）
     film_id: str = ""
     defects: list[EvidenceDefectIn] = []  # 漏检缺陷清单
     gt_boxes: list[list[float]] = []  # 人工标注框（叠加左侧，绿）
@@ -247,7 +266,9 @@ class EvidenceIn(BaseModel):
 
 
 @router.post("/std-eval/evidence/{record_id}")
-def create_evidence(record_id: str, body: EvidenceIn) -> dict[str, Any]:
+def create_evidence(
+    record_id: str, body: EvidenceIn, reg: Annotated[Registry, Depends(get_registry)]
+) -> dict[str, Any]:
     """生成"标注原图 vs 系统识别图"对照证据图与 manifest（落 eval_dir/evidence）。
 
     record_id 直接拼证据目录/文件名，必须消毒（写面封死越界）；底片路径
@@ -259,8 +280,8 @@ def create_evidence(record_id: str, body: EvidenceIn) -> dict[str, Any]:
     film = film if film.is_absolute() else resolve_config_path(str(film))
     film = film.resolve()
     if not film.is_file():
-        raise HTTPException(404, f"底片不存在: {body.film_path}")
-    cfg = load_config().std_eval
+        raise _err(404, "FILM_NOT_FOUND", f"底片不存在: {body.film_path}")
+    cfg = reg.config.std_eval
     out_dir = resolve_config_path(cfg.eval_dir)
     try:
         manifest = build_evidence(
@@ -273,7 +294,7 @@ def create_evidence(record_id: str, body: EvidenceIn) -> dict[str, Any]:
             out_dir=out_dir / "evidence",
         )
     except (OSError, RuntimeError) as exc:
-        raise HTTPException(422, f"证据包生成失败: {exc}") from None
+        raise _err(422, "EVIDENCE_BUILD_FAILED", f"证据包生成失败: {exc}") from None
     return manifest
 
 
@@ -284,14 +305,16 @@ def create_evidence(record_id: str, body: EvidenceIn) -> dict[str, Any]:
 
 @router.get("/std-eval/gate-rejects")
 def list_gate_rejects(
+    reg: Annotated[Registry, Depends(get_registry)],
     limit: int = 50,
     offset: int = 0,
     operator: Annotated[str, Depends(get_operator_name)] = "",
 ) -> dict[str, Any]:
     """拦截留档台账（gate_rejects）：原因/dpi/位深/操作员，按时间降序。"""
     del operator  # 查询不记审计，仅读取台账
-    db_path = resolve_config_path(load_config().paths.db_path)
-    rows, total = GateRejectStore(str(db_path)).list(limit=limit, offset=offset)
+    # 复用 Registry 懒建单例引擎：此前每请求 new 一个 GateRejectStore
+    # （create_db_engine + create_all 全量元数据检查），随翻页频次放大。
+    rows, total = reg.gate_reject_store().list(limit=limit, offset=offset)
     return {"total": total, "items": rows}
 
 
@@ -316,9 +339,7 @@ def export_false_reports(
     """
     ensure_export_allowed("std_eval:false_reports", request, principal, reg)
     if eval_result_path is None:
-        eval_result_path = str(
-            resolve_config_path(load_config().std_eval.eval_dir) / "std_eval.json"
-        )
+        eval_result_path = str(resolve_config_path(reg.config.std_eval.eval_dir) / "std_eval.json")
     payload = _load_eval_result(eval_result_path)
     films = []
     for f in payload.get("false_report_films", []):

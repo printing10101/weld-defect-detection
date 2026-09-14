@@ -1,0 +1,57 @@
+{
+  "model_id": "best::8370aeeef0b1",
+  "weights": "D:\\扫描检测软件\\models\\weights\\best.onnx",
+  "golden": "D:\\扫描检测软件\\data\\eval\\golden_v3",
+  "golden_fingerprint": "5d535ae746a49c1d",
+  "metrics": {
+    "mAP50": 0.6843,
+    "recall": 0.7027,
+    "precision": 0.8185,
+    "gt_total": 407,
+    "by_class": {
+      "0": {
+        "ap50": 0.5541,
+        "recall": 0.5857,
+        "precision": 0.8471,
+        "gt_count": 210
+      },
+      "1": {
+        "ap50": 0.9663,
+        "recall": 0.963,
+        "precision": 1.0,
+        "gt_count": 27
+      },
+      "6": {
+        "ap50": 0.8758,
+        "recall": 0.9,
+        "precision": 0.6944,
+        "gt_count": 30
+      },
+      "4": {
+        "ap50": 0.874,
+        "recall": 0.8857,
+        "precision": 0.8452,
+        "gt_count": 35
+      },
+      "2": {
+        "ap50": 0.9429,
+        "recall": 0.9429,
+        "precision": 0.881,
+        "gt_count": 35
+      },
+      "3": {
+        "ap50": 0.5725,
+        "recall": 0.5676,
+        "precision": 0.6081,
+        "gt_count": 37
+      },
+      "5": {
+        "ap50": 0.7576,
+        "recall": 0.7576,
+        "precision": 0.7424,
+        "gt_count": 33
+      }
+    }
+  },
+  "created_at": "2026-09-13T03:14:33"
+}

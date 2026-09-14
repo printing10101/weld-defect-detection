@@ -43,17 +43,41 @@ if (Test-Path $weights) {
     Write-Warning "未找到 backend\models\weights\best.onnx —— 本次安装包为基线降级版（界面将显示降级横幅），不得作为正式交付物外发！"
 }
 
-Write-Host "==> [3/5] 前端依赖安装（锁定锁文件）" -ForegroundColor Cyan
-Push-Location (Join-Path $root "src")
-try {
-    pnpm install --frozen-lockfile
-    if ($LASTEXITCODE -ne 0) { throw "pnpm install 失败" }
+# ---- 安装版必须走 external 连接模式 ----
+# 安装包不随分发模型运行时（CUDA 版 llama.cpp 约 1.3GB + GGUF 2.4GB 起，超 NSIS
+# 2GB 上限），故安装版必须 llm.mode=external（只连接本机已有服务）。managed 会让
+# 安装版永远停在 unavailable。构建期临时改写后端配置，构建结束（含失败）恢复原值。
+$cfgPath = Join-Path $root "backend\configs\default.yaml"
+$cfgOriginal = Get-Content -Raw -LiteralPath $cfgPath
+$cfgPatched = $cfgOriginal -replace "(?m)^(\s*mode:\s*)managed", '${1}external'
+$cfgChanged = $cfgPatched -ne $cfgOriginal
+if ($cfgChanged) {
+    Set-Content -LiteralPath $cfgPath -Value $cfgPatched -NoNewline -Encoding utf8
+    Write-Host "==> 安装版配置：llm.mode managed → external（连接本机已有服务）" -ForegroundColor Green
+} elseif ($cfgOriginal -match "(?m)^\s*mode:\s*external") {
+    Write-Host "==> 安装版配置：llm.mode 已是 external" -ForegroundColor Green
+} else {
+    throw "backend\configs\default.yaml 未找到 llm.mode 字段——配置结构已变更，请人工确认后再打包（禁止静默产出配置错误的安装包）"
+}
 
-    Write-Host "==> [4/5] Tauri 打包（前端构建 + Rust release 编译 + 资源收集 + NSIS 安装器）" -ForegroundColor Cyan
-    pnpm exec tauri build
-    if ($LASTEXITCODE -ne 0) { throw "tauri build 失败" }
+try {
+    Write-Host "==> [3/5] 前端依赖安装（锁定锁文件）" -ForegroundColor Cyan
+    Push-Location (Join-Path $root "src")
+    try {
+        pnpm install --frozen-lockfile
+        if ($LASTEXITCODE -ne 0) { throw "pnpm install 失败" }
+
+        Write-Host "==> [4/5] Tauri 打包（前端构建 + Rust release 编译 + 资源收集 + NSIS 安装器）" -ForegroundColor Cyan
+        pnpm exec tauri build
+        if ($LASTEXITCODE -ne 0) { throw "tauri build 失败" }
+    } finally {
+        Pop-Location
+    }
 } finally {
-    Pop-Location
+    if ($cfgChanged) {
+        Set-Content -LiteralPath $cfgPath -Value $cfgOriginal -NoNewline -Encoding utf8
+        Write-Host "==> 已恢复开发配置（llm.mode=managed）" -ForegroundColor DarkGray
+    }
 }
 
 $installer = Get-ChildItem (Join-Path $root "src\src-tauri\target\release\bundle\nsis\*-setup.exe") |
@@ -63,6 +87,20 @@ if (-not $installer) { throw "未找到安装包产物" }
 Write-Host "==> [5/5] 完成" -ForegroundColor Green
 Write-Host ("安装包: " + $installer.FullName)
 Write-Host ("大小:   " + [math]::Round($installer.Length / 1MB, 1) + " MB")
+
+# 交付前校验：训练模型权重必须真正进入打包产物。
+# 历史事故：tauri.windows.conf.json 的 bundle.resources 覆盖了主配置且漏配
+# models/weights，安装包的 models\weights 成了空目录——当时靠 resolve_model_uri
+# 的双锚点回落到 backend\models\weights 才没崩，但"配置指向空目录"本身是隐患
+# （任何人不动双锚点就会静默降级到连通域基线）。此处把"权重入包"变成硬门禁。
+$bundledWeights = @(
+    (Join-Path $root "src\src-tauri\target\release\models\weights\best.onnx"),
+    (Join-Path $root "src\src-tauri\target\release\backend\models\weights\best.onnx")
+) | Where-Object { Test-Path $_ }
+if ($bundledWeights.Count -eq 0) {
+    throw "打包产物未包含 best.onnx —— 安装版将无法加载训练模型（回退连通域基线）。请检查 tauri.windows.conf.json 的 bundle.resources。"
+}
+Write-Host (">>> 权重已入包: " + $bundledWeights[0]) -ForegroundColor Green
 Write-Host ""
 Write-Host "分发说明：安装包离线自足（内嵌 Python 运行时 + 全部后端依赖 + WebView2"
 Write-Host "离线安装器），目标机无需联网；当前用户级安装，WebView2 缺失时需允许"

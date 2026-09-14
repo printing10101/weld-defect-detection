@@ -147,7 +147,9 @@ def main() -> None:
     ap.add_argument("--soak", type=int, default=60, help="循环推理次数（内存盯测）")
     ap.add_argument("--batch-size", type=int, default=8)
     ap.add_argument("--skip-soak", action="store_true")
-    ap.add_argument("--rss-grow-max", type=float, default=1.35, help="RSS 增长倍数上限（泄漏启发式）")
+    ap.add_argument(
+        "--rss-grow-max", type=float, default=1.35, help="RSS 增长倍数上限（泄漏启发式）"
+    )
     args = ap.parse_args()
 
     import httpx
@@ -198,7 +200,9 @@ def main() -> None:
                 files={"image": ("garbage.png", b"not-an-image", "image/png")},
                 headers=headers,
             )
-            _check(r.status_code in (400, 415, 422), "坏图被拒绝（非 5xx）", f"HTTP {r.status_code}")
+            _check(
+                r.status_code in (400, 415, 422), "坏图被拒绝（非 5xx）", f"HTTP {r.status_code}"
+            )
 
             # --- 判定 ---
             r = client.post(
@@ -255,9 +259,7 @@ def main() -> None:
                 headers={"Authorization": f"Bearer {sec_token}"},
             )
             _check(r.status_code == 200, "保密员审批导出", r.text[:200])
-            r = client.post(
-                f"{_BASE}/api/v1/export/requests/{req_id}/token", headers=headers
-            )
+            r = client.post(f"{_BASE}/api/v1/export/requests/{req_id}/token", headers=headers)
             _check(r.status_code == 200, "签发一次性导出令牌", r.text[:200])
             export_token = r.json().get("export_token") or r.json().get("token")
             _check(bool(export_token), "取得导出令牌", r.text[:200])
@@ -272,9 +274,9 @@ def main() -> None:
             )
 
             # --- 批量（全量跑完）---
-            files = [
-                ("images", (p.name, p.read_bytes(), "image/png")) for p in films * 3
-            ][: max(3, args.batch_size)]
+            files = [("images", (p.name, p.read_bytes(), "image/png")) for p in films * 3][
+                : max(3, args.batch_size)
+            ]
             r = client.post(
                 f"{_BASE}/api/v1/batch",
                 files=files,
@@ -286,10 +288,38 @@ def main() -> None:
             t0 = time.time()
             status = ""
             tasks: list = []
+            resolved = False
             while time.time() - t0 < 600:
                 s = client.get(f"{_BASE}/api/v1/batch/{batch_id}", headers=headers).json()
                 status = str(s.get("status"))
                 tasks = s.get("tasks") or []
+                if status == "awaiting_review" and not resolved:
+                    # 批量查重命中 → 人工复核：批内重复一律跳过（原版已在批内
+                    # 执行）；与历史重复的每内容首个保留（确认后仍检测），
+                    # 其余跳过。复核后批次继续执行。
+                    dups = s.get("duplicates") or []
+                    decisions: list[dict] = []
+                    seen_hash: set[str] = set()
+                    for d in dups:
+                        if d.get("kind") == "batch":
+                            continue
+                        h = str(d.get("content_sha256"))
+                        if h in seen_hash:
+                            continue
+                        seen_hash.add(h)
+                        decisions.append({"task_id": d["task_id"], "action": "keep"})
+                    rr = client.post(
+                        f"{_BASE}/api/v1/batch/{batch_id}/dedup/resolve",
+                        json={"decisions": decisions},
+                        headers=headers,
+                    )
+                    _check(rr.status_code == 200, "批量查重人工复核（跳过/仍检测）", rr.text[:200])
+                    counts = rr.json()
+                    print(
+                        f"[INFO] 查重复核: 命中 {len(dups)} 项 → 保留 {counts.get('kept')} 跳过 {counts.get('skipped')}"
+                    )
+                    resolved = True
+                    continue
                 terminal = {"done", "failed", "cancelled"}
                 if status in ("done", "completed") or (
                     tasks and all(t.get("status") in terminal for t in tasks)
@@ -298,30 +328,57 @@ def main() -> None:
                 time.sleep(2.0)
             n_ok = sum(1 for t in tasks if t.get("status") == "done")
             n_fail = sum(1 for t in tasks if t.get("status") == "failed")
+            n_cancel = sum(1 for t in tasks if t.get("status") == "cancelled")
             _check(
-                bool(tasks) and all(t.get("status") in ("done", "failed") for t in tasks),
+                bool(tasks)
+                and all(t.get("status") in ("done", "failed", "cancelled") for t in tasks),
                 "批量全部到达终态",
                 f"status={status} tasks={len(tasks)}",
             )
-            _check(n_ok >= len(tasks) // 2, "批量过半成功", f"ok={n_ok}/{len(tasks)}")
+            if resolved:
+                # 复核跳过的任务以 cancelled 收敛是预期终态（不重复检测不出报告）；
+                # 质量门禁拦截的 failed 同为预期（失败隔离）；其余必须全部跑完。
+                _check(
+                    n_ok >= 1 and n_ok + n_cancel + n_fail == len(tasks),
+                    "复核后批次收敛",
+                    f"done={n_ok} cancelled={n_cancel} failed={n_fail}/{len(tasks)}",
+                )
+            else:
+                _check(n_ok >= len(tasks) // 2, "批量过半成功", f"ok={n_ok}/{len(tasks)}")
             if n_fail:
                 # 质量门禁拦截（黑度/IQI/位深不符）是**预期行为**：失败隔离、
                 # 不拖垮批次——正是批量链路的韧性验证点。
-                reason = str((tasks[-1] or {}).get("error") or tasks[-1])[:80]
-                print(f"[INFO] 批量 {n_fail} 张被质量门禁拦截（预期行为）：{reason}…")
+                for t in tasks:
+                    if t.get("status") == "failed":
+                        print(f"[INFO] 失败任务 {t.get('image_name')}: {str(t.get('error'))[:100]}")
             print(f"[INFO] 批量 {batch_id}: {n_ok}/{len(tasks)} 成功")
 
             # --- 批量取消 ---
             r = client.post(
                 f"{_BASE}/api/v1/batch",
-                files=[("images", ("c.png", films[2].read_bytes(), "image/png"))]
-                * 4,
+                files=[("images", ("c.png", films[2].read_bytes(), "image/png"))] * 4,
                 headers=headers,
             )
             _check(r.status_code == 200, "取消用批量提交", r.text[:120])
             cid = r.json()["batch_id"]
             r = client.post(f"{_BASE}/api/v1/batch/{cid}/cancel", headers=headers)
             _check(r.status_code == 200, "批量取消", r.text[:120])
+            # 取消（含查重暂缓态取消）后所有任务必须即时收敛 cancelled
+            deadline = time.time() + 60
+            cs: dict = {}
+            while time.time() < deadline:
+                cs = client.get(f"{_BASE}/api/v1/batch/{cid}", headers=headers).json()
+                ctasks = cs.get("tasks") or []
+                if ctasks and all(
+                    t.get("status") in ("cancelled", "done", "failed") for t in ctasks
+                ):
+                    break
+                time.sleep(1.0)
+            _check(
+                bool(cs.get("tasks")) and all(t.get("status") == "cancelled" for t in cs["tasks"]),
+                "取消批全部任务收敛 cancelled",
+                str([(t.get("status")) for t in cs.get("tasks") or []]),
+            )
 
             # --- 持久性盯测：循环推理 + RSS 泄漏启发式 ---
             if not args.skip_soak:

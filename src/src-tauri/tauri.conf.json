@@ -11,7 +11,7 @@
     "beforeBuildCommand": "pnpm build:pkg"
   },
   "app": {
-    "windows": [{ "title": "射线焊缝缺陷智能检测系统", "width": 1280, "height": 800, "label": "main" }],
+    "windows": [{ "title": "射线焊缝缺陷智能检测系统", "width": 1280, "height": 800, "minWidth": 1024, "minHeight": 640, "label": "main" }],
     "security": {
       "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:18773 http://localhost:18773; img-src 'self' data: blob: http://127.0.0.1:18773 http://localhost:18773; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'"
     }
@@ -43,7 +43,8 @@
       "../../backend/infra": "backend/infra",
       "../../backend/migrations": "backend/migrations",
       "../../backend/models/__init__.py": "backend/models/__init__.py",
-      "../../backend/models/weights": "backend/models/weights"
+      "../../backend/models/weights": "backend/models/weights",
+      "../../models/weights": "models/weights"
     }
   }
 }

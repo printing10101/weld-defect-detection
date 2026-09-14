@@ -188,7 +188,7 @@ async function onSubmit(): Promise<void> {
       <span
         class="st"
         style="color: var(--amber)"
-      >need_review=true</span>
+      >待人工复核</span>
     </div>
     <div style="padding: 14px 16px">
       <div class="row">
@@ -214,13 +214,13 @@ async function onSubmit(): Promise<void> {
             v-model="role"
           >
             <option value="initial">
-              初评（initial）
+              初评
             </option>
             <option value="secondary">
-              复评（secondary）
+              复评
             </option>
             <option value="arbitrator">
-              仲裁（arbitrator）
+              仲裁
             </option>
           </select>
         </div>
@@ -397,7 +397,7 @@ async function onSubmit(): Promise<void> {
         class="kv"
       >
         <div class="k">
-          对评一致性（consensus）
+          对评一致性
         </div>
         <div class="v">
           {{ outcome.consensus ? "已达成" : "未达成" }}

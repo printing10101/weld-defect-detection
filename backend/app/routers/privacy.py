@@ -54,9 +54,14 @@ async def run_privacy_audit(
     else:
         directory = str(resolve_config_path(reg.config.paths.images_dir))
     report = await run_in_threadpool(audit_directory_phi, directory)
-    paths = write_audit_report(report, resolve_config_path(reg.config.paths.data_dir) / "privacy")
+    # JSON 落盘 + reportlab 生成 PDF 均为重 IO/CPU：一并放线程池，避免大报告
+    # （扫描数千文件）在事件循环内裸跑卡死所有并发请求（含 /health 探针）。
+    paths = await run_in_threadpool(
+        write_audit_report, report, resolve_config_path(reg.config.paths.data_dir) / "privacy"
+    )
     report["report_files"] = paths
-    reg.repository.append_audit(
+    await run_in_threadpool(
+        reg.repository.append_audit,
         actor=principal.username,
         action="privacy_audit",
         object_type="privacy",

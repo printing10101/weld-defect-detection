@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import random
 import shutil
@@ -22,6 +23,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from backend.domain.dto import DefectClass
+from backend.domain.labeling.leakage import assign_groups
 from backend.training.class_map import YOLO_CLASSES
 
 _RAW_ROOT = Path("data/training/raw")
@@ -193,6 +195,51 @@ def _limit_class_balanced(
     return ps
 
 
+def _split_stratum(
+    items: list[tuple[Path, Path | None]],
+    ratios: tuple[float, float, float],
+    rnd: random.Random,
+    group_of: dict[str, str],
+) -> tuple[
+    list[tuple[Path, Path | None]],
+    list[tuple[Path, Path | None]],
+    list[tuple[Path, Path | None]],
+]:
+    """同源底片整组划分：同组（池级 assign_groups 等价类）的图像永不跨 split。
+
+    patch 级随机划分是 RIAWELC 基准泄漏的根源——同一物理底片的衍生图
+    （copy-paste 合成、裁剪 patch）一旦跨越 train/test，指标即被乐观污染。
+    组粒度按图像数贪心装填 train/val/test 配额；首组保底进 train。
+    """
+    groups: dict[str, list[tuple[Path, Path | None]]] = {}
+    for p in items:
+        groups.setdefault(group_of[p[0].stem], []).append(p)
+    glist = list(groups.values())
+    rnd.shuffle(glist)
+    n = len(items)
+    n_train = round(n * ratios[0])
+    n_val = round(n * ratios[1])
+    if n >= 3:
+        n_train = max(1, min(n_train, n - 2))
+        n_val = max(0, min(n_val, n - n_train))
+    else:
+        n_train = max(1, n - 1)  # 极小层：保 train，其余给 test
+        n_val = 0
+    train: list[tuple[Path, Path | None]] = []
+    val: list[tuple[Path, Path | None]] = []
+    test: list[tuple[Path, Path | None]] = []
+    filled = 0
+    for g in glist:
+        if filled < n_train or not train:
+            train.extend(g)
+            filled += len(g)
+        elif len(val) < n_val:
+            val.extend(g)
+        else:
+            test.extend(g)
+    return train, val, test
+
+
 def build_dataset(
     out_root: Path | None = None,
     ratios: tuple[float, float, float] = (0.8, 0.1, 0.1),
@@ -202,6 +249,7 @@ def build_dataset(
     train_only_sources: set[str] | None = None,
     source_limits: dict[str, int] | None = None,
     clean_output: bool = False,
+    enforce_groups: bool = False,
 ) -> Path:
     """合并多源 → 分层划分 → 写出 data.yaml。返回 data.yaml 路径。
 
@@ -219,6 +267,9 @@ def build_dataset(
 
     clean_output：写入前清空 out_root 的 train/val/test（防重复 build
     累积旧 split 被误用）。
+
+    enforce_groups：同源底片组跨 split 时抛异常阻断（默认仅报告——跨类别层
+    的合成派生图无法在划分期归组，如实写进泄漏审计报告供人工裁决）。
     """
     out_root = Path(out_root or _OUT_ROOT)
     raw_root = _RAW_ROOT
@@ -254,28 +305,22 @@ def build_dataset(
             _rmtree_native(out_root / split)
         print("[dataset] 已清空旧 split 输出（clean_output=True）")
 
-    # 按类别集合分层抽样（仅非 train-only 源参与，train-only 源全部并入 train）
+    # 按类别集合分层抽样（仅非 train-only 源参与，train-only 源全部并入 train）；
+    # 层内再按同源底片组整组划分（_split_stratum），杜绝同底片衍生图跨 split
     strata: dict[frozenset[int], list[tuple[Path, Path | None]]] = {}
     for p in all_pairs:
         key = _classes_in_label(p[1])
         strata.setdefault(key, []).append(p)
 
     rnd = random.Random(seed)
+    # 池级同源等价类：合成图（cp_/rcp_，含 train-only 源）与亲本底片并查集归并
+    group_of = assign_groups([p[0].stem for p in all_pairs] + [p[0].stem for p in train_only_pairs])
     splits: dict[str, list[tuple[Path, Path | None]]] = {"train": [], "val": [], "test": []}
     for key, items in strata.items():
-        rnd.shuffle(items)
-        n = len(items)
-        n_train = round(n * ratios[0])
-        n_val = round(n * ratios[1])
-        if n >= 3:
-            n_train = max(1, min(n_train, n - 2))
-            n_val = max(0, min(n_val, n - n_train))
-        else:
-            n_train = max(1, n - 1)  # 极小层：保 train，其余给 test
-            n_val = 0
-        splits["train"].extend(items[:n_train])
-        splits["val"].extend(items[n_train : n_train + n_val])
-        splits["test"].extend(items[n_train + n_val :])
+        tr, va, te = _split_stratum(items, ratios, rnd, group_of)
+        splits["train"].extend(tr)
+        splits["val"].extend(va)
+        splits["test"].extend(te)
 
     # train-only 源（伪标签等）全部并入 train
     if train_only_pairs:
@@ -298,14 +343,44 @@ def build_dataset(
         seen: dict[str, int] = {}
         for img, lbl in pairs:
             name = img.name
-            # 过采样副本同名 → 唯一化（os0_/os1_ 前缀），否则 shutil.copy 互相覆盖
+            # 跨源同名去重（dup 前缀，与过采样 os 前缀区分；两者均被
+            # assign_groups 剥离归组）。同组文件必然同 split，跨源同名图
+            # （同一张图多源摄入）在此撞名，须唯一化否则 copy 互相覆盖。
             cnt = seen.get(name, 0)
             seen[name] = cnt + 1
             if cnt > 0:
-                name = f"os{cnt}_{name}"
+                name = f"dup{cnt}_{name}"
             shutil.copy(img, d_img / name)
             if lbl is not None and lbl.exists():
                 shutil.copy(lbl, d_lbl / (Path(name).stem + ".txt"))
+
+    # 泄漏审计（§8.3.1 延伸）：跨 split 字节/感知重复 + 同源底片分组越界。
+    # 报告先于互斥门禁落盘：构建失败的现场也留审计痕迹（评估闭环可引用）。
+    from backend.domain.labeling.leakage import audit_leakage
+
+    audit = audit_leakage(
+        {
+            "train": out_root / "train" / "images",
+            "val": out_root / "val" / "images",
+            "test": out_root / "test" / "images",
+        },
+        enforce_groups=enforce_groups,
+    )
+    (out_root / "leakage_audit.json").write_text(
+        json.dumps(audit.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(
+        f"[dataset] 泄漏审计: 重复簇={len(audit.duplicate_clusters)} "
+        f"感知疑似对={len(audit.perceptual_pairs)} "
+        f"跨split同源组={len(audit.cross_split_groups)} → {out_root / 'leakage_audit.json'}"
+    )
+    for c in audit.cross_split_groups[:5]:
+        print(f"[dataset] ⚠ 同源底片组跨split: {c['group']} → {sorted(c['splits'])}")  # type: ignore[arg-type]
+    if enforce_groups and audit.cross_split_groups:
+        raise RuntimeError(
+            f"同源底片组跨 split（enforce_groups=True）：共 {len(audit.cross_split_groups)} 组，"
+            f"首例 {audit.cross_split_groups[0]['group']}（详见 leakage_audit.json）"
+        )
 
     # 测试集/训练集互斥校验（DB50/T 1807-2025 ）：字节 md5 + 感知哈希
     # 双重判定，重叠即抛异常阻断（疑似感知重复默认拦截）。

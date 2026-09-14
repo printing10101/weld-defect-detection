@@ -43,7 +43,7 @@ const conclusion = computed<string>(() => {
 
 const reason = computed<string>(() => {
   if (tone.value === "fail") return "可能原因：像质计（IQI）丝号未达要求，或黑度 D 超出 AB 级规定范围。可调整曝光参数或补加像质计后重新透照；必要时转人工评片。";
-  if (tone.value === "review") return "可能原因：标准限值未获授权（tables.authorized=false），或双人对评结论存在分歧，按 §12.2 升级至仲裁流程。此为「宁保守、不误放行」的保守判定策略，并非系统误报。";
+  if (tone.value === "review") return "可能原因：本报告依据的评级标准限值需要授权后使用，或初评与对评结论存在分歧。系统已按 §12.2 转入人工仲裁流程——此为「宁保守、不误放行」的保守判定策略，并非系统误报。";
   return "像质计灵敏度与黑度 D 校验均通过；如需归档，请导出 PDF/A 检测报告。";
 });
 </script>

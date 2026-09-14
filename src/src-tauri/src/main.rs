@@ -30,6 +30,14 @@ use std::time::Duration;
 use tauri::Manager;
 
 const BACKEND_PORT: u16 = 18773;
+/// 本机 llama.cpp 30B 服务（E:\llama-cpp）：
+/// model-proxy.js 监听 8080（hermes 等外部工具入口），按需拉起/切换
+/// llama-server（监听 8081）。本壳将其纳入软件生命周期随启随停。
+const LLAMA_PROXY_PORT: u16 = 8080;
+/// node 运行时（model-proxy.js 宿主，与 start-if-needed.ps1 中路径一致）。
+const LLAMA_NODE_EXE: &str = "C:\\Program Files\\nodejs\\node.exe";
+/// model-proxy.js 绝对路径（30B 服务入口，内建按需拉起/切换 llama-server）。
+const LLAMA_PROXY_SCRIPT: &str = "E:\\llama-cpp\\model-proxy.js";
 /// 单轮就绪等待上限：仅约束 wait_for_backend_ready 的单次轮询窗口（超时后
 /// 监督循环仍会持续探测并在就绪后注入令牌，见 run_supervisor 的补注入分支），
 /// 不再是"超时即放弃注入"的硬截止。
@@ -44,6 +52,9 @@ fn main() {
     // 供后台监督线程与窗口事件钩子各自持有一份 Arc 克隆（引用计数，零额外开销）。
     let launch_slot: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
     let event_slot = launch_slot.clone();
+    // 本机 30B llama 服务子进程槽（node 代理进程 + Job Object 句柄），随软件启停。
+    let llama_slot: Arc<Mutex<Option<LlamaProc>>> = Arc::new(Mutex::new(None));
+    let event_llama_slot = llama_slot.clone();
     // 停止标志：窗口销毁即置位，监督线程据此退出并回收后端子进程。
     let stop = Arc::new(AtomicBool::new(false));
     let supervisor_stop = stop.clone();
@@ -87,6 +98,9 @@ fn main() {
 
                 // 首启后端并等待就绪。
                 try_spawn_backend(&launch_slot, &app_root, &python, &user_data_dir);
+                // 本机 30B llama 随软件启动：脚本内建"已在跑则跳过"，幂等。
+                // 30B 冷启动耗时长（数秒~数十秒），异步拉取不阻塞后端就绪。
+                try_spawn_llama_stack(&llama_slot);
                 let ready = wait_for_backend_ready_stoppable(
                     "127.0.0.1",
                     BACKEND_PORT,
@@ -133,6 +147,8 @@ fn main() {
                         println!("[ScanDetection] backend process stopped");
                     }
                 }
+                // 回收随软件拉起的 30B llama 服务（仅回收本壳拉起的进程树）。
+                stop_llama_stack(&event_llama_slot);
             }
         })
         .run(tauri::generate_context!())
@@ -409,6 +425,173 @@ fn probe_backend_health(addr: &str) -> bool {
     let n = stream.read(&mut buf).unwrap_or(0);
     let head = String::from_utf8_lossy(&buf[..n]);
     head.starts_with("HTTP/1.0 200") || head.starts_with("HTTP/1.1 200")
+}
+
+/// 探测本机 30B llama 代理（8080）是否已就绪：GET /health，HTTP 200=已运行。
+/// 与 probe_backend_health 同款裸 TCP 探测，不引入额外依赖。
+fn probe_llama_proxy_health(port: u16) -> bool {
+    use std::io::{Read, Write};
+    let addr = format!("127.0.0.1:{port}");
+    let Ok(mut stream) = TcpStream::connect(&addr) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let req = format!(
+        "GET /health HTTP/1.0\r\nHost: {addr}\r\nConnection: close\r\n\r\n"
+    );
+    if stream.write_all(req.as_bytes()).is_err() {
+        return false;
+    }
+    let mut buf = [0u8; 64];
+    let n = stream.read(&mut buf).unwrap_or(0);
+    let head = String::from_utf8_lossy(&buf[..n]);
+    head.starts_with("HTTP/1.0 200") || head.starts_with("HTTP/1.1 200")
+}
+
+/// 随软件拉起的 30B llama 进程树（node 代理 + 其子进程 llama-server）。
+struct LlamaProc {
+    /// node(model-proxy.js) 直接子进程句柄。
+    child: Child,
+    /// Windows Job Object 句柄（KILL_ON_JOB_CLOSE）：关闭句柄即由 OS 回收
+    /// 整棵进程树，兜底"壳被强杀/崩溃 → llama 残留常驻"。
+    #[cfg(windows)]
+    job: isize,
+}
+
+/// 创建 KILL_ON_JOB_CLOSE 的 Job Object（与后端 llm_server.py 同语义）。
+/// 失败返回 None（降级：停止时退化为仅杀 node 直接子进程）。
+#[cfg(windows)]
+fn create_kill_on_close_job() -> Option<isize> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::JobObjects::{
+        CreateJobObjectW, SetInformationJobObject, JobObjectExtendedLimitInformation,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            return None;
+        }
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let ok = SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const core::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        if ok == 0 {
+            CloseHandle(job);
+            return None;
+        }
+        Some(job as isize)
+    }
+}
+
+/// 把子进程绑入 Job Object（KILL_ON_JOB_CLOSE）。失败仅打日志，不阻断启动。
+#[cfg(windows)]
+fn assign_llama_to_job(job: isize, proc_handle: isize) -> bool {
+    use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
+    unsafe { AssignProcessToJobObject(job as _, proc_handle as _) != 0 }
+}
+
+/// 拉起本机 30B llama 服务（随软件启动）。
+///
+/// 直接 spawn node(model-proxy.js)（其内部按需拉起/切换 llama-server），
+/// 并绑入 Job Object（KILL_ON_JOB_CLOSE）——壳进程无论以何种方式退出，
+/// OS 关闭 Job 句柄即回收整棵进程树，杜绝残留常驻。
+/// - 8080 已有健康代理 → 收编复用，不重复拉起（退出时不回收，归外部所有）；
+/// - 否则以隐藏窗口静默启动，句柄存入 `llama_slot` 供退出时回收。
+/// spawn 失败不 panic，仅打日志（30B 属增强能力，失败不阻断主应用）。
+fn try_spawn_llama_stack(llama_slot: &Arc<Mutex<Option<LlamaProc>>>) -> bool {
+    // 已有健康代理：收编复用（与后端 llm_server 的 adopted 语义一致）。
+    if probe_llama_proxy_health(LLAMA_PROXY_PORT) {
+        println!(
+            "[ScanDetection] llama proxy already healthy on :{}; adopting",
+            LLAMA_PROXY_PORT
+        );
+        return true;
+    }
+    let mut cmd = Command::new(LLAMA_NODE_EXE);
+    cmd.arg(LLAMA_PROXY_SCRIPT)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        // CREATE_NO_WINDOW：避免拉起时闪出黑色控制台窗口。
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[ScanDetection] llama stack spawn failed: {e}");
+            return false;
+        }
+    };
+    #[cfg(windows)]
+    {
+        // 绑定成功才保留 job 句柄；失败已内部 CloseHandle，存 0 避免二次关闭。
+        let mut bound_job: isize = 0;
+        if let Some(j) = create_kill_on_close_job() {
+            use std::os::windows::io::AsRawHandle;
+            let h = child.as_raw_handle() as isize;
+            if assign_llama_to_job(j, h) {
+                bound_job = j;
+            } else {
+                eprintln!("[ScanDetection] llama job assign failed; closing job");
+                unsafe {
+                    windows_sys::Win32::Foundation::CloseHandle(j as _);
+                }
+            }
+        } else {
+            eprintln!("[ScanDetection] llama job object unavailable; degrade to child-kill only");
+        }
+        if let Ok(mut slot) = llama_slot.lock() {
+            *slot = Some(LlamaProc { child, job: bound_job });
+        }
+        println!(
+            "[ScanDetection] llama stack started (node proxy pid); job_bound={}",
+            bound_job != 0
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        if let Ok(mut slot) = llama_slot.lock() {
+            *slot = Some(LlamaProc { child });
+        }
+        println!("[ScanDetection] llama stack started (node proxy pid)");
+    }
+    true
+}
+
+/// 回收随软件拉起的 30B llama 服务（随软件退出）。
+///
+/// 只回收本壳拉起的情形（llama_slot 有句柄），收编复用不回收。
+/// - Windows：关闭 Job Object 句柄（KILL_ON_JOB_CLOSE）→ OS 回收整棵进程树；
+/// - 兜底：直接杀 node 子进程并 wait（非 Windows 仅此路径）。
+fn stop_llama_stack(llama_slot: &Arc<Mutex<Option<LlamaProc>>>) {
+    let mut taken = None;
+    if let Ok(mut slot) = llama_slot.lock() {
+        taken = slot.take();
+    }
+    let Some(proc) = taken else {
+        return; // 收编复用或未拉起：不干预外部实例
+    };
+    #[cfg(windows)]
+    if proc.job != 0 {
+        // KILL_ON_JOB_CLOSE：关闭句柄即由 OS 回收 node 及全部子进程（llama-server）。
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(proc.job as _);
+        }
+        println!("[ScanDetection] llama stack job handle closed; tree reclaimed by OS");
+        return;
+    }
+    // 兜底（无 Job 或非 Windows）：杀直接子进程。
+    let mut child = proc.child;
+    let _ = child.kill();
+    let _ = child.wait();
+    println!("[ScanDetection] llama stack child stopped");
 }
 
 /// 后端存活监控与自愈（S-09 配套：Tauri 壳侧崩溃重启）。

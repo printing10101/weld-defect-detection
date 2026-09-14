@@ -96,6 +96,9 @@ class Geometry:
     aspect_ratio: float
     position_x_mm: float
     position_y_mm: float
+    # 条形缺陷中心线弧长（G13）：弯曲裂纹的真实长度，比最小外接矩形长边公平；
+    # 圆形缺陷或退化时为 None（length_mm 仍为矩形长边口径）。
+    centerline_mm: float | None = None
 
 
 @dataclass(frozen=True)
@@ -133,3 +136,6 @@ class ImageMeta:
     base_metal_thickness_mm: float | None = None
     bit_depth: int | None = None
     density_array: np.ndarray | None = None
+    # 管外径（G18 工程上下文）：当前 NB/T47013.2 规则库暂无依赖管径的条款，
+    # 仅随判定上下文透传并在判定依据中记录备查；接入小径管专用规则时此缝即用。
+    pipe_outer_diameter_mm: float | None = None

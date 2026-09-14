@@ -106,6 +106,18 @@ def challenge(
     return ChallengeOut(challenge_id=challenge_id, nonce=nonce)
 
 
+@router.get("/bootstrap/status")
+def bootstrap_status(
+    reg: Annotated[Registry, Depends(get_registry)],
+) -> dict:
+    """登录页引导探测（公开）：系统是否尚无账号（需要引导建号）+ 访客模式开关。
+
+    前端据此自动展开首次部署引导、显示/隐藏访客入口；不泄漏账号细节。
+    """
+    accounts = reg.security_store.list_accounts()
+    return {"needs_bootstrap": len(accounts) == 0, "guest_mode": reg.config.auth.guest_mode}
+
+
 @router.post("/bootstrap", response_model=BootstrapOut)
 def bootstrap(
     body: BootstrapIn,
@@ -185,7 +197,6 @@ def logout(
         after={"revoked": True},
         note=None,
     )
-    del principal
     return {"ok": True}
 
 
@@ -257,6 +268,9 @@ def set_account_status(
         raise _http(exc) from None
     except KeyError as exc:
         raise HTTPException(404, detail={"code": "NOT_FOUND", "message": str(exc)}) from None
+    except ValueError as exc:
+        # store 层对非法 status 抛 ValueError：不接住会把可预期的输入错误变 500
+        raise HTTPException(422, detail={"code": "INVALID_STATUS", "message": str(exc)}) from None
 
 
 @router.post("/accounts/{account_id}/unlock", response_model=AccountOut)

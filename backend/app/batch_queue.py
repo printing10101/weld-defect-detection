@@ -10,7 +10,11 @@ BatchManager 用线程池多 worker 并行跑 ``InspectionPipeline.run_inspectio
   进程重启后 ``status`` 仍可读历史与未完成标记（v1 不自动重跑，
   已完成任务结果已入库，可重新提交未完成项继续）；
 - 取消：``cancel`` 标记批次取消，未启动任务不再执行（running 任务
-  线程不可抢占，v1 等待其自然结束，结果保留）。
+  线程不可抢占，v1 等待其自然结束，结果保留）；
+- 暂停/恢复：``pause`` 置暂停闸门，未启动任务被 worker 退回待派发列表
+  （不阻塞共享线程池），``resume`` 重新入队；running 任务同样等待自然
+  结束。暂停态随进程重启收敛为 interrupted（与 running 同语义），可用
+  retry 断点续跑。
 
 线程安全：所有状态变更在 ``_lock`` 内；worker 只读快照对象并回写结果。
 """
@@ -20,7 +24,6 @@ from __future__ import annotations
 import json
 import logging
 import threading
-import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -98,6 +101,11 @@ class BatchManager:
         self._closed = False
         self._lock = threading.Lock()
         self._batches: dict[str, dict[str, Any]] = {}
+        # 暂停期间被 worker 退回的待派发任务（batch_id -> [(task_id, item)]）。
+        # 任务在提交时即急切派发到共享线程池，暂停不能阻塞 worker（会饿死其他
+        # 批次），改为：worker 发现暂停标记即把任务登记回这里并退出，resume 时
+        # 重新入队。运行中的任务不被抢占，等其自然结束（与取消同语义）。
+        self._held: dict[str, list[tuple[str, BatchItem]]] = {}
 
     # ------------------------------------------------------------------
     # 生命周期
@@ -145,6 +153,7 @@ class BatchManager:
             "batch_id": batch_id,
             # running=立即执行；awaiting_review=查重命中，等人工复核后继续
             "status": "awaiting_review" if hold else "running",
+            "paused": False,
             "total": len(items),
             "done": 0,
             "failed": 0,
@@ -194,6 +203,8 @@ class BatchManager:
                 else:
                     t["status"] = "cancelled"
                     t["error"] = "人工查重复核：内容重复，确认跳过"
+                    # 结构化标记：retry 不得重跑用户明确跳过的任务（见 retry）
+                    t["dup_skipped"] = True
                     skipped += 1
             batch["done"] = sum(1 for t in batch["tasks"] if t["status"] == "done")
             batch["failed"] = sum(1 for t in batch["tasks"] if t["status"] == "failed")
@@ -202,7 +213,7 @@ class BatchManager:
                 batch["status"] = "running"
                 batch["finished_at"] = None
             else:
-                # 全部跳过：所有任务已终态，直接收敛完成并清理暂存目录
+                # 全部跳过：所有任务已终态，原子收敛完成态（钩子/清理随 _maybe_finish）
                 self._maybe_finish(batch)
         self._persist(batch)
         if not kept:
@@ -229,11 +240,48 @@ class BatchManager:
                 return None
             return json.loads(json.dumps(batch))  # 深拷贝，防外部篡改
 
+    def pause(self, batch_id: str) -> bool:
+        """暂停批次：未启动任务不再派发（running 任务线程不可抢占，等其自然结束）。
+
+        返回是否命中该批次；已完成批次幂等返回 True（同 cancel 口径）。
+        """
+        with self._lock:
+            batch = self._batches.get(batch_id)
+            if batch is None:
+                return False
+            if batch["status"] == "finished":
+                return True
+            if batch["status"] != "running":
+                return True  # awaiting_review 本就暂缓；paused 幂等
+            batch["paused"] = True
+            batch["status"] = "paused"
+        self._persist(batch)
+        return True
+
+    def resume(self, batch_id: str) -> int:
+        """恢复暂停的批次：把被退回的待派发任务重新入队，返回恢复派发数。"""
+        self._ensure_pool()
+        with self._lock:
+            batch = self._batches.get(batch_id)
+            if batch is None:
+                raise KeyError(f"batch not found: {batch_id}")
+            held = self._held.pop(batch_id, [])
+            batch["paused"] = False
+            if batch["status"] == "paused":
+                batch["status"] = "running"
+        self._persist(batch)
+        for task_id, item in held:
+            self._pool.submit(self._run_one, batch_id, task_id, item)
+        return len(held)
+
     def cancel(self, batch_id: str) -> bool:
         """标记批次取消：未启动任务不再执行。返回是否命中该批次。
 
         awaiting_review（查重暂缓）批次：任务尚未入队，pending 直接标
         cancelled，批次即时 finished 并清理暂存目录（等不到 worker 收尾）。
+        paused（已暂停）批次：被 worker 退回的任务不在池中，等待队列不会再
+        消费 cancelled_flag——直接把 pending 标 cancelled 并丢弃退回任务，
+        否则批次永远无法收敛到 finished。
         """
         with self._lock:
             batch = self._batches.get(batch_id)
@@ -241,16 +289,19 @@ class BatchManager:
                 return False
             if batch["status"] == "finished":
                 return True  # 已完成批次无需取消
-            if batch.get("status") == "awaiting_review":
+            if batch.get("status") in ("awaiting_review", "paused"):
                 for t in batch["tasks"]:
                     if t["status"] == "pending":
                         t["status"] = "cancelled"
                         t["error"] = "batch cancelled"
+                self._held.pop(batch_id, None)
+                batch["paused"] = False
                 batch["done"] = sum(1 for t in batch["tasks"] if t["status"] == "done")
                 batch["failed"] = sum(1 for t in batch["tasks"] if t["status"] == "failed")
                 batch["cancelled"] = sum(1 for t in batch["tasks"] if t["status"] == "cancelled")
             batch["cancelled_flag"] = True
-            self._maybe_finish(batch)  # 取消后若所有任务已终态则标记 finished（纯状态变更）
+            # 取消后若所有任务已终态则标记 finished（钩子/清理随 _maybe_finish 原子执行）
+            self._maybe_finish(batch)
         self._persist(batch)
         return True
 
@@ -269,14 +320,21 @@ class BatchManager:
                 batch["cancelled_flag"] = False  # 用户显式重试：解除取消标记
             pending: list[tuple[str, str, str, dict[str, Any]]] = []
             for t in batch["tasks"]:
-                if t["status"] in ("failed", "cancelled"):
-                    t["status"] = "pending"
-                    t["error"] = None
-                    t["result"] = None
-                    pending.append((t["task_id"], t["image_path"], t["image_name"], t["options"]))
+                if t["status"] not in ("failed", "cancelled"):
+                    continue
+                # 人工查重复核确认跳过的任务不重跑：retry 是断点续跑手段，
+                # 不得覆盖用户"确认跳过"的显式决定。
+                if t.get("dup_skipped"):
+                    continue
+                t["status"] = "pending"
+                t["error"] = None
+                t["result"] = None
+                pending.append((t["task_id"], t["image_path"], t["image_name"], t["options"]))
             if not pending:
                 return 0
-            batch["status"] = "running"
+            # 暂停态重试：任务重新入队后仍会被暂停闸门拦回待派发列表，
+            # 状态保持 paused（恢复时与新任务一起继续），不静默解除暂停。
+            batch["status"] = "paused" if batch.get("paused") else "running"
             batch["finished_at"] = None
         self._persist(batch)
         for task_id, image_path, image_name, options in pending:
@@ -325,23 +383,36 @@ class BatchManager:
     def _ensure_pool(self) -> None:
         """若线程池已随 shutdown 关闭（如测试生命周期中 lifespan 多次启停），
         惰性重建，使单例 BatchManager 在进程内可继续接收提交（生产真实退出后
-        不再有新提交，不受影响）。"""
-        if self._closed:
-            self._pool = ThreadPoolExecutor(max_workers=self._workers, thread_name_prefix="batch")
-            self._closed = False
+        不再有新提交，不受影响）。
+
+        check-then-act 须持锁：并发提交同时见 _closed=True 会各建一个线程池，
+        泄漏一个（空闲线程非 daemon，驻留到进程退出）。调用方均未持锁（submit/
+        resolve_dups/retry 在加锁前调用），锁内无嵌套，无死锁面。
+        """
+        with self._lock:
+            if self._closed:
+                self._pool = ThreadPoolExecutor(
+                    max_workers=self._workers, thread_name_prefix="batch"
+                )
+                self._closed = False
 
     # ------------------------------------------------------------------
     # 内部
     # ------------------------------------------------------------------
     def _run_one(self, batch_id: str, task_id: str, item: BatchItem) -> None:
-        # 锁仅保护状态变更；落盘（序列化整批 JSON + 写盘，I/O 较重）移到锁外，
-        # 避免每次状态变更阻塞全部 worker。
+        # 锁仅保护状态变更；落盘（序列化整批 JSON + 写盘）在锁外执行，避免
+        # 每次状态变更阻塞全部 worker（收尾钩子/暂存清理由 _maybe_finish 原子执行）。
         with self._lock:
             batch = self._batches[batch_id]
             if batch["cancelled_flag"]:
                 self._mark(batch, task_id, "cancelled", error="batch cancelled")
                 self._maybe_finish(batch)
                 self._persist(batch)
+                return
+            if batch.get("paused"):
+                # 暂停闸门：任务保持 pending，登记回待派发列表，worker 退出
+                # 不占线程等待（共享线程池被阻塞会饿死其他批次的任务）。
+                self._held.setdefault(batch_id, []).append((task_id, item))
                 return
             self._mark(batch, task_id, "running")
         pipeline = self._pipeline_factory()
@@ -377,6 +448,14 @@ class BatchManager:
         # 注意：落盘由调用方在锁外执行，此处仅变更内存状态。
 
     def _maybe_finish(self, batch: dict) -> None:
+        """终态收敛（锁内调用）：全部任务到达终态即置 finished，并同步执行
+        收尾钩子（印字裁决落库）与暂存清理。
+
+        刻意与状态翻转同锁原子：status() 一旦可见 finished，钩子已跑完、
+        stamp_summary 已入快照、暂存已清理——对外一致性"finished ⇒ 收尾完成"。
+        （曾有"钩子/清理移锁外"的版本，会让轮询在窗口期看到 finished 而无
+        stamp_summary，已回退；收尾每批次仅一次，持锁窗口有界，可接受。）
+        """
         if batch["status"] == "finished":
             return
         terminal = {"done", "failed", "cancelled"}
@@ -530,7 +609,7 @@ class BatchManager:
             for t in batch.get("tasks", []):
                 if t.get("status") in ("running", "pending"):
                     t["status"] = "failed"
-                    t["error"] = "interrupted by restart; retry available"
+                    t["error"] = "因程序重启中断；可在本批重试失败任务"
                     changed = True
             if changed:
                 batch["done"] = sum(1 for t in batch["tasks"] if t["status"] == "done")
@@ -538,9 +617,9 @@ class BatchManager:
                 batch["cancelled"] = sum(1 for t in batch["tasks"] if t["status"] == "cancelled")
                 if batch["status"] != "finished":
                     batch["status"] = "finished"
-                    batch["finished_at"] = batch.get("finished_at") or time.strftime(
-                        "%Y-%m-%dT%H:%M:%S"
-                    )
+                    # 全库统一 naive-UTC 口径（fmt_naive_utc）；本地时区会使
+                    # 非 UTC 部署下的 finished_at 偏移数小时。
+                    batch["finished_at"] = batch.get("finished_at") or fmt_naive_utc()
                 self._persist(batch)
         # S-*：恢复历史快照后同样收敛内存，避免积压的历史批次一次性占满内存。
         self._maybe_evict_excess()

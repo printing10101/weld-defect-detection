@@ -5,20 +5,27 @@
  * 查重复核：提交命中重复（批内/与历史已检影像）时后端整批置 awaiting_review
  * 暂缓态，本页逐项确认「跳过/仍检测」后批次才继续执行。
  */
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { IMAGE_ACCEPT, IMAGE_EXTS as EXTS } from "../services/imageFormats";
 import { toErrorMessage } from "../utils/errorMessage";
 import { useViewerFilmsStore } from "../stores/viewerFilms";
+import { useWorkspaceStore } from "../stores/workspace";
+import { busyTask } from "../stores/busy";
+import { useControlledPdf } from "../composables/useControlledPdf";
 import BatchProgress from "../components/BatchProgress.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
+import PdfGateModal from "../components/PdfGateModal.vue";
 import {
+  ApiRequestError,
   cancelBatch,
   getBatchStatus,
   getReportDetections,
   listBatches,
+  pauseBatch,
   resolveBatchDuplicates,
+  resumeBatch,
   retryBatch,
-  submitBatch,
+  submitBatchWithProgress,
 } from "../services/api";
 import type { BatchDuplicateItem, BatchStatusOut, BatchSummaryOut } from "../types/api";
 
@@ -28,6 +35,8 @@ const emit = defineEmits<{ archive: [] }>();
 const viewerFilms = useViewerFilmsStore();
 
 const MAX_PER_BATCH = 100;
+/** 与单幅上传同口径的单文件上限（UploadPanel.MAX_BYTES）。 */
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
 
 type Phase = "upload" | "dedup" | "running" | "result";
 const phase = ref<Phase>("upload");
@@ -36,7 +45,18 @@ const files = ref<File[]>([]);
 const activeBatchId = ref<string | null>(null);
 const submitError = ref<string | null>(null);
 const submitting = ref(false);
+/** 批量上传进度百分比（-1 = 非上传阶段；XHR 提供真实字节数）。 */
+const uploadPct = ref(-1);
+/** 结果视图内的操作错误（打开历史批次失败等；此前点击无任何反馈）。 */
+const viewError = ref<string | null>(null);
 const history = ref<BatchSummaryOut[]>([]);
+
+/* ── 报告 PDF 受控导出：任务行「报告」按钮共用（见 BatchProgress 事件） ── */
+const pdfCtrl = useControlledPdf();
+
+function openTaskReport(reportId: string): void {
+  void pdfCtrl.openPdf(reportId);
+}
 
 /* ── 查重复核（awaiting_review 阶段） ── */
 const duplicates = ref<BatchDuplicateItem[]>([]);
@@ -81,6 +101,8 @@ const POLL_BASE_MS = 2000;
 const MAX_OFFLINE_STRIKES = 3;
 const pollErrorCount = ref(0);
 const backendDown = ref(false);
+/** 最近一次轮询错误（区分「服务离线」与「会话过期」等真实原因，此前一律误报离线）。 */
+const lastPollErr = ref<string | null>(null);
 
 function pollIntervalMs(): number {
   // 连续失败指数退避：2s → 4s → 8s（上限），恢复即回 2s
@@ -88,11 +110,17 @@ function pollIntervalMs(): number {
 }
 
 /* ── 历史批次 ── */
+const historyError = ref<string | null>(null);
+
 async function refreshHistory(): Promise<void> {
   try {
     history.value = await listBatches();
-  } catch {
-    /* 列表刷新失败不打扰当前流程 */
+    historyError.value = null;
+  } catch (e) {
+    // 历史刷新失败此前完全无声：点了历史行/刷新毫无反应。给出轻量提示，
+    // 不打断当前批次流程。
+    if (e instanceof ApiRequestError && e.status === 401) return; // 会话过期由全局处理
+    historyError.value = `历史批次刷新失败：${toErrorMessage(e)}`;
   }
 }
 
@@ -119,9 +147,13 @@ async function fetchStatusOnce(id: string): Promise<void> {
     if (token !== fetchToken) return; // 已切走（切换/新提交都会使代次失效）
     status.value = s;
     phase.value = "result";
+    viewError.value = null;
     void enrichAnnotations(s);
-  } catch {
-    /* 忽略 */
+  } catch (e) {
+    // 此前 catch 完全为空：点击历史「已完成」批次毫无反应。
+    if (token !== fetchToken) return;
+    if (e instanceof ApiRequestError && e.status === 401) return; // 会话过期由全局统一处理
+    viewError.value = `批次状态获取失败：${toErrorMessage(e)}`;
   }
 }
 
@@ -136,12 +168,27 @@ function onInputChanged(e: Event): void {
 function pickFiles(list: FileList | null): void {
   if (!list || list.length === 0) return;
   const accepted: File[] = [];
+  const oversized: string[] = [];
   for (const f of Array.from(list)) {
     const ext = f.name.split(".").pop()?.toLowerCase() ?? "";
-    if ((EXTS as readonly string[]).includes(ext)) accepted.push(f);
+    if (!(EXTS as readonly string[]).includes(ext)) continue;
+    // 与单幅同口径的单文件大小校验（此前批量不校验，超大文件提交后才被后端 413 打回）
+    if (f.size > MAX_FILE_BYTES) {
+      oversized.push(`${f.name}（${(f.size / 1024 / 1024).toFixed(1)}MB）`);
+      continue;
+    }
+    accepted.push(f);
+  }
+  if (oversized.length > 0) {
+    submitError.value =
+      `以下 ${oversized.length} 个文件超过单文件 50MB 上限，已未导入：${oversized.slice(0, 5).join("、")}` +
+      (oversized.length > 5 ? " 等。" : "。请压缩或降分辨率后重新导入。");
   }
   if (accepted.length === 0) {
-    submitError.value = "所选文件/文件夹中未包含受支持的影像格式（DICOM .dcm / JPG / PNG / BMP / GIF / WebP / TIFF / HEIC 等）。";
+    if (oversized.length === 0) {
+      submitError.value =
+        "所选文件/文件夹中未包含受支持的影像格式（DICOM .dcm / JPG / PNG / BMP / GIF / WebP / TIFF / HEIC 等）。";
+    }
     return;
   }
   if (accepted.length > MAX_PER_BATCH) {
@@ -149,7 +196,7 @@ function pickFiles(list: FileList | null): void {
     return;
   }
   files.value = accepted;
-  submitError.value = null;
+  if (oversized.length === 0) submitError.value = null;
   viewerFilms.add(accepted);
 }
 
@@ -167,6 +214,19 @@ function openFilePicker(): void {
 function openDirPicker(): void {
   (document.getElementById("pick-dir") as HTMLInputElement | null)?.click();
 }
+
+/** 菜单/快捷键「批量导入底片…」直达文件选择器：
+ *  AppShell 经 workspace 下发意图，本页无论先挂载还是后挂载都会消费一次。 */
+const workspace = useWorkspaceStore();
+watch(
+  () => workspace.pendingFileOpen,
+  (v) => {
+    if (v !== "batch") return;
+    workspace.pendingFileOpen = null;
+    void nextTick(openFilePicker);
+  },
+  { immediate: true },
+);
 
 /* ── 提交与轮询 ── */
 function onSubmit(): void {
@@ -192,8 +252,11 @@ function onSubmit(): void {
 async function doSubmit(fd: FormData): Promise<void> {
   if (submitting.value) return; // 防双击重复提交（§D2）
   submitting.value = true;
+  uploadPct.value = 0; // 百张批量上传耗时可观：展示真实上传百分比（此前只有"提交中…"文字）
   try {
-    const out = await submitBatch(fd);
+    const out = await submitBatchWithProgress(fd, (pct) => {
+      uploadPct.value = pct;
+    });
     activeBatchId.value = out.batch_id;
     if (out.status === "awaiting_review") {
       // 查重命中：整批暂缓，先交人工逐项复核
@@ -205,9 +268,11 @@ async function doSubmit(fd: FormData): Promise<void> {
       startPolling(out.batch_id);
     }
   } catch (e) {
+    if (e instanceof ApiRequestError && e.code === "ABORTED") return; // 用户主动取消上传
     submitError.value = toErrorMessage(e);
   } finally {
     submitting.value = false;
+    uploadPct.value = -1;
   }
 }
 
@@ -251,14 +316,17 @@ function startPolling(id: string): void {
   stopPolling();
   backendDown.value = false;
   pollErrorCount.value = 0;
+  lastPollErr.value = null;
   fetchToken++; // 使在途的 fetchStatusOnce 失效，防止一次性拉取覆盖轮询视图
   pollingId = id;
+  busyTask.value = "batch"; // 批次在跑：关闭窗口前给出拦截提示
   void tick(id);
 }
 
 function stopPolling(): void {
   pollingId = null;
   clearTimer();
+  if (busyTask.value === "batch") busyTask.value = null;
 }
 
 /** 旧快照/缺 duplicates 字段时，从任务明细兜底还原重复清单。 */
@@ -341,6 +409,7 @@ async function tick(id: string): Promise<void> {
     status.value = s;
     pollErrorCount.value = 0;
     backendDown.value = false;
+    lastPollErr.value = null;
     void enrichAnnotations(s); // 逐任务完成后即时回填标注（有问题才标注）
     enrichStamps(s); // 逐任务完成后即时回填印字性质（正/镜像/无印字）
     if (s.status === "awaiting_review") {
@@ -355,10 +424,16 @@ async function tick(id: string): Promise<void> {
       void refreshHistory();
       return;
     }
-  } catch {
+  } catch (e) {
     if (pollingId !== id) return; // 同上：迟到失败的响应也不影响新批次
+    // 会话过期：不再误报「推理服务无响应」（全局 401 处理会跳登录页），停止轮询
+    if (e instanceof ApiRequestError && (e.status === 401 || e.status === 403)) {
+      stopPolling();
+      return;
+    }
     // 单次轮询失败：累计并退避；超过阈值判定后端离线，停止空转并提示。
     pollErrorCount.value += 1;
+    lastPollErr.value = toErrorMessage(e);
     if (pollErrorCount.value >= MAX_OFFLINE_STRIKES) {
       backendDown.value = true;
       stopPolling();
@@ -371,6 +446,7 @@ async function tick(id: string): Promise<void> {
 }
 
 function retryConnection(): void {
+  lastPollErr.value = null;
   if (activeBatchId.value) startPolling(activeBatchId.value);
 }
 
@@ -382,13 +458,38 @@ function onCancel(): void {
   cancelConfirmOpen.value = true;
 }
 
+/** 暂停/继续：操作失败必须可见（批次实际仍在跑/仍暂停时，用户需要知道）。 */
+async function onPause(): Promise<void> {
+  if (!activeBatchId.value) return;
+  try {
+    await pauseBatch(activeBatchId.value);
+    submitError.value = null;
+  } catch (e) {
+    if (e instanceof ApiRequestError && e.status === 401) return;
+    submitError.value = `暂停失败：${toErrorMessage(e)}`;
+  }
+}
+
+async function onResume(): Promise<void> {
+  if (!activeBatchId.value) return;
+  try {
+    await resumeBatch(activeBatchId.value);
+    submitError.value = null;
+  } catch (e) {
+    if (e instanceof ApiRequestError && e.status === 401) return;
+    submitError.value = `恢复失败：${toErrorMessage(e)}`;
+  }
+}
+
 async function onCancelConfirmed(): Promise<void> {
   cancelConfirmOpen.value = false;
   if (!activeBatchId.value) return;
   try {
     await cancelBatch(activeBatchId.value);
-  } catch {
-    /* 取消失败忽略（轮询会继续展示真实状态） */
+  } catch (e) {
+    // 此前取消失败被静默吞掉：批次继续跑，操作员误以为已取消。
+    if (e instanceof ApiRequestError && e.status === 401) return;
+    submitError.value = `取消请求失败（批次可能仍在执行）：${toErrorMessage(e)}`;
   }
   if (phase.value === "dedup") {
     // 暂缓批取消后立即终态（无 worker 收尾），拉一次状态展示结果
@@ -404,7 +505,9 @@ async function onRetry(): Promise<void> {
     phase.value = "running";
     startPolling(activeBatchId.value);
   } catch (e) {
-    submitError.value = toErrorMessage(e);
+    // 重试失败此前写进 submitError 但运行/结果分支不渲染它 → 错误被吞
+    if (e instanceof ApiRequestError && e.status === 401) return;
+    submitError.value = `重试失败：${toErrorMessage(e)}`;
   }
 }
 
@@ -416,18 +519,45 @@ function reset(): void {
   activeBatchId.value = null;
   files.value = [];
   submitError.value = null;
+  viewError.value = null;
   duplicates.value = [];
   dupDecisions.value = {};
   void refreshHistory();
 }
 
+/** 进入页面自动续接：存在进行中/待核查批次时直接恢复其监视视图，
+ *  不再要求操作员自己从历史列表里找回（刷新/切页后原视图会丢）。 */
+async function autoResume(): Promise<void> {
+  try {
+    const rows = await listBatches();
+    // 列表最新在前：优先续接最近的进行中批次，其次待重复性核查批次
+    const target =
+      rows.find((r) => r.status === "running") ??
+      rows.find((r) => r.status === "awaiting_review") ??
+      rows.find((r) => r.status === "paused");
+    if (target && !activeBatchId.value) openHistory(target);
+  } catch {
+    /* 自动续接失败静默：不影响手动选择历史批次 */
+  }
+}
+
 onMounted(() => {
   void refreshHistory();
+  void autoResume();
 });
 
 onUnmounted(() => {
   stopPolling();
 });
+
+/* ── 拖拽导入（与单幅上传一致的操作方式；此前批量只能点击选择） ── */
+const dragOver = ref(false);
+
+function onDropFiles(e: DragEvent): void {
+  dragOver.value = false;
+  const fs = e.dataTransfer?.files;
+  if (fs && fs.length > 0) pickFiles(fs);
+}
 </script>
 
 <template>
@@ -484,10 +614,19 @@ onUnmounted(() => {
           </div>
           <div
             class="drop"
+            role="button"
+            tabindex="0"
+            :class="{ over: dragOver }"
+            aria-label="点击或拖入底片文件"
             @click="openFilePicker"
+            @keydown.enter.prevent="openFilePicker"
+            @keydown.space.prevent="openFilePicker"
+            @dragover.prevent="dragOver = true"
+            @dragleave="dragOver = false"
+            @drop.prevent="onDropFiles"
           >
             <div class="big">
-              点击选择底片文件
+              点击选择、拖入底片文件
             </div>
             <div class="hint">
               支持 Ctrl/Shift 多选；影像全程本机处理，不经外部网络传输
@@ -532,6 +671,21 @@ onUnmounted(() => {
             class="err show"
           >
             ⚠ {{ submitError }}
+          </div>
+          <!-- 上传进度（真实字节数）：百张大底片上传期不再只有一句"提交中…" -->
+          <div
+            v-if="submitting && uploadPct >= 0"
+            class="up-progress"
+            role="status"
+          >
+            <div class="up-bar">
+              <div
+                class="up-fill"
+                :style="{ width: `${uploadPct}%` }"
+              />
+            </div>
+            <span class="up-pct">上传中 {{ uploadPct }}%</span>
+            <span class="up-hint">上传完成后即开始评定，可保持本页等待</span>
           </div>
         </div>
 
@@ -623,8 +777,12 @@ onUnmounted(() => {
                 </template>
                 <template v-else-if="d.history">
                   首检 {{ d.history.image_id.slice(0, 8) }}
-                  <template v-if="d.history.created_at"> · {{ d.history.created_at }}</template>
-                  <template v-if="d.history.joint_level"> · 级别 {{ d.history.joint_level }}</template>
+                  <template v-if="d.history.created_at">
+                    · {{ d.history.created_at }}
+                  </template>
+                  <template v-if="d.history.joint_level">
+                    · 级别 {{ d.history.joint_level }}
+                  </template>
                 </template>
               </div>
             </div>
@@ -696,7 +854,7 @@ onUnmounted(() => {
         v-if="backendDown"
         class="err show"
       >
-        ⚠ 推理服务无响应，已暂停进度轮询。<button
+        ⚠ {{ lastPollErr ? `进度获取失败（${lastPollErr}），` : "" }}推理服务可能无响应，已暂停进度轮询。<button
           class="btn link"
           type="button"
           @click="retryConnection"
@@ -705,12 +863,42 @@ onUnmounted(() => {
         </button>
       </div>
       <div
+        v-if="submitError"
+        class="err show"
+      >
+        ⚠ {{ submitError }}
+        <button
+          class="btn link"
+          type="button"
+          @click="submitError = null"
+        >
+          知道了
+        </button>
+      </div>
+      <div
+        v-if="viewError"
+        class="err show"
+      >
+        ⚠ {{ viewError }}
+        <button
+          class="btn link"
+          type="button"
+          @click="activeBatchId && fetchStatusOnce(activeBatchId)"
+        >
+          重试
+        </button>
+      </div>
+      <div
         class="sec-label"
         :data-t="`BATCH ${activeBatchId ? activeBatchId.slice(0, 8) : ''}`"
       >
         批次 {{ activeBatchId ? activeBatchId.slice(0, 8) : "" }}
         <span
-          v-if="phase === 'running'"
+          v-if="status && status.status === 'paused'"
+          class="sec-state hold"
+        >已暂停</span>
+        <span
+          v-else-if="phase === 'running'"
           class="sec-state run"
         >执行中</span>
         <span
@@ -724,6 +912,9 @@ onUnmounted(() => {
         @cancel="onCancel"
         @retry="onRetry"
         @archive="emit('archive')"
+        @open-report="openTaskReport"
+        @pause="onPause"
+        @resume="onResume"
       />
       <div
         v-if="phase === 'result'"
@@ -755,6 +946,13 @@ onUnmounted(() => {
       <div class="section-h">
         历史批次
       </div>
+      <p
+        v-if="historyError"
+        class="hint"
+        role="alert"
+      >
+        ⚠ {{ historyError }}
+      </p>
       <div class="hist-list">
         <button
           v-for="row in history"
@@ -775,13 +973,15 @@ onUnmounted(() => {
           </span>
           <span
             class="h-status"
-            :class="row.status"
+            :class="row.status === 'paused' ? 'paused' : row.status"
           >{{
             row.status === "finished"
               ? "已完成"
               : row.status === "awaiting_review"
                 ? "待重复性核查"
-                : "进行中"
+                : row.status === "paused"
+                  ? "已暂停"
+                  : "进行中"
           }}</span>
         </button>
       </div>
@@ -796,6 +996,7 @@ onUnmounted(() => {
     @confirm="onCancelConfirmed"
     @cancel="cancelConfirmOpen = false"
   />
+  <PdfGateModal :ctrl="pdfCtrl" />
 </template>
 
 <style scoped>
@@ -978,7 +1179,48 @@ onUnmounted(() => {
 .h-status.awaiting_review {
   color: #b06a10;
 }
+.h-status.paused {
+  color: #b06a10;
+}
 .faint {
   color: #8a99b5;
+}
+/* 拖拽悬停高亮 */
+.drop.over {
+  border-color: #2f6bff;
+  background: rgba(47, 107, 255, 0.06);
+}
+/* 上传进度条 */
+.up-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: #44577a;
+}
+.up-bar {
+  flex: 0 0 220px;
+  height: 8px;
+  border-radius: 6px;
+  background: rgba(120, 140, 180, 0.18);
+  overflow: hidden;
+}
+.up-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2f6bff, #5b8bff);
+  transition: width 0.2s ease;
+}
+.up-pct {
+  font-weight: 700;
+  color: #2f6bff;
+  font-variant-numeric: tabular-nums;
+}
+.up-hint {
+  color: #8a99b5;
+}
+.drop:focus-visible {
+  outline: 2px solid #2f6bff;
+  outline-offset: 2px;
 }
 </style>

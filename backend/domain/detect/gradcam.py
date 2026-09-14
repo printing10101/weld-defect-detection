@@ -89,6 +89,7 @@ def grad_cam_map(
     """
     try:
         import torch
+        from torch import nn
 
         det_model = getattr(model, "model", None)
         if det_model is None:
@@ -124,9 +125,29 @@ def grad_cam_map(
             fwd, bwd = _make(i)
             handles.append(layer.register_forward_hook(fwd))  # type: ignore[attr-defined]
             handles.append(layer.register_full_backward_hook(bwd))  # type: ignore[attr-defined]
+        # 融合卷积的 SiLU/ReLU 激活为 inplace：full_backward_hook 把输出变成
+        # view 后，inplace 写入会被 autograd 禁止（"view + inplace" 报错）。
+        # CAM 计算窗内临时关闭 inplace 激活，结束恢复（梯度精度不受影响）。
+        inplace_mods = [
+            (m, getattr(m, "inplace", False))
+            for m in det_model.modules()
+            if isinstance(m, (nn.SiLU, nn.ReLU, nn.ReLU6, nn.LeakyReLU))
+            and getattr(m, "inplace", False)
+        ]
+        for m, _ in inplace_mods:
+            m.inplace = False
         try:
             det_model.eval()  # type: ignore[attr-defined]
-            with torch.enable_grad():
+            # 此前的正常推理（inference_mode）会把 Detect 头缓存的 anchors/strides
+            # 冻结为 inference tensor，梯度前向复用会报
+            # "Inference tensors cannot be saved for backward"；把 shape 缓存置
+            # 哨兵值强制其重算（重算发生在下方 inference_mode(False) 域内，
+            # 得到普通张量）。
+            root_mod = getattr(det_model, "model", None)
+            head_mod = root_mod[-1] if root_mod is not None and len(root_mod) else None
+            if head_mod is not None and hasattr(head_mod, "shape"):
+                head_mod.shape = None
+            with torch.enable_grad(), torch.inference_mode(False):
                 preds = det_model(blob)  # type: ignore[attr-defined,operator]
             out = preds[0] if isinstance(preds, tuple) else preds
             arr = out[0] if isinstance(out, (list, tuple)) else out
@@ -159,6 +180,8 @@ def grad_cam_map(
         finally:
             for hd in handles:
                 hd.remove()  # type: ignore[attr-defined]
+            for m, prev_inplace in inplace_mods:
+                m.inplace = prev_inplace
 
         # 选层：梯度非零的最深层（注册顺序靠后 = 语义层级越高）。
         # 骨干层在所有路径上梯度必非零；走 P3 的缺陷会延伸到 P3 颈部分支。

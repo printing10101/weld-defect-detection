@@ -5,21 +5,53 @@ const SECRET_LEVEL_NAMES: Record<number, string> = { 0: "非密", 1: "内部", 2
  * 档案检索视图（真实 GET /api/v1/records）。
  * 列表与统计全部来自后端查询；空态/错误态基于真实响应。
  * 附加：主动学习训练池状态（GET /api/v1/active/pool）。
+ * 行操作：查看影像（跳「底片观察」按编号载入）/ 查看报告（受控导出通道）——
+ * 此前列表完全不可交互，操作员只能肉眼抄编号再手动去别的页面输入。
  */
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { toErrorMessage } from "../utils/errorMessage";
 import { stampBadge } from "../utils/filmStamp";
 import { activePool, listRecords } from "../services/api";
+import { useControlledPdf } from "../composables/useControlledPdf";
+import PdfGateModal from "../components/PdfGateModal.vue";
+import { DEFECT_CLASS_LABELS } from "../types/api";
 import type { ActivePoolOut, RecordsResponse } from "../types/api";
+
+const router = useRouter();
+const pdfCtrl = useControlledPdf();
 
 const loading = ref(true);
 const err = ref<string | null>(null);
 const resp = ref<RecordsResponse | null>(null);
 const level = ref("");
 const workpiece = ref("");
+const dateFrom = ref("");
+const dateTo = ref("");
+const classId = ref<number | null>(null);
+const needReviewOnly = ref(false);
 const page = ref(1);
 const pageSize = ref(50);
 const total = ref(0);
+
+/** 是否带有任一筛选条件：用于区分「检索无结果」与「从未归档」两种空态。 */
+const hasFilter = computed(
+  () =>
+    level.value !== "" ||
+    workpiece.value.trim() !== "" ||
+    dateFrom.value.trim() !== "" ||
+    dateTo.value.trim() !== "" ||
+    classId.value !== null ||
+    needReviewOnly.value,
+);
+
+function openInViewer(imageId: string): void {
+  void router.push({ name: "viewer", query: { image_id: imageId } });
+}
+
+function openReport(reportId: string): void {
+  void pdfCtrl.openPdf(reportId);
+}
 
 // 请求序号守卫：切回 active / 翻页 / 过滤可能并发多个 load，
 // 旧请求晚到会覆盖新响应。仅接受最新一次请求的返回。
@@ -48,6 +80,10 @@ async function load(): Promise<void> {
     const r = await listRecords({
       level: level.value || undefined,
       workpiece: workpiece.value || undefined,
+      dateFrom: dateFrom.value.trim() || undefined,
+      dateTo: dateTo.value.trim() || undefined,
+      classId: classId.value ?? undefined,
+      needReview: needReviewOnly.value ? true : undefined,
       page: page.value,
       size: pageSize.value,
     });
@@ -70,6 +106,16 @@ onMounted(() => {
 function onFilter(): void {
   page.value = 1; // 重新过滤回到首页
   void load();
+}
+
+function clearFilters(): void {
+  level.value = "";
+  workpiece.value = "";
+  dateFrom.value = "";
+  dateTo.value = "";
+  classId.value = null;
+  needReviewOnly.value = false;
+  onFilter();
 }
 
 function gotoPage(p: number): void {
@@ -142,6 +188,41 @@ const levelOptions = ["", "I", "II", "III", "IV"] as const;
           {{ l ? `${l} 级` : "全部级别" }}
         </option>
       </select>
+      <input
+        v-model="dateFrom"
+        type="date"
+        title="归档日期起"
+        @change="onFilter"
+      >
+      <input
+        v-model="dateTo"
+        type="date"
+        title="归档日期止"
+        @change="onFilter"
+      >
+      <select
+        v-model="classId"
+        @change="onFilter"
+      >
+        <option :value="null">
+          全部缺陷类别
+        </option>
+        <option
+          v-for="(lbl, i) in DEFECT_CLASS_LABELS"
+          :key="i"
+          :value="i"
+        >
+          含{{ lbl }}
+        </option>
+      </select>
+      <label class="nr-check">
+        <input
+          v-model="needReviewOnly"
+          type="checkbox"
+          @change="onFilter"
+        >
+        仅看待复核
+      </label>
       <button
         class="btn ghost"
         type="button"
@@ -149,6 +230,15 @@ const levelOptions = ["", "I", "II", "III", "IV"] as const;
         @click="onFilter"
       >
         检索
+      </button>
+      <button
+        v-if="hasFilter"
+        class="btn link"
+        type="button"
+        style="margin-top: 0"
+        @click="clearFilters"
+      >
+        清除筛选
       </button>
     </div>
 
@@ -170,12 +260,25 @@ const levelOptions = ["", "I", "II", "III", "IV"] as const;
         重试
       </button>
     </p>
-    <p
-      v-else-if="!resp || resp.items.length === 0"
-      class="empty"
-    >
-      暂无归档记录 —— 完成检测评定后，结果将自动归档至此。
-    </p>
+    <template v-else-if="!resp || resp.items.length === 0">
+      <p
+        v-if="hasFilter"
+        class="empty"
+      >
+        没有匹配当前筛选条件的归档记录。可调整筛选条件，或
+        <a
+          href="#"
+          class="clr"
+          @click.prevent="clearFilters"
+        >清除全部筛选</a> 后重试。
+      </p>
+      <p
+        v-else
+        class="empty"
+      >
+        暂无归档记录 —— 完成检测评定后，结果将自动归档至此。
+      </p>
+    </template>
     <template v-else>
       <table>
         <thead>
@@ -188,6 +291,7 @@ const levelOptions = ["", "I", "II", "III", "IV"] as const;
             <th>可评片</th>
             <th>待复核</th>
             <th>归档时间</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -231,6 +335,25 @@ const levelOptions = ["", "I", "II", "III", "IV"] as const;
               >待复核</span><span v-else>—</span>
             </td>
             <td>{{ item.created_at ?? "—" }}</td>
+            <td class="ops">
+              <button
+                type="button"
+                class="btn link"
+                title="在「底片观察」中载入该影像"
+                @click="openInViewer(item.image_id)"
+              >
+                查看影像
+              </button>
+              <button
+                v-if="item.report_id"
+                type="button"
+                class="btn link"
+                title="打开该底片的 PDF/A 检测报告（经受控导出通道）"
+                @click="openReport(item.report_id)"
+              >
+                查看报告
+              </button>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -272,10 +395,31 @@ const levelOptions = ["", "I", "II", "III", "IV"] as const;
         </select>
       </div>
     </template>
+    <PdfGateModal :ctrl="pdfCtrl" />
   </div>
 </template>
 
 <style scoped>
+.search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.nr-check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #44577a;
+}
+.ops {
+  white-space: nowrap;
+}
+.clr {
+  color: #2c5aa0;
+}
 /* C-10：秘密/机密级红色高亮 */
 .lv.secret {
   color: #b3261e;

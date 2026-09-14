@@ -9,12 +9,13 @@
 - ``POST /api/v1/models/{id}/evaluate``：对指定模型跑 Golden 评估（不切换）。
 
 热切换互斥：检测器推理与切换之间由 ResilientDetector 内置读写锁协调——
-``load``（含回退重载）持写锁、``infer``/``infer_tta`` 持读锁，切换等在途
+``load``（含回退重载）持写锁、``infer`` 持读锁，切换等在途
 推理排空后执行、期间新推理排队，不会打到半初始化会话上。
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -34,6 +35,8 @@ from backend.domain.errors import ModelUnavailableError
 from backend.evaluation.run_eval import run_golden_evaluation
 
 router = APIRouter(tags=["models"])
+
+_LOG = logging.getLogger("scandetection")
 
 
 class ModelInfo(BaseModel):
@@ -192,8 +195,8 @@ async def _activate_with_gate(model_id: str, reg: Registry, operator: str) -> Ac
                 message=f"模型 {model_id} 投产门禁评估未通过，已拒绝激活",
                 detail={"reason": record["reason"], "metrics": record["metrics"]},
             )
-        except Exception:  # noqa: BLE001, S110 - 告警失败不掩盖 422
-            pass
+        except Exception as exc:  # noqa: BLE001 - 告警失败不掩盖 422
+            _LOG.warning("model_gate_reject 告警落库失败: %s", exc)
         reg.repository.append_audit(
             actor=operator,
             action="model_gate_reject",

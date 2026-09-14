@@ -16,6 +16,23 @@ import { AUTH_UNAUTHORIZED_EVENT, getChallenge, getMe, login as apiLogin, logout
 import { clearGuestMode, clearToken, getToken, isGuestMode, setGuestMode, setToken } from "../services/authToken";
 
 const IDLE_CHECK_MS = 30_000; // 空闲检查周期
+/** 空闲自动登出前的预警窗口：剩余这么久时置 idleWarning，界面提示"即将自动退出"。 */
+const IDLE_WARN_BEFORE_MS = 90_000;
+/** 登出原因（会话过期/空闲超时时让登录页给出解释，而非无声踢回）。 */
+export type LogoutReason = "manual" | "idle" | "expired";
+const LOGOUT_REASON_KEY = "scan_logout_reason";
+
+/** 供 LoginView 读取并清除最近一次被动登出的原因（跨路由卸载传递）。 */
+export function takeLogoutReason(): LogoutReason | null {
+  const v = sessionStorage.getItem(LOGOUT_REASON_KEY);
+  sessionStorage.removeItem(LOGOUT_REASON_KEY);
+  if (v === "idle" || v === "expired" || v === "manual") return v;
+  return null;
+}
+
+function storeLogoutReason(reason: LogoutReason): void {
+  sessionStorage.setItem(LOGOUT_REASON_KEY, reason);
+}
 
 export const useAuthStore = defineStore("auth", () => {
   const token = ref<string>(getToken());
@@ -29,6 +46,8 @@ export const useAuthStore = defineStore("auth", () => {
   let idleTimer: number | undefined;
   let lastActivity = Date.now();
   let idleTimeoutMs = 15 * 60_000; // 默认 15min，登录成功后以后端配置为准
+  /** 空闲预警：true = 距自动登出不足预警窗口（App 显示琥珀色横幅）。 */
+  const idleWarning = ref(false);
 
   /** 登录：用户名 + SM2 私钥文件内容（后端代签）。 */
   async function login(name: string, privateKey: string): Promise<void> {
@@ -68,12 +87,13 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   /** 登出（尽力通知后端吊销会话；本地状态一律清除）。 */
-  async function logout(): Promise<void> {
+  async function logout(reason: LogoutReason = "manual"): Promise<void> {
     try {
       if (token.value) await apiLogout();
     } catch {
       /* 后端不可达也照常本地登出 */
     }
+    if (reason !== "manual") storeLogoutReason(reason);
     _clear();
   }
 
@@ -83,6 +103,7 @@ export const useAuthStore = defineStore("auth", () => {
     role.value = "";
     accountId.value = "";
     guest.value = false;
+    idleWarning.value = false;
     clearToken();
     clearGuestMode();
     stopIdleWatch();
@@ -92,16 +113,22 @@ export const useAuthStore = defineStore("auth", () => {
 
   function markActivity(): void {
     lastActivity = Date.now();
+    idleWarning.value = false;
   }
 
   function onIdleCheck(): void {
-    if (token.value && Date.now() - lastActivity > idleTimeoutMs) {
-      void logout();
+    if (!token.value) return;
+    const idleMs = Date.now() - lastActivity;
+    if (idleMs > idleTimeoutMs) {
+      void logout("idle");
+      return;
     }
+    idleWarning.value = idleTimeoutMs - idleMs <= IDLE_WARN_BEFORE_MS;
   }
 
   function onUnauthorized(): void {
-    // 后端 401（过期/注销）：仅清本地态，不回呼后端
+    // 后端 401（过期/注销）：仅清本地态，不回呼后端；登录页据原因给解释
+    storeLogoutReason("expired");
     _clear();
   }
 
@@ -134,6 +161,7 @@ export const useAuthStore = defineStore("auth", () => {
     accountId,
     guest,
     isLoggedIn,
+    idleWarning,
     login,
     enterGuest,
     restore,

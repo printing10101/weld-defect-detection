@@ -2,7 +2,7 @@
 /** 经典菜单栏（WPS/AutoCAD 范式）：文件/视图/工具/帮助 四组下拉菜单。
  *  交互约定：单击菜单名展开，展开后悬停切换，单击外部或选中项后收起；
  *  所有动作以 action 事件上抛，由 AppShell 统一分发。 */
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "../stores/auth";
 
@@ -30,6 +30,8 @@ const WORKSPACE_NAMES: Record<string, string> = {
   viewer: "底片观察",
   "std-eval": "系统评价",
   device: "设备标定",
+  admin: "账号管理",
+  llm: "本地大模型",
 };
 
 // 三员认证（C-06）：顶栏展示当前登录身份，支持手动登出
@@ -45,7 +47,8 @@ function logout(): void {
   void auth.logout().then(() => router.push("/login"));
 }
 
-const MENUS: Menu[] = [
+/** 账号管理仅系统管理员可见（后端 /auth/accounts 系列同为 sysadmin 专属）。 */
+const MENUS = computed<Menu[]>(() => [
   {
     id: "file",
     label: "文件",
@@ -66,6 +69,10 @@ const MENUS: Menu[] = [
       { id: "view-device", label: "设备标定", shortcut: "Ctrl+4" },
       { id: "view-viewer", label: "底片观察", shortcut: "Ctrl+5" },
       { id: "view-std-eval", label: "系统评价", shortcut: "Ctrl+6" },
+      { id: "view-llm", label: "本地大模型", shortcut: "Ctrl+7" },
+      ...(auth.role === "sysadmin"
+        ? [{ id: "view-admin", label: "账号管理", shortcut: "" }]
+        : []),
     ],
   },
   {
@@ -81,7 +88,7 @@ const MENUS: Menu[] = [
       { id: "about", label: "关于…" },
     ],
   },
-];
+]);
 
 const openMenu = ref<string | null>(null);
 
@@ -162,7 +169,7 @@ onBeforeUnmount(() => document.removeEventListener("click", onDocClick));
     <!-- 右侧：当前工作区指示（AutoCAD 顶栏上下文信息） -->
     <div class="ctx">
       当前工作区：{{
-        WORKSPACE_NAMES[activeView] ?? "设备标定"
+        WORKSPACE_NAMES[activeView] ?? ""
       }}
     </div>
     <!-- 右侧：当前登录身份（三员之一）+ 登出 -->
@@ -175,7 +182,9 @@ onBeforeUnmount(() => document.removeEventListener("click", onDocClick));
         type="button"
         class="logout"
         @click="logout"
-      >注销</button>
+      >
+        注销
+      </button>
     </div>
   </div>
 </template>

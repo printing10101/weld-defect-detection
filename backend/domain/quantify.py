@@ -255,16 +255,26 @@ class MaskQuantifier:
         W_px = min(rw, rh)
         perimeter_px = cv2.arcLength(cnt, True)
         s = pixel_spacing_mm
-        length_mm = L_px * s
+        # 条形缺陷长度用中心线弧长（G13）：弯曲裂纹的矩形长边量"弦"偏短，
+        # 低估条形缺陷累计长度会导致评级偏松；退化/圆形回退矩形长边口径。
+        centerline_mm: float | None = None
+        length_px = L_px
+        if L_px / max(W_px, 1e-6) > cfg.round_aspect_max:
+            cl_px = _centerline_length_px(cnt, mask)
+            if cl_px is not None and cl_px > 0:
+                length_px = cl_px
+                centerline_mm = round(cl_px * s, 3)
+        length_mm = length_px * s
         width_mm = W_px * s
         return Geometry(
             length_mm=round(length_mm, 3),
             width_mm=round(width_mm, 3),
             area_mm2=round(area_px * s * s, 3),
             perimeter_mm=round(perimeter_px * s, 3),
-            aspect_ratio=round(length_mm / max(width_mm, 1e-6), 3),
+            aspect_ratio=round(L_px * s / max(W_px * s, 1e-6), 3),
             position_x_mm=round((cx + ox) * s, 3),
             position_y_mm=round((cy + oy) * s, 3),
+            centerline_mm=centerline_mm,
         )
 
 
@@ -274,6 +284,100 @@ def refine_detections(
     """批量精修检测框（ 入口，供 detect 路由与全链路复用）。"""
     mq = MaskQuantifier()
     return [mq.refine(image, d, cfg) for d in detections]
+
+
+# ---------------------------------------------------------------------------
+# 中心线弧长（G13：条形缺陷真实长度）
+# ---------------------------------------------------------------------------
+def _centerline_length_px(cnt, mask: np.ndarray) -> float | None:
+    """条形缺陷中心线弧长（像素）：沿 PCA 主轴分 bin 取质心，折线求和。
+
+    最小外接矩形长边量的是"弦"，对弯曲裂纹系统性偏短；质心折线近似骨架
+    弧长，无需骨架化依赖（cv2 无内置 thinning，ximgproc 不随部署包捆绑）。
+    bin 宽取掩膜平均宽度（面积/主轴跨度），保证横穿缺陷截面各取一点。
+    退化（点过少/掩膜近圆）返回 None，调用方回退矩形长边。
+    """
+    pts = cnt.reshape(-1, 2).astype(np.float64)
+    if len(pts) < 4:
+        return None
+    mean = pts.mean(axis=0)
+    cov = np.cov((pts - mean).T)
+    eigvecs = np.linalg.eigh(cov)[1]
+    axis = eigvecs[:, -1]  # 最大特征值方向 = 主轴
+    t = (pts - mean) @ axis
+    span = float(t.max() - t.min())
+    if span <= 0:
+        return None
+    area = float(cv2.contourArea(cnt))
+    bin_w = max(2.0, area / span)
+    nbins = max(2, int(span / bin_w))
+    edges = np.linspace(float(t.min()), float(t.max()), nbins + 1)
+    centers: list[np.ndarray] = []
+    for i in range(nbins):
+        sel = (t >= edges[i]) & (t <= edges[i + 1])
+        if sel.any():
+            centers.append(pts[sel].mean(axis=0))
+    if len(centers) < 2:
+        return None
+    c = np.asarray(centers)
+    return float(np.linalg.norm(np.diff(c, axis=0), axis=1).sum())
+
+
+# ---------------------------------------------------------------------------
+# 位置语义（G14：钟点位 / 焊缝轴向）
+# ---------------------------------------------------------------------------
+def clock_position(weld_cx: float, weld_cy: float, x_mm: float, y_mm: float) -> str:
+    """缺陷相对焊缝圆心的钟点位（"H:MM"，半小时精度，12:00 = 正上方）。
+
+    图像坐标 y 向下，先翻转到数学坐标再取顺时针角；钟点位是角度语义，
+    不依赖像素标定。cx/cy 来自请求提供的焊缝圆心（管对接偏心透照布局），
+    不从底片反推——猜不准的几何宁可不输出。
+    """
+    ang = float(np.degrees(np.arctan2(x_mm - weld_cx, weld_cy - y_mm)))  # 0=正上，顺时针为正
+    if ang < 0:
+        ang += 360.0
+    # 一圈 720"分钟"（12h×60min），30 分钟精度 = 每 15° 一档
+    total_minutes = int(round(ang * 2 / 30.0) * 30) % 720
+    hour = total_minutes // 60
+    minute = total_minutes % 60
+    if hour == 0:
+        hour = 12
+    return f"{hour}:{minute:02d}"
+
+
+def weld_axis(film_box: tuple[float, float, float, float]) -> str:
+    """由胶片有效区外接框判定焊缝走向："h"（水平条带）或 "v"（垂直条带）。
+
+    RT 底片焊缝沿胶片长边布置是行业惯例；轴向位置即缺陷中心在该方向
+    上的投影。胶片区缺失或近方形（长短边比 < 1.2，走向不可判）时保守
+    默认 "h"（多数底片为水平条带）。
+    """
+    _, _, w, h = film_box
+    if h > 0 and w / h <= 1 / 1.2:  # 长边在垂直方向才判垂直
+        return "v"
+    return "h"
+
+
+def nearest_neighbor_gaps(detections: list[Detection]) -> dict[str, tuple[str, float]]:
+    """每缺陷的最近邻（id, 边缘间距 px）：G17 间距输出。
+
+    边缘间距 = 两框在 x/y 上不重叠间隙的欧氏距离（47013"同线合并"gap 的
+    2D 推广）；相互取最小。单缺陷返回空表。
+    """
+    gaps: dict[str, tuple[str, float]] = {}
+    for i, a in enumerate(detections):
+        best: tuple[str, float] | None = None
+        for j, b in enumerate(detections):
+            if i == j:
+                continue
+            dx = max(0.0, a.bbox.x - (b.bbox.x + b.bbox.w), b.bbox.x - (a.bbox.x + a.bbox.w))
+            dy = max(0.0, a.bbox.y - (b.bbox.y + b.bbox.h), b.bbox.y - (a.bbox.y + a.bbox.h))
+            gap = float(np.hypot(dx, dy))
+            if best is None or gap < best[1]:
+                best = (b.id, gap)
+        if best is not None:
+            gaps[a.id] = best
+    return gaps
 
 
 # ---------------------------------------------------------------------------

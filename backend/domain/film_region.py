@@ -150,3 +150,34 @@ def _to_uint8(arr: np.ndarray) -> np.ndarray:
     if hi <= lo:
         return np.zeros_like(a, dtype=np.uint8)
     return ((a - lo) / (hi - lo) * 255.0).astype(np.uint8)
+
+
+# ---------------------------------------------------------------------------
+# 检测源装配（评片管道与 /detect 预检共用，消除两处分叉）
+# ---------------------------------------------------------------------------
+
+
+def detect_film_region_trusted(gray: np.ndarray, cfg: FilmRegionCfg) -> FilmRegion | None:
+    """detect_film_region + 可信校验。
+
+    分割结果既非翻拍、也不占大幅面（如 Otsu 只锁到焊缝条带）→ 不可信，返回
+    None（调用方按整图处理）：据此掩膜检测会把条带外的真实缺陷一并屏蔽掉。
+    """
+    film = detect_film_region(gray, cfg)
+    if film is not None and not (film.is_photo or film.area_frac >= 0.7):
+        return None
+    return film
+
+
+def film_background_fill(gray: np.ndarray, film: FilmRegion | None) -> np.ndarray:
+    """胶片区外背景填充为胶片中位灰阶，返回检测源（原数组不被修改）。
+
+    防止灯箱亮背景/翻拍边框被误检为缺陷；film=None 或胶片占满幅（mask 全真）
+    时原样返回。填充值取胶片区（x,y,w,h）中位灰阶——与胶片本体一致，把背景
+    推离检测阈值。
+    """
+    if film is None or bool(film.mask.all()):
+        return gray
+    out = gray.copy()
+    out[~film.mask] = int(np.median(gray[film.y : film.y + film.h, film.x : film.x + film.w]))
+    return out

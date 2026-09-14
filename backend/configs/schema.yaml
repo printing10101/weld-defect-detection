@@ -145,7 +145,12 @@ detect:
   abs_threshold: float            # 绝对阈值下限（低噪声图兜底）
   dark_only: bool                 # 只检暗缺陷（True）或暗+亮（False）
   review_conf: float              # 检测不确定性阈值，超过则 need_review（人工兜底）
+  class_review_conf: dict[int, float]  # 逐类复核阈值（键=DefectClass.value，未列出类回落 review_conf）
   calibration_file: str | None    # 逐类温度校准表路径（含 model_id 指纹校验；None=关闭）
+  mode: str                       # 检测工作模式：balanced | recall_first | precision_first（高检出/高准确双档）
+  recall_conf_scale: float        # recall_first 模式对 infer_conf/class_conf 的缩放系数（0<x<=1）
+  precision_conf_scale: float     # precision_first 模式对 infer_conf/class_conf 的缩放系数（1<=x<=5）
+  mask_stamp_zone: bool           # true=屏蔽印字区误检（OCR 印字框外扩区域的检出判为印字误检并留痕）
   tile_size: int                  # Tiling 分块推理瓦片边长（px）；0=整图推理（大底片小缺陷召回）
   tile_overlap: float             # 相邻瓦片重叠比例（重叠区重复检出由跨瓦片 NMS 合并）
   tile_trigger_side: int          # 最长边超过此值才分块（小图整图推理不受影响）
@@ -221,3 +226,25 @@ std_eval:                       # DB50/T 1807-2025 标准评价（§9~§11）
   aspect_round_max: float       # 夹渣形状分流：L/W<=3 归圆形缺陷
   eval_dir: str                 # 标准评价结果落盘目录
   personnel_path: str           # 评价/标注人员资质记录（TSG Z8001）
+llm:                              # 本地大模型（llama.cpp llama-server）随软件启停
+  enabled: bool                   # 总开关（false=不拉起，state=disabled）
+  mode: str                       # managed=自拉起 | external=只连接已有服务
+  server_exe: str                 # llama-server 路径（空=项目内置 tools/llama/）
+  model_file: str                 # GGUF 模型路径（相对路径锚定安装根）
+  host: str                       # 服务绑定地址（仅允许回环）
+  port: int                       # OpenAI 兼容端点端口
+  n_ctx: int                      # 上下文窗口（tokens）
+  n_gpu_layers: int               # GPU 卸载层数（99=全量，0=CPU）
+  threads: int                    # CPU 线程数（0=自动）
+  startup_timeout_sec: float      # 模型加载就绪等待上限（超时回收并降级）
+  watch_interval_sec: float       # 看门狗存活巡检周期
+  max_restart: int                # 意外退出重启上限
+  external_endpoint: str          # external 模式目标端点（仅回环）
+  api_key_env: str                # 端点鉴权 Key 的环境变量名（Key 本身不落配置）
+  probe_timeout_sec: float        # 端点探测超时（失败不阻断启动）
+  model_dirs: list                # 额外模型目录（相对路径锚定安装根）
+  service_presets: list           # 默认探测的服务端点（host:port）
+  scan_roots: list                # 模型扫描根（空=本机全部固定盘）
+  scan_on_startup: bool           # 启动即后台扫描（默认关）
+  registry_state_file: str        # 选中模型/额外目录持久化文件
+  scan_cache_file: str            # 扫描结果缓存文件

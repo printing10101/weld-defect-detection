@@ -46,6 +46,7 @@ class ReportContent:
     secret_level: int = 0  # 密级（C-10）：0=非密 1=内部 2=秘密 3=机密
     classification_basis: str = ""  # 定密依据（C-10，随密级嵌入报告页眉/页脚）
     witness: str | None = None  # S-22 军代表/见证人（可选；不传则签字栏不出该行）
+    report_meta: dict[str, str] | None = None  # 报告补充信息（样张汇总表填充字段）
 
 
 def build_report_content(
@@ -88,4 +89,5 @@ def build_report_content(
         secret_level=int(image.get("secret_level") or 0),
         classification_basis=str(image.get("classification_basis") or ""),
         witness=witness,
+        report_meta=dict(image.get("report_meta") or {}),
     )

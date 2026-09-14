@@ -82,6 +82,81 @@ def test_report_blocks_unevaluable_film(tmp_path) -> None:
     assert resp.json()["error"]["code"] == "IQI_FAIL"
 
 
+def test_report_meta_flows_to_report_and_pdf(tmp_path) -> None:
+    """报告补充信息（样张汇总表字段）应贯通 API → 落库 → 回显 → PDF 填充。
+
+    - 未知键/空值被白名单清洗（不落库不回显）；
+    - ReportOut.report_meta 回显清洗后结果，前端报告页据此渲染样张预览；
+    - PDF 汇总表相应空格出现用户填写的值；
+    - 重新出报告（regenerate）仍能从库中读到 report_meta（快照复用）。
+    """
+    import json
+
+    img = tmp_path / "syn_meta.png"
+    _synthetic(img)
+    meta = {
+        "client_unit": "测试委托单位",
+        "project_name": "测试工程",
+        "material": "20G",
+        "weld_process": "GTAW",
+        "accept_level": "II",
+        "tube_voltage": "190kV",
+        "unknown_key": "应被丢弃",
+        "device_no": "  ",
+    }
+    with TestClient(app) as client:
+        body = _post_report(
+            client,
+            img,
+            pixel_spacing_mm="0.1",
+            base_metal_thickness_mm="20",
+            report_meta=json.dumps(meta, ensure_ascii=False),
+        )
+        assert body["report_meta"]["client_unit"] == "测试委托单位"
+        assert body["report_meta"]["material"] == "20G"
+        assert "unknown_key" not in body["report_meta"]  # 白名单外键被清洗
+        assert "device_no" not in body["report_meta"]  # 空值被清洗
+
+        pdf = client.get(body["pdf_url"])
+        assert pdf.status_code == 200
+        import io
+
+        from pypdf import PdfReader
+
+        reader = PdfReader(io.BytesIO(pdf.content))
+        page1 = reader.pages[0].extract_text() or ""
+        assert "测试委托单位" in page1
+        assert "GTAW" in page1
+        assert "190kV" in page1
+
+        # 重新出报告：从库中快照回填（不重跑检测）
+        regen = client.post(
+            "/api/v1/report",
+            data={"image_id": body["image_id"], "template": "standard"},
+        )
+        assert regen.status_code == 200, regen.text
+        assert regen.json()["report_meta"]["client_unit"] == "测试委托单位"
+
+
+def test_report_meta_invalid_json_422(tmp_path) -> None:
+    """report_meta 非法 JSON 必须显式 422（用户输入错误可见，不静默丢弃）。"""
+    img = tmp_path / "syn_badmeta.png"
+    _synthetic(img)
+    with TestClient(app) as client, open(img, "rb") as f:
+        resp = client.post(
+            "/api/v1/report",
+            files={"image": (img.name, f, "image/png")},
+            data={
+                "pixel_spacing_mm": "0.1",
+                "base_metal_thickness_mm": "20",
+                "report_meta": "{not-json",
+            },
+        )
+    assert resp.status_code == 422
+    # HTTPException 走 FastAPI 默认信封（detail），与同路由 INVALID_SPACING 一致
+    assert resp.json()["detail"]["code"] == "INVALID_REPORT_META"
+
+
 def test_report_full_pipeline(tmp_path) -> None:
     img = tmp_path / "syn.png"
     _synthetic(img)
@@ -249,3 +324,21 @@ def test_records_rejects_invalid_level() -> None:
     with TestClient(app) as client:
         resp = client.get("/api/v1/records", params={"level": "V"})
     assert resp.status_code == 422
+
+
+def test_report_single_duplicate_hint_and_warnings(tmp_path) -> None:
+    """C/F 修复回归：同一文件两次评片——
+    - 响应透出门禁告警（warnings）与判定依据（basis）；
+    - 第二次评片的 duplicates 必须命中第一次的记录（模块内共享测试库，
+      既有同内容记录只影响数量，不影响"包含首次记录"这一语义）。
+    """
+    img = tmp_path / "syn_dup.png"
+    _synthetic(img)
+    with TestClient(app) as client:
+        first = _post_report(client, img)
+        assert isinstance(first["warnings"], list) and "basis" in first
+        n_before = len(first["duplicates"])
+        second = _post_report(client, img)
+    assert len(second["duplicates"]) == n_before + 1
+    assert second["duplicates"][-1]["image_id"] == first["image_id"]
+    assert any("内容完全相同" in w for w in second["warnings"])

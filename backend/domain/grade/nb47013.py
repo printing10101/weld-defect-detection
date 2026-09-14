@@ -31,14 +31,53 @@ _ZERO_TOLERANCE = {
     DefectClass.INCOMPLETE_PENETRATION,
 }
 _ORDER = {JointLevel.I: 1, JointLevel.II: 2, JointLevel.III: 3, JointLevel.IV: 4}
+_CLASS_ZH = {
+    DefectClass.POROSITY: "气孔",
+    DefectClass.SLAG: "夹渣",
+    DefectClass.INCOMPLETE_PENETRATION: "未焊透",
+    DefectClass.LACK_OF_FUSION: "未熔合",
+    DefectClass.CRACK: "裂纹",
+    DefectClass.UNDERCUT: "咬边",
+    DefectClass.CONCAVITY: "内凹",
+}
 
 
 class Nb47013Grader:
     """NB/T47013.2-2015 评级实现。"""
 
-    def __init__(self, tables: StandardTables, review_uncertainty: float = 0.5) -> None:
+    def __init__(
+        self,
+        tables: StandardTables,
+        review_uncertainty: float = 0.5,
+        class_review_uncertainty: dict[int, float] | None = None,
+    ) -> None:
         self.tables = tables
         self.review_uncertainty = review_uncertainty
+        # 逐类复核阈值（键=DefectClass.value）：在全局阈值之上按类收紧/放宽
+        # 人工复核路由。逐类温度校准后，各类的置信度尺度系统分化（过自信类
+        # 需更高门槛、欠自信类可放宽），全局单一阈值不可行（§15.4 实测）。
+        # 未列出的类回落 review_conf。
+        self.class_review_uncertainty: dict[int, float] = dict(class_review_uncertainty or {})
+
+    def _review_threshold(self, class_id: DefectClass) -> float:
+        return self.class_review_uncertainty.get(class_id.value, self.review_uncertainty)
+
+    def _review_routing(self, defects: list[Detection]) -> list[tuple[Detection, float]]:
+        """不确定性超出其类别复核阈值的检出（低置信灰区 → 人工复核路由）。"""
+        return [
+            (d, self._review_threshold(d.class_id))
+            for d in defects
+            if d.uncertainty > self._review_threshold(d.class_id)
+        ]
+
+    @staticmethod
+    def _routing_basis(triggers: list[tuple[Detection, float]]) -> str:
+        parts = [
+            f"{_CLASS_ZH.get(d.class_id, d.class_id.name)}(不确定度{d.uncertainty:.2f}>阈值{thr:.2f})"
+            for d, thr in triggers[:3]
+        ]
+        more = f" 等{len(triggers)}处" if len(triggers) > 3 else ""
+        return f"检出置信度处于复核灰区，转人工复核：{'; '.join(parts)}{more}"
 
     def grade(self, defects: list[Detection], context: ImageMeta) -> GradeResult:
         if not self.tables.authorized:
@@ -49,8 +88,10 @@ class Nb47013Grader:
         spacing = context.pixel_spacing_mm
         if spacing is None or spacing <= 0:
             raise GradingAmbiguousError("缺少有效像素标定 pixel_spacing_mm，无法换算物理尺寸")
-        # 人工兜底：任一检测不确定性超阈值则升级人工复核（ + ）
-        needs_human = any(d.uncertainty > self.review_uncertainty for d in defects)
+        # 人工兜底：任一检出的不确定性超出**其类别**复核阈值则升级人工复核
+        # （逐类温度校准后 u_score 落在校准尺度上，逐类阈值才与校准成果对齐）
+        review_triggers = self._review_routing(defects)
+        needs_human = bool(review_triggers)
 
         if any(d.class_id in _ZERO_TOLERANCE for d in defects):
             per_all = tuple(JointLevel.IV for _ in defects)
@@ -118,6 +159,19 @@ class Nb47013Grader:
 
         # 尺寸临界（长径≈T/2、点数压线、条形长度压线）→ 需人工复核
         near_critical = self._near_critical(defects, round_defs, t, spacing)
+        if review_triggers:
+            # 置信度路由依据落文本：报告/审计可解释"为何转人工"
+            basis = basis + (self._routing_basis(review_triggers),)
+        # 管径上下文备查（G18）：当前规则库无管径条款，但工程上下文须在判定
+        # 依据中留痕，证明输入被接收且未被使用（零容忍/深孔提前返回路径必判
+        # IV、与管径无关，不重复记录）。
+        if context.pipe_outer_diameter_mm:
+            basis = basis + (
+                (
+                    f"判定上下文：管外径 Φ{context.pipe_outer_diameter_mm:g} mm"
+                    "（本标准版本评级规则未使用管径，记录备查）"
+                ),
+            )
         return self._result(
             joint, tuple(per), basis, need_review=bool(needs_human or near_critical or concav_defs)
         )

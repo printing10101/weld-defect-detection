@@ -29,6 +29,11 @@ _TMP_ROOT = Path(tempfile.mkdtemp(prefix="scan_m6_test_"))
 # test_ipc_token 专项覆盖（临时置 true 构造独立 app 实例）。
 os.environ.setdefault("SCAN_IPC__ENFORCE", "false")
 
+# 本地大模型随软件启停（llama.cpp）：测试默认关闭——否则 lifespan 装配会把
+# 真实 llama-server 连同 2.5GB GGUF 拉起来，全组集成测试背上模型加载；
+# 启停生命周期由 test_llm_server 专项覆盖（以测试替身进程验证）。
+os.environ.setdefault("SCAN_LLM__ENABLED", "false")
+
 # P2-9：测试禁用限流（TestClient 共享计数会误伤套件）；安全头中间件保持生效。
 # 同上：create_app 在收集期构造中间件，必须模块体设置（fixture 内设置无效——
 # 否则限流计数跨测试实例共享，登录请求会偶发 429）。

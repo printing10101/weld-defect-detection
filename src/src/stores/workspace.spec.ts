@@ -34,4 +34,17 @@ describe("workspace store", () => {
     const s = useWorkspaceStore();
     expect(s.operator).toBe("赵五");
   });
+
+  it("requestFileOpen 下发意图，消费方直接置空即完成一次性消费", () => {
+    const s = useWorkspaceStore();
+    expect(s.pendingFileOpen).toBeNull();
+    s.requestFileOpen("image");
+    expect(s.pendingFileOpen).toBe("image");
+    // 视图（UploadPanel/BatchView 的 watch）消费：置空后不得重复触发
+    s.pendingFileOpen = null;
+    expect(s.pendingFileOpen).toBeNull();
+    // 再次下发另一意图不被旧消费残留干扰
+    s.requestFileOpen("batch");
+    expect(s.pendingFileOpen).toBe("batch");
+  });
 });

@@ -217,6 +217,39 @@ def test_local_keyfile_unwritable_raises(monkeypatch, tmp_path: Path) -> None:
         AesCrypto()
 
 
+def test_local_keyfile_migrates_across_devices(monkeypatch, tmp_path: Path) -> None:
+    """跨卷密钥迁移：os.replace 抛 EXDEV 时必须退化为复制，且沿用原密钥。
+
+    历史缺陷：源与目标不同卷（安装盘 C: / 用户数据盘 D:）时 ``os.replace``
+    抛 WinError 17 → CryptoKeyError → 静态加密 provider 整体不可用 →
+    fail-closed **拒绝一切影像副本落盘**，用户看到的是"软件突然不能评片"。
+    修复后迁移应成功，且必须是原密钥（重新生成会让既有密文全部不可解）。
+    """
+    monkeypatch.delenv("SCAN_CRYPTO_KEY", raising=False)
+    monkeypatch.delenv("SCAN_CRYPTO_KEY_FILE", raising=False)
+    udd = tmp_path / "udd"
+    monkeypatch.setenv("SCANDETECTION_USER_DATA_DIR", str(udd))
+    cwd = tmp_path / "cwd"
+    legacy = cwd / "data" / ".crypto_key"
+    legacy.parent.mkdir(parents=True)
+    legacy_key = base64.b64encode(bytes.fromhex("11" * 32)) + b"\n"
+    legacy.write_bytes(legacy_key)
+    monkeypatch.chdir(cwd)
+
+    def _exdev(src, dst):
+        raise OSError(17, "系统无法将文件移到不同的磁盘驱动器")
+
+    monkeypatch.setattr(os, "replace", _exdev)
+
+    cipher = AesCrypto()
+    target = udd / "data" / ".crypto_key"
+    assert target.is_file(), "跨卷时应复制而非放弃迁移"
+    assert target.read_bytes() == legacy_key, "必须沿用原密钥（新密钥会让既有密文不可解）"
+    assert not legacy.exists(), "迁移完成后源文件应清理"
+    blob = cipher.encrypt(b"cross-device")
+    assert AesCrypto().decrypt(blob) == b"cross-device"
+
+
 # ---------------------------------------------------------------------------
 # 集成：影像副本加密落盘 + 报告解密读取
 # ---------------------------------------------------------------------------

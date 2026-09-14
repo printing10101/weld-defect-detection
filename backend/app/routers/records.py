@@ -36,6 +36,7 @@ def records(
     date_from: Annotated[str | None, Query(alias="from", pattern=_DATE_PATTERN)] = None,
     date_to: Annotated[str | None, Query(alias="to", pattern=_DATE_PATTERN)] = None,
     workpiece: Annotated[str | None, Query(max_length=128)] = None,
+    need_review: Annotated[bool | None, Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> RecordsResponse:
@@ -46,6 +47,7 @@ def records(
             date_from=date_from,
             date_to=date_to,
             workpiece=workpiece,
+            need_review=need_review,
             page=page,
             size=size,
         )
@@ -71,8 +73,11 @@ def image_preview(
     image = reg.repository.get_image(image_id)
     if image is None:
         raise HTTPException(
-            status_code=404, detail={"code": "NOT_FOUND", "message": f"image not found: {image_id}"}
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": f"影像不存在或尚未归档: {image_id}"},
         )
+    # 诚实边界：DB 内 path 支持外部底片路径（与 std_eval._eval_result_path 同
+    # 口径，见 test_diconde_route）；服务端数据非用户直传，不做 images_dir 锚定。
     gray = _read_gray(str(image["path"]))
     if gray is None:
         raise HTTPException(
@@ -107,7 +112,8 @@ def image_diconde(
     image = reg.repository.get_image(image_id)
     if image is None:
         raise HTTPException(
-            status_code=404, detail={"code": "NOT_FOUND", "message": f"image not found: {image_id}"}
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": f"影像不存在或尚未归档: {image_id}"},
         )
     try:
         return parse_diconde_file(image["path"])

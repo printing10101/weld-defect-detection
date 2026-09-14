@@ -18,6 +18,7 @@
       "../../backend/migrations": "backend/migrations",
       "../../backend/models/__init__.py": "backend/models/__init__.py",
       "../../backend/models/weights": "backend/models/weights",
+      "../../models/weights": "models/weights",
       "../../scripts/eval_real_onnx.py": "scripts/eval_real_onnx.py",
       "../python_embed": "python_embed"
     }

@@ -61,9 +61,11 @@ const emboss = ref(false);
 
 const img = ref<HTMLImageElement | null>(null);
 const imgErr = ref<string | null>(null);
-/** 鼠标是否悬停在本查看器内：window 级快捷键只作用于悬停窗（双片对比时两
- * 实例都在 window 上监听，不限定归属会让同一按键同时作用于两窗）。 */
+/** 鼠标是否悬停在本查看器内：window 级快捷键只作用于悬停/聚焦窗（双片对比时两
+ *  实例都在 window 上监听，不限定归属会让同一按键同时作用于两窗）。 */
 const hovered = ref(false);
+/** 画布键盘聚焦：纯键盘用户 Tab 到画布后同样可缩放/平移（此前必须鼠标悬停）。 */
+const focused = ref(false);
 
 // 处理结果缓存：仅滤波/姿态/分辨率档变化时重算
 const processed = document.createElement("canvas");
@@ -95,14 +97,17 @@ const transformState = computed<Transform>(() => ({
   flipV: flipV.value,
 }));
 
-const statusText = computed(
-  () =>
-    `${Math.round(scale.value * 100)}% · ${rotation.value}°` +
-    (flipH.value ? " · 水平镜像" : "") +
-    (flipV.value ? " · 垂直镜像" : "") +
-    (invert.value ? " · 反相" : "") +
-    (winEnabled.value ? ` · 窗宽${winWidth.value}/窗位${winLevel.value}` : ""),
-);
+const statusText = computed(() => {
+  const parts = [
+    `${Math.round(scale.value * 100)}% · ${rotation.value}°`,
+    img.value ? `原图 ${img.value.naturalWidth}×${img.value.naturalHeight}px` : "",
+    flipH.value ? "· 水平镜像" : "",
+    flipV.value ? "· 垂直镜像" : "",
+    invert.value ? "· 反相" : "",
+    winEnabled.value ? `· 窗宽${winWidth.value}/窗位${winLevel.value}` : "",
+  ].filter(Boolean);
+  return parts.join(" ");
+});
 
 // ---- 源图加载 ----
 watch(
@@ -483,8 +488,8 @@ function onKey(e: KeyboardEvent): void {
   // 修饰键组合让给全局/浏览器快捷键（AppShell 的 Ctrl+1..6 切工作区、
   // Ctrl+R 等）：不排除时两边监听都会执行，切工作区的同时查看器被偷改缩放。
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  // 快捷键只作用于鼠标悬停的本查看器（双片对比时两实例都在 window 监听）。
-  if (!hovered.value || !canvas.value || !img.value) return;
+  // 快捷键作用于悬停或键盘聚焦的本查看器（双片对比时两实例都在 window 监听）。
+  if ((!hovered.value && !focused.value) || !canvas.value || !img.value) return;
   const step = 24;
   switch (e.key) {
     case "+":
@@ -654,11 +659,15 @@ onBeforeUnmount(() => {
     >
       <canvas
         ref="canvas"
+        tabindex="0"
+        aria-label="底片查看区：+/- 缩放，方向键平移，r 旋转，i 反相，f 适应，1 原始尺寸，0 还原"
         @wheel="onWheel"
         @mousedown="onDown"
         @mousemove="onMove"
         @mouseup="onUp"
         @mouseleave="onUp"
+        @focus="focused = true"
+        @blur="focused = false"
       />
       <div
         v-if="imgErr"
@@ -761,6 +770,10 @@ onBeforeUnmount(() => {
   height: 100%;
   display: block;
   cursor: grab;
+}
+.fv-stage canvas:focus {
+  outline: 1px solid rgba(90, 140, 255, 0.7);
+  outline-offset: -1px;
 }
 .fv-hint,
 .fv-error,

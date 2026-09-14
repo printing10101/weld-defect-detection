@@ -30,7 +30,13 @@ def _err(status: int, code: str, message: str) -> HTTPException:
 
 
 class CarrierIn(BaseModel):
-    carrier_id: str = Field(min_length=1, max_length=64)  # 载体编号（如 CN-2026-0001）
+    # 编号字符白名单：进入台账的编号后续会拼进销毁证明文件名
+    # （destroy_cert_{id}.pdf），登记侧即挡住路径分隔符/控制字符。
+    carrier_id: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9_\-]+$",
+    )  # 载体编号（如 CN-2026-0001）
     kind: str  # film | report | backup
     object_id: str | None = None
     secret_level: int = Field(default=0, ge=0, le=3)
@@ -223,8 +229,15 @@ def destroy_certificate(
         raise _err(409, "NOT_DESTROYED", "载体尚未完成销毁，不能导出销毁证明")
     out_dir = reg.config.paths.reports_dir
     from backend.infra.config import resolve_config_path
+    from backend.infra.fs import safe_resolve
 
-    out = resolve_config_path(out_dir) / f"destroy_cert_{carrier_id}.pdf"
+    # carrier_id 直拼文件名：历史台账可能存在含路径分隔符的编号，写出前
+    # safe_resolve 钉死在 reports_dir 内（越界一律 422），杜绝越权写文件。
+    out_dir_resolved = resolve_config_path(out_dir)
+    try:
+        out = safe_resolve(out_dir_resolved, f"destroy_cert_{carrier_id}.pdf")
+    except ValueError as exc:
+        raise _err(422, "INVALID_CARRIER_ID", f"载体编号不可用于文件名: {carrier_id}") from exc
     build_destroy_certificate(c, out)
     reg.repository.append_audit(
         actor=principal.username,

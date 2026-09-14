@@ -1,18 +1,34 @@
 <script setup lang="ts">
-/** 批量进度面板：进度条 + 计数 + 逐任务状态 + 取消/重试操作。 */
+/** 批量进度面板：进度条 + 计数 + 逐任务状态 + 取消/重试操作。
+ *  每个已完成任务提供「报告」入口（此前批量评完无法查看任何一张的完整报告）。 */
 import { stampBadge } from "../utils/filmStamp";
 import type { BatchStatusOut } from "../types/api";
 
 defineProps<{ status: BatchStatusOut }>();
-const emit = defineEmits<{ cancel: []; retry: []; archive: [] }>();
+const emit = defineEmits<{
+  cancel: [];
+  retry: [];
+  archive: [];
+  pause: [];
+  resume: [];
+  /** 打开某任务的 PDF 报告（经受控导出通道） */
+  openReport: [reportId: string];
+}>();
 
 const TASK_STATUS_LABEL: Record<string, string> = {
   pending: "排队中",
   running: "评定中",
   done: "已完成",
-  failed: "失败",
+  failed: "已失败",
   cancelled: "已取消",
 };
+
+/** 后端任务错误信息中文化（旧快照里持久化的英文错误一并覆盖）。 */
+function errorText(raw: string | null): string {
+  if (!raw) return "";
+  if (raw.includes("interrupted by restart")) return "因程序重启中断，可整批重试";
+  return raw;
+}
 
 const STATUS_BADGE: Record<string, string> = {
   pending: "badge-muted",
@@ -22,9 +38,10 @@ const STATUS_BADGE: Record<string, string> = {
   cancelled: "badge-muted",
 };
 
-/** 批次级状态标签（awaiting_review = 查重命中，等人工复核）。 */
+/** 批次级状态标签（paused = 用户主动暂停，待恢复）。 */
 const BATCH_STATUS_LABEL: Record<string, string> = {
   running: "评定中",
+  paused: "已暂停",
   awaiting_review: "待重复性核查",
   finished: "已完结",
 };
@@ -70,6 +87,10 @@ function stampSummaryLine(status: BatchStatusOut): string {
         >
           预计剩余 ≈ {{ status.estimated_sec }} 秒
         </span>
+        <span
+          v-else-if="status.status === 'paused'"
+          class="bp-paused"
+        >已暂停 · 点击「继续评定」恢复</span>
         <span
           v-else
           class="bp-fin"
@@ -122,8 +143,17 @@ function stampSummaryLine(status: BatchStatusOut): string {
         <span
           v-if="t.error"
           class="bp-err"
-          :title="t.error"
-        >⚠ {{ t.error }}</span>
+          :title="errorText(t.error)"
+        >⚠ {{ errorText(t.error) }}</span>
+        <button
+          v-if="t.status === 'done' && t.report_id"
+          type="button"
+          class="bp-report"
+          title="打开该底片的 PDF/A 检测报告（含缺陷标注与检出明细）"
+          @click="emit('openReport', t.report_id)"
+        >
+          报告
+        </button>
       </div>
     </div>
 
@@ -137,6 +167,24 @@ function stampSummaryLine(status: BatchStatusOut): string {
     <div class="bp-ops">
       <button
         v-if="status.status === 'running'"
+        type="button"
+        class="btn ghost"
+        title="未启动的底片暂停派发，正在评定的底片会正常完成；可随时恢复"
+        @click="emit('pause')"
+      >
+        暂停评定
+      </button>
+      <button
+        v-if="status.status === 'paused'"
+        type="button"
+        class="btn"
+        title="把暂停时未启动的底片重新投入评定"
+        @click="emit('resume')"
+      >
+        继续评定 →
+      </button>
+      <button
+        v-if="status.status === 'running' || status.status === 'paused'"
         type="button"
         class="btn ghost"
         @click="emit('cancel')"
@@ -202,6 +250,10 @@ function stampSummaryLine(status: BatchStatusOut): string {
 }
 .bp-est {
   color: #2f6bff;
+}
+.bp-paused {
+  color: #b06a10;
+  font-weight: 600;
 }
 .bp-fin {
   color: #2a8f4a;
@@ -309,6 +361,21 @@ function stampSummaryLine(status: BatchStatusOut): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.bp-report {
+  flex: none;
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(47, 107, 255, 0.45);
+  background: rgba(47, 107, 255, 0.08);
+  color: #2f6bff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.bp-report:hover {
+  background: #2f6bff;
+  color: #fff;
 }
 .bp-ops {
   display: flex;

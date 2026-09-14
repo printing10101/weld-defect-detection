@@ -35,7 +35,11 @@ def _window_probe(pid: int) -> bool:
         import ctypes
         from ctypes import wintypes
 
-        k32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        # WinDLL(use_last_error=True)：windll 单例不保存 last-error 到 ctypes
+        # 线程私有副本，get_last_error() 恒读陈旧值（实测 OpenProcess 失败后
+        # windll 读 0、WinDLL(use_last_error=True) 读真实错误码），ACCESS_DENIED
+        # 判活分支将永远失效 → 权限受限场景误判父进程已死 → os._exit 误杀。
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
         open_proc = getattr(k32, "OpenProcess", None)
         if open_proc is not None:
             open_proc.restype = ctypes.c_void_p  # type: ignore[attr-defined]

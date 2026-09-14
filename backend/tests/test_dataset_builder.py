@@ -85,9 +85,11 @@ class TestBuildDatasetIntegration:
         assert yaml_path.exists()
         train_imgs = list((out / "train" / "images").iterdir())
         train_lbls = list((out / "train" / "labels").iterdir())
-        # 4 张源图 × 2 源 = 8，train ≈ 6-7（含 os_ 副本）→ 至少存在 os 副本文件
+        # 过采样副本与跨源同名副本统一以 dup 前缀唯一化：rare1/rare2 各
+        # 4 份 = user 原图 + synthetic 同名图 + 2 份过采样副本（同组必同 split）
         names = [p.name for p in train_imgs]
-        assert any(n.startswith("os") for n in names), f"no oversampled files: {names}"
+        assert sum("rare1" in n for n in names) == 4, f"oversample missing: {names}"
+        assert sum("rare2" in n for n in names) == 4, names
         assert len(train_imgs) == len(train_lbls)
         # 每个图像都有对应标签（stem 对齐）
         for img in train_imgs:

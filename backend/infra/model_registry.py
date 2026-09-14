@@ -24,10 +24,24 @@ from pathlib import Path
 # backend/infra/model_registry.py -> parents[2] = 安装根目录（项目根 / 部署包根）
 from backend.infra.paths import BACKEND_ROOT as _BACKEND_ROOT
 from backend.infra.paths import INSTALL_ROOT as _INSTALL_ROOT
+from backend.infra.paths import resolve_data_path as _resolve_data_path
 
 _LOG = logging.getLogger("scandetection.model_registry")
 
 _SUFFIXES = (".onnx", ".pt", ".pth")
+
+
+def _resolve_state_file(p: str) -> str:
+    """状态文件路径解析：绝对路径原样返回；相对路径走 data 目录口径。
+
+    ``data/`` 前缀须跟随用户数据目录重定向（SCANDETECTION_USER_DATA_DIR，
+    与 db/影像/IPC 令牌同源）——此前按安装根直锚，打包版把
+    model_registry.json 写进安装目录 data\\，落在卸载器清单之外成为残留
+    （冒烟断言"卸载零残留"失败）。
+    """
+    if Path(p).is_absolute():
+        return p
+    return str(_resolve_data_path(p))
 
 
 def _resolve(p: str) -> str:
@@ -47,9 +61,7 @@ def _resolve(p: str) -> str:
 
     def _contains_weights(d: Path) -> bool:
         try:
-            return d.is_dir() and any(
-                child.suffix.lower() in _SUFFIXES for child in d.iterdir()
-            )
+            return d.is_dir() and any(child.suffix.lower() in _SUFFIXES for child in d.iterdir())
         except OSError:
             return False
 
@@ -84,7 +96,7 @@ class ModelRegistry:
 
     def __init__(self, weights_dir: str, state_file: str) -> None:
         self.weights_dir = _resolve(weights_dir)
-        self.state_file = _resolve(state_file)
+        self.state_file = _resolve_state_file(state_file)
         self._active_id: str | None = self._load_state()
         # 版本指纹缓存：键=(路径, mtime_ns, size)。权重数百 MB 级，全文件哈希
         # 不能每次 scan()（GET /models、get、mark_active_by_uri 都走 scan）重算；
@@ -102,10 +114,17 @@ class ModelRegistry:
             return None
 
     def _save_state(self) -> None:
-        Path(self.state_file).parent.mkdir(parents=True, exist_ok=True)
-        Path(self.state_file).write_text(
-            json.dumps({"active_id": self._active_id}), encoding="utf-8"
-        )
+        # 状态文件仅是活跃指针缓存（启动期 mark_active_by_uri 会重算），写失败
+        # 仅告警不阻断——装配路径（mark_active_by_uri）与热切换都不因磁盘问题崩溃。
+        # 原子写（临时文件 + os.replace）：崩溃中断可致 JSON 损坏 → 活跃指针丢失。
+        try:
+            state = Path(self.state_file)
+            state.parent.mkdir(parents=True, exist_ok=True)
+            tmp = state.with_name(f"{state.name}.tmp")
+            tmp.write_text(json.dumps({"active_id": self._active_id}), encoding="utf-8")
+            os.replace(tmp, state)
+        except OSError as exc:
+            _LOG.warning("模型注册表状态写入失败（不影响运行）: %s", exc)
 
     @staticmethod
     def _hash(path: str) -> str:

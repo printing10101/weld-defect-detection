@@ -6,6 +6,7 @@
  * 另含评价历史档案与等级曲线（E-15：GET /std-eval/history，版本-指标随时间）。
  */
 import { computed, onMounted, ref } from "vue";
+import ConfirmDialog from "../components/ConfirmDialog.vue";
 import { toErrorMessage } from "../utils/errorMessage";
 import {
   createStdRecord,
@@ -26,6 +27,11 @@ const err = ref<string | null>(null);
 
 const recordName = ref("std_record");
 const record = ref<StdRecordOut | null>(null);
+/** 已生成记录表的编号：PDF 下载以生成时为准；此后改动输入框不再误拼 404 直链。 */
+const savedRecordName = ref<string | null>(null);
+const recordNameDirty = computed(
+  () => record.value !== null && savedRecordName.value !== null && recordName.value.trim() !== savedRecordName.value,
+);
 
 const systemName = ref("承压设备射线检测缺陷自动识别系统");
 const systemVersion = ref("");
@@ -85,9 +91,21 @@ function addPerson(): void {
   pValid.value = "";
 }
 
-function removePerson(role: "evaluator" | "labeler", idx: number): void {
-  if (role === "evaluator") evaluators.value = evaluators.value.filter((_, i) => i !== idx);
-  else labelers.value = labelers.value.filter((_, i) => i !== idx);
+/* 移除人员：二次确认（此前一键即删且无撤销）。 */
+const removeCandidate = ref<{ role: "evaluator" | "labeler"; idx: number; name: string } | null>(null);
+
+function askRemovePerson(role: "evaluator" | "labeler", idx: number): void {
+  const list = role === "evaluator" ? evaluators.value : labelers.value;
+  removeCandidate.value = { role, idx, name: list[idx]?.name ?? "" };
+}
+
+function confirmRemovePerson(): void {
+  const c = removeCandidate.value;
+  if (!c) return;
+  if (c.role === "evaluator") evaluators.value = evaluators.value.filter((_, i) => i !== c.idx);
+  else labelers.value = labelers.value.filter((_, i) => i !== c.idx);
+  removeCandidate.value = null;
+  msg.value = "已从列表移除；如需生效到已保存的资质档案，请点击「保存并校验资质」。";
 }
 
 async function savePersonnel(): Promise<void> {
@@ -121,6 +139,7 @@ async function buildRecord(): Promise<void> {
       weld_method: weldMethod.value,
       record_name: recordName.value.trim() || "std_record",
     });
+    savedRecordName.value = recordName.value.trim() || "std_record";
     msg.value = record.value.grading.official
       ? "附录 A 记录表已生成（正式分级结论）。"
       : "附录 A 记录表已生成（人员资质或 FRR 未满足要求，分级数据仅作参考）。";
@@ -226,10 +245,11 @@ const levelMarks = computed(() => {
 
 <template>
   <div>
-    <h1 class="title-zine">系统评价（DB50/T 1807-2025）</h1>
+    <h1 class="title-zine">
+      系统评价（DB50/T 1807-2025）
+    </h1>
     <div class="lede">
-      先经命令行产出评价指标：python -m backend.evaluation.run_std_eval --img-dir … --label-dir … --model …；
-      本页用于检测人员资质录入与附录 A 记录表生成。
+      评价指标由系统管理员在服务端运行标准评价任务产出；本页用于检测人员资质录入与附录 A 记录表生成。
     </div>
 
     <div class="section-h">
@@ -259,8 +279,12 @@ const levelMarks = computed(() => {
             id="spr"
             v-model="pRole"
           >
-            <option value="evaluator">评价人员</option>
-            <option value="labeler">标注人员</option>
+            <option value="evaluator">
+              评价人员
+            </option>
+            <option value="labeler">
+              标注人员
+            </option>
           </select>
         </div>
         <div class="field">
@@ -290,7 +314,7 @@ const levelMarks = computed(() => {
           评价人员：{{ p.name }}（{{ p.cert_type }}{{ p.valid_until ? "，至 " + p.valid_until : "" }}）
           <a
             href="#"
-            @click.prevent="removePerson('evaluator', i)"
+            @click.prevent="askRemovePerson('evaluator', i)"
           >移除</a>
         </li>
         <li
@@ -300,7 +324,7 @@ const levelMarks = computed(() => {
           标注人员：{{ p.name }}（{{ p.cert_type }}）
           <a
             href="#"
-            @click.prevent="removePerson('labeler', i)"
+            @click.prevent="askRemovePerson('labeler', i)"
           >移除</a>
         </li>
       </ul>
@@ -370,8 +394,12 @@ const levelMarks = computed(() => {
             id="sef"
             v-model="weldForm"
           >
-            <option value="single">单面焊</option>
-            <option value="double">双面焊</option>
+            <option value="single">
+              单面焊
+            </option>
+            <option value="double">
+              双面焊
+            </option>
           </select>
         </div>
         <div class="field">
@@ -380,8 +408,12 @@ const levelMarks = computed(() => {
             id="sem"
             v-model="weldMethod"
           >
-            <option value="manual">手工焊</option>
-            <option value="auto">自动焊</option>
+            <option value="manual">
+              手工焊
+            </option>
+            <option value="auto">
+              自动焊
+            </option>
           </select>
         </div>
         <div class="field">
@@ -401,13 +433,19 @@ const levelMarks = computed(() => {
         生成附录 A 记录表
       </button>
       <a
-        v-if="record"
+        v-if="record && !recordNameDirty"
         class="btn"
-        :href="stdRecordPdfUrl(recordName.trim() || 'std_record')"
+        :href="stdRecordPdfUrl(savedRecordName ?? 'std_record')"
         target="_blank"
       >
         下载 PDF
       </a>
+      <span
+        v-else-if="recordNameDirty"
+        class="hint"
+      >
+        记录表编号已修改，请点击「生成附录 A 记录表」以新编号重新生成后再下载。
+      </span>
     </div>
 
     <template v-if="record">
@@ -566,6 +604,15 @@ const levelMarks = computed(() => {
     >
       {{ err }}
     </div>
+    <ConfirmDialog
+      :open="removeCandidate !== null"
+      title="移除人员确认"
+      :message="`将从列表移除「${removeCandidate?.name ?? ''}」。如该人员此前已保存过，还需点击「保存并校验资质」才会生效。确认移除？`"
+      confirm-text="移除"
+      danger
+      @confirm="confirmRemovePerson"
+      @cancel="removeCandidate = null"
+    />
   </div>
 </template>
 

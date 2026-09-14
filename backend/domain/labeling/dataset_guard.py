@@ -19,7 +19,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-_IMG_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+IMG_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
 
 
 @dataclass
@@ -50,7 +50,7 @@ class OverlapReport:
 def _image_files(root: Path) -> list[Path]:
     if not root.is_dir():
         return []
-    return sorted(p for p in root.iterdir() if p.suffix.lower() in _IMG_EXTS)
+    return sorted(p for p in root.iterdir() if p.suffix.lower() in IMG_EXTS)
 
 
 def md5_of(path: Path) -> str:

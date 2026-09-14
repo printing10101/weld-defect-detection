@@ -36,6 +36,9 @@ DISPOSITION_CONDITIONAL = "conditional"  # 有条件验收
 DISPOSITION_REWORK = "rework"  # 不合格（返修/判废）
 DISPOSITION_RECHECK = "recheck"  # 暂缓处置，人工复核
 
+# 验收合格级别的序（G20）：设计/合同给出"X 级合格"时，合格性 = 级别 ≤ X
+_ACCEPT_ORDER = {"I": 1, "II": 2, "III": 3, "IV": 4}
+
 _LABELS = {
     DISPOSITION_ACCEPT: "验收合格",
     DISPOSITION_CONDITIONAL: "有条件验收",
@@ -63,13 +66,18 @@ class Recommendation:
 
 
 def _rework(
-    standard_id: str, zero_tolerance: bool = False, disclaimer: str | None = None
+    standard_id: str,
+    zero_tolerance: bool = False,
+    disclaimer: str | None = None,
+    extra_basis: str | None = None,
 ) -> Recommendation:
     basis = (
         "存在零容忍类缺陷（裂纹/未熔合/未焊透），NB/T47013.2-2015 规定 I-III 级均不允许"
         if zero_tolerance
         else "评级为 IV 级（不合格），不满足验收要求",
     )
+    if extra_basis:
+        basis = (*basis, extra_basis)
     return Recommendation(
         disposition=DISPOSITION_REWORK,
         disposition_label=_LABELS[DISPOSITION_REWORK],
@@ -92,12 +100,17 @@ def recommend(
     need_review: bool = False,
     standard_id: str = "NB/T47013.2-2015",
     disclaimer: str | None = None,
+    accept_level: str | None = None,
 ) -> Recommendation:
     """由评级输出生成处置建议（纯函数，可单测）。
 
     level      : 综合级别（'I'~'IV' 或 JointLevel；None=级别不可得/方法标准）
     defects    : 参与评级的缺陷（用于零容忍/深孔判定）
     need_review: 系统人工复核标志（高不确定性/尺寸临界/复核兜底）
+    accept_level: 设计/合同的验收合格级别（'I'~'IV'，报告"合格级别"栏）。
+                  给出时合格性 = 级别 ≤ 验收级别，替代默认口径（I/II 合格、
+                  III 条件）；无法识别时静默忽略走默认口径（报告该栏为自由
+                  文本，建议引擎不得因脏文本阻塞出片）。
     """
     dl = disclaimer if disclaimer is not None else _DEFAULT_DISCLAIMER
 
@@ -145,7 +158,37 @@ def recommend(
             disclaimer=dl,
         )
 
-    # 5) III 级：有条件验收
+    # 5) 显式验收等级（G20）：设计/合同给出"X 级合格"时按阈值判定，替代
+    # 默认口径。零容忍/深孔/复核兜底不因验收等级放宽——任何验收等级都
+    # 不得豁免零容忍缺陷，或代替复核确认。
+    if accept_level is not None:
+        norm = accept_level.strip().upper()
+        if norm in _ACCEPT_ORDER:
+            required = _ACCEPT_ORDER[norm]
+            actual = _ACCEPT_ORDER[level]
+            if actual <= required:
+                return Recommendation(
+                    disposition=DISPOSITION_ACCEPT,
+                    disposition_label=_LABELS[DISPOSITION_ACCEPT],
+                    actions=(
+                        f"系统评级 {level} 级，满足验收合格级别 {norm} 级要求",
+                        "允许放行；按质量管理要求留存底片与报告",
+                    ),
+                    basis=(f"验收判定：级别 {level} ≤ 验收合格级别 {norm}（设计/合同要求）",),
+                    standard_id=standard_id,
+                    disclaimer=dl,
+                )
+            return _rework(
+                standard_id,
+                zero_tolerance=False,
+                disclaimer=dl,
+                extra_basis=(
+                    f"验收判定：级别 {level} 高于验收合格级别 {norm}（设计/合同要求）"
+                ),
+            )
+        # 无法识别的验收级别：忽略，走下方默认口径（不阻塞出片）
+
+    # 6) III 级：有条件验收
     if level == "III":
         return Recommendation(
             disposition=DISPOSITION_CONDITIONAL,

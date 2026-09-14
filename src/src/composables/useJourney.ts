@@ -10,6 +10,7 @@
 import { getCurrentScope, onScopeDispose, readonly, ref } from "vue";
 import { toErrorMessage } from "../utils/errorMessage";
 import { createReport } from "../services/api";
+import { busyTask } from "../stores/busy";
 import type { ReportOut } from "../types/api";
 
 export type JourneyPhase = "upload" | "processing" | "result";
@@ -46,6 +47,7 @@ export function useJourney() {
     phase.value = "processing";
     error.value = null;
     result.value = null;
+    busyTask.value = "journey"; // 评定中：关闭窗口前拦截提示
     const start = performance.now();
     timer = setInterval(() => {
       elapsedMs.value = Math.round(performance.now() - start);
@@ -60,7 +62,17 @@ export function useJourney() {
     } finally {
       if (timer) clearInterval(timer);
       timer = undefined;
+      if (busyTask.value === "journey") busyTask.value = null;
     }
+  }
+
+  /** 返回上传页但保留已选底片与参数（UploadPanel 经 v-show 保持挂载）：
+   *  与语义一致——此前「返回并重试」实际是全部清空重来。 */
+  function backToUpload(): void {
+    error.value = null;
+    result.value = null;
+    elapsedMs.value = 0;
+    phase.value = "upload";
   }
 
   function reset(): void {
@@ -82,6 +94,7 @@ export function useJourney() {
     elapsedMs: readonly(elapsedMs),
     setFile,
     submit,
+    backToUpload,
     reset,
   };
 }

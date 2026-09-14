@@ -1,0 +1,36 @@
+{
+  "synthetic": true,
+  "version": 3,
+  "seed": 20260945,
+  "seed_search": "起始 20260913，第 33 次尝试通过（跨集合零重叠）",
+  "train_seed": 12345,
+  "n_images": 120,
+  "size": [
+    640,
+    640
+  ],
+  "n_classes": 7,
+  "classes": [
+    "气孔",
+    "夹渣",
+    "未焊透",
+    "未熔合",
+    "裂纹",
+    "咬边",
+    "内凹"
+  ],
+  "class_box_counts": {
+    "0": 210,
+    "1": 27,
+    "2": 35,
+    "3": 37,
+    "4": 35,
+    "5": 33,
+    "6": 30
+  },
+  "generator": "backend/training/planB_run.py::generate（与当前部署权重的训练语料同源，种子不同）",
+  "purpose": "权重版本回归门禁（同分布相对比较）；非真实底片精度证书",
+  "provenance": "合成缺陷图，无真实影像；禁止用于训练；零重叠校验：与训练集 600 张最小 dHash 汉明距离 = 5（阈值 >4，与 planB 生成期内去重阈值一致）",
+  "generated_at": "2026-09-13T03:14:01",
+  "generated_by": "scripts/make_golden_set_v3.py"
+}

@@ -7,14 +7,18 @@
  * 数据诚实性：仅显示用户真实上传/选择的影像，不预置任何样例。
  */
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import FilmViewer from "../components/FilmViewer.vue";
-import { imagePreviewUrl } from "../services/api";
+import ConfirmDialog from "../components/ConfirmDialog.vue";
+import { ApiRequestError, fetchImagePreviewBlob } from "../services/api";
 import { IMAGE_ACCEPT } from "../services/imageFormats";
 import { useViewerFilmsStore, type ViewerFilm } from "../stores/viewerFilms";
 import { stampBadge } from "../utils/filmStamp";
+import { toErrorMessage } from "../utils/errorMessage";
 import type { Transform } from "../types/api";
 
 const store = useViewerFilmsStore();
+const route = useRoute();
 
 /** 面板内容来源：owned=本页 pick 创建的 Blob（替换/卸载时须回收）；
  * store 影像与档案 http URL 的生命周期不归本页，绝不在此 revoke。 */
@@ -52,7 +56,14 @@ function openFilm(film: ViewerFilm, which: "A" | "B" = "A"): void {
 }
 
 // 挂载即同步：面板为空且已有上传影像 → 自动展示最新一张可预览的。
+// 支持深链：/viewer?image_id=xxx（档案页「查看影像」入口）直接载入该档案影像。
 onMounted(() => {
+  const qid = route.query.image_id;
+  if (typeof qid === "string" && qid.trim()) {
+    archiveId.value = qid.trim();
+    void loadFromArchive();
+    return;
+  }
   if (paneA.value) return;
   const latest = store.films.find((f) => f.decodable);
   if (latest) openFilm(latest);
@@ -80,15 +91,34 @@ watch(
   },
 );
 
-/** 从检测档案加载：输入影像编号，走后端 PNG 预览接口（支持 TIFF/DICOM 密文副本）。 */
-function loadFromArchive(): void {
+/** 从检测档案加载：输入影像编号，走后端 PNG 预览接口（支持 TIFF/DICOM 密文副本）。
+ *  经统一请求管道拉 Blob：404/401/离线都能如实归因（此前直链 <img> 的 onerror
+ *  把「编号不存在/未登录」都误报成「格式不支持」）。 */
+const archiveLoading = ref(false);
+
+async function loadFromArchive(): Promise<void> {
   const id = archiveId.value.trim();
   archiveErr.value = null;
   if (!id) {
     archiveErr.value = "请输入影像编号（可在「检测档案」中复制）。";
     return;
   }
-  setPane("A", { url: imagePreviewUrl(id), name: `档案影像 ${id}`, owned: false });
+  archiveLoading.value = true;
+  try {
+    const blob = await fetchImagePreviewBlob(id);
+    const url = URL.createObjectURL(blob);
+    setPane("A", { url, name: `档案影像 ${id}`, owned: true });
+  } catch (e) {
+    if (e instanceof ApiRequestError) {
+      if (e.status === 404) archiveErr.value = `未找到影像「${id}」：请确认编号是否来自「检测档案」列表。`;
+      else if (e.status === 401) archiveErr.value = "登录状态已失效，请重新登录后再试。";
+      else archiveErr.value = `影像载入失败：${e.message}`;
+    } else {
+      archiveErr.value = `影像载入失败：${toErrorMessage(e)}`;
+    }
+  } finally {
+    archiveLoading.value = false;
+  }
 }
 
 function pick(which: "A" | "B"): void {
@@ -112,6 +142,31 @@ function onTransform(t: Transform): void {
 function clear(which: "A" | "B"): void {
   setPane(which, null);
   if (which === "B") dualMode.value = false;
+}
+
+/* ── 清空/移除确认：会话内 Blob 清掉后无法找回，不再一键即清（§用户差错防御） ── */
+const confirmKind = ref<"clear" | "remove" | null>(null);
+const removeTarget = ref<ViewerFilm | null>(null);
+
+function askClear(): void {
+  confirmKind.value = "clear";
+}
+
+function askRemove(f: ViewerFilm): void {
+  removeTarget.value = f;
+  confirmKind.value = "remove";
+}
+
+function onConfirmAction(): void {
+  if (confirmKind.value === "clear") store.clear();
+  else if (confirmKind.value === "remove" && removeTarget.value) store.remove(removeTarget.value.id);
+  confirmKind.value = null;
+  removeTarget.value = null;
+}
+
+function onCancelAction(): void {
+  confirmKind.value = null;
+  removeTarget.value = null;
 }
 
 function extOf(name: string): string {
@@ -175,12 +230,16 @@ function thumbStamp(filmId: number) {
         placeholder="档案影像编号…"
         @keyup.enter="loadFromArchive"
       >
-      <button @click="loadFromArchive">
-        从检测档案载入
+      <button
+        :disabled="archiveLoading"
+        @click="loadFromArchive"
+      >
+        {{ archiveLoading ? "载入中…" : "从检测档案载入" }}
       </button>
       <span
         v-if="archiveErr"
         class="aerr"
+        role="alert"
       >{{ archiveErr }}</span>
       <button
         :class="{ on: dualMode }"
@@ -199,6 +258,25 @@ function thumbStamp(filmId: number) {
       </template>
     </div>
 
+    <!-- 首次使用引导：store 为空时说明影像从哪里来（此前只有一句"未载入影像"） -->
+    <div
+      v-if="store.count === 0"
+      class="empty-guide"
+    >
+      <p class="eg-title">
+        尚未同步任何底片
+      </p>
+      <p class="eg-line">
+        · 在「单幅评定」或「批量评定」中导入的底片会自动同步到本页（本会话内有效）；
+      </p>
+      <p class="eg-line">
+        · 或在上方输入档案影像编号，从「检测档案」载入历史底片（支持 TIFF/DICOM 转档预览）；
+      </p>
+      <p class="eg-line">
+        · 也可点击「载入主片…」直接选择本机影像文件。
+      </p>
+    </div>
+
     <!-- 上传同步影像条：最新在前；点选上屏，双片模式下可指派为对比片 -->
     <div
       v-if="store.count"
@@ -209,7 +287,7 @@ function thumbStamp(filmId: number) {
         <a
           href="#"
           class="clear"
-          @click.prevent="store.clear()"
+          @click.prevent="askClear"
         >清空</a>
       </div>
       <div class="strip">
@@ -258,7 +336,7 @@ function thumbStamp(filmId: number) {
           <button
             class="tx"
             title="从列表移除"
-            @click.stop="store.remove(f.id)"
+            @click.stop="askRemove(f)"
           >
             ✕
           </button>
@@ -283,10 +361,42 @@ function thumbStamp(filmId: number) {
         @transform-changed="onTransform"
       />
     </div>
+
+    <ConfirmDialog
+      :open="confirmKind !== null"
+      :title="confirmKind === 'clear' ? '清空已同步影像' : '移除影像'"
+      :message="
+        confirmKind === 'clear'
+          ? `将移除已同步的全部 ${store.count} 幅影像及其缺陷标注（不影响已归档的检测结果），本会话内无法找回。确认清空？`
+          : `将移除「${removeTarget?.name ?? ''}」及其缺陷标注（不影响已归档的检测结果）。确认移除？`
+      "
+      confirm-text="确认移除"
+      danger
+      @confirm="onConfirmAction"
+      @cancel="onCancelAction"
+    />
   </div>
 </template>
 
 <style scoped>
+.empty-guide {
+  border: 1px dashed rgba(120, 140, 180, 0.45);
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin: 8px 0 12px;
+  background: rgba(255, 255, 255, 0.55);
+}
+.eg-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #22355c;
+}
+.eg-line {
+  margin: 3px 0;
+  font-size: 12px;
+  color: #44577a;
+}
 .viewer-controls {
   display: flex;
   align-items: center;

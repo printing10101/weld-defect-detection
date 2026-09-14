@@ -11,13 +11,13 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any
-
-_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
+
+_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 _BASE = Path(__file__).resolve().parents[1] / "configs"
 _LOG = logging.getLogger("scandetection.config")
@@ -411,6 +411,10 @@ class DetectCfg(BaseModel):
     abs_threshold: float = 8.0
     dark_only: bool = False
     review_conf: float = 0.5  # 检测不确定性阈值，超过则判定 need_review（M4b 人工兜底）
+    # 逐类复核阈值（键=DefectClass.value，未列出类回落 review_conf）：逐类温度
+    # 校准后各类置信度尺度系统分化（§15.4 实测过自信/欠自信方向相反），复核
+    # 路由需按类设定灰区门槛；空映射 = 全部回落全局阈值（行为与历史一致）。
+    class_review_conf: dict[int, float] = {}
     # Tiling 分块推理（大底片小缺陷召回）：tile_size=0 关闭。开启后最长边超过
     # tile_trigger_side 的影像按瓦片推理（瓦片内 letterbox 缩放比整图小一个量级，
     # 小缺陷特征不再被整图缩放淹没），跨瓦片 NMS 合并重叠区重复检出。代价 =
@@ -426,6 +430,18 @@ class DetectCfg(BaseModel):
     # 文件内含 model_id 指纹——加载时校验，与当前权重不匹配则静默不启用
     # （绝不让过期校准表污染新权重）。None = 关闭校准。
     calibration_file: str | None = None
+    # 检测工作模式（高检出/高准确双档，对标商业评片软件）：balanced=标定阈值；
+    # recall_first=整体放宽（初筛/复核兜底，漏检代价高的场景）；
+    # precision_first=整体收紧（终审定级，压误报省复核人力）。
+    # 语义为对 infer_conf/class_conf 统一缩放，类间相对关系不破坏（ADR-010）。
+    mode: Literal["balanced", "recall_first", "precision_first"] = "balanced"
+    recall_conf_scale: float = Field(default=0.5, gt=0.0, le=1.0)  # recall_first 缩放系数
+    precision_conf_scale: float = Field(default=1.8, ge=1.0, le=5.0)  # precision_first 缩放系数
+    # 印字区误检过滤：印字 OCR 命中（日期/编号）后，把中心落在印字框外扩区域
+    # 内的检出判为印字误检并屏蔽。真实扫描底片的编号/日期铅字是首要误检源
+    # （实测某真实底片 27/27 检出全部落在印字带）。屏蔽不静默：数量进响应
+    # warnings 与审计；关闭后印字区检出原样保留。
+    mask_stamp_zone: bool = True
 
 
 class UploadCfg(BaseModel):
@@ -598,6 +614,70 @@ class DiskSpaceCfg(BaseModel):
     warn_min_bytes: int = 1073741824  # 1 GiB
 
 
+class LlmCfg(BaseModel):
+    """本地大模型（llama.cpp / llama-server）随软件启停。
+
+    enabled            : 总开关（false=完全不拉起，/health llm.state=disabled）。
+    mode               : managed=自拉起 llama-server；external=只连接已有服务。
+    server_exe         : llama-server 可执行文件路径；空 = 项目内置 tools/llama/。
+    model_file         : GGUF 模型路径（相对路径锚定安装根，同 weights 语义）。
+    host / port        : OpenAI 兼容服务端点；host 仅允许回环（单机交付面收敛）。
+    n_ctx              : 上下文窗口（tokens）。
+    n_gpu_layers       : 卸载到 GPU 的层数（99=全量；无 GPU 机器调 0 走 CPU）。
+    threads            : CPU 线程数（0 = llama.cpp 自动）。
+    startup_timeout_sec: 模型加载就绪等待上限（4B Q4 权重 + RTX 3080 实测数秒，
+                         冷盘/杀毒扫描下放宽到 120s；超时回收进程并降级）。
+    watch_interval_sec : 看门狗存活巡检周期。
+    max_restart        : 意外退出重启上限（防崩溃循环空转）。
+    external_endpoint  : external 模式连接的目标端点（仅回环）。
+    api_key_env        : 端点鉴权 Key 的**环境变量名**（Key 本身不落配置、不落盘）。
+    probe_timeout_sec  : 端点探测超时。
+    model_dirs         : 额外模型目录（用户手动添加，界面可增删）。
+    service_presets    : 默认探测的服务端点（host:port）。
+    scan_roots         : 模型扫描根；空=本机全部固定盘。
+    scan_on_startup    : 启动即后台扫描（默认关，避免开机全盘 IO）。
+    registry_state_file: 选中模型/额外目录的持久化文件（data/ 前缀随用户数据目录重定向）。
+    scan_cache_file    : 扫描结果缓存文件（避免每次启动重扫）。
+    """
+
+    enabled: bool = True
+    server_exe: str = ""
+    model_file: str = "models/llm/Qwen3-4B-Q4_K_M.gguf"
+    host: str = "127.0.0.1"
+    port: int = 18780
+    n_ctx: int = 4096
+    n_gpu_layers: int = 99
+    threads: int = 0
+    startup_timeout_sec: float = 120.0
+    watch_interval_sec: float = 20.0
+    max_restart: int = 3
+
+    # --- 加载方式：自拉起 vs 连接已有服务 -------------------------------------
+    # managed : 由本软件拉起 tools/llama 下的 llama-server 加载 model_file。
+    # external: 只连接一个**已运行**的 OpenAI 兼容端点（如用户用
+    #           llama.cpp router / Ollama / LM Studio 起好的实例），
+    #           不重复占用显存、秒级就绪。大模型权重（2.4GB 起）随 NSIS
+    #           安装包分发会突破 2GB 打包上限，故安装版一律走本模式。
+    mode: str = "managed"
+    external_endpoint: str = "http://127.0.0.1:8080"  # 仅回环，非回环拒绝
+    api_key_env: str = "SCANDETECTION_LLM_API_KEY"  # 端点鉴权 Key 的环境变量名
+    probe_timeout_sec: float = 3.0  # 端点探测超时（探测失败不阻断启动）
+
+    # --- 本地模型发现（只读扫描，供界面「本地大模型」面板列出可选模型）--------
+    model_dirs: list[str] = []  # 额外模型目录（相对路径锚定安装根）
+    # 默认探测的 llama 兼容服务端点（host:port）；Ollama=11434 / LM Studio=1234
+    service_presets: list[str] = [
+        "127.0.0.1:8080",
+        "127.0.0.1:8081",
+        "127.0.0.1:11434",
+        "127.0.0.1:1234",
+    ]
+    scan_roots: list[str] = []  # 扫描根；空 = 本机全部固定盘
+    scan_on_startup: bool = False  # 启动即后台全盘扫描（默认关：不做开机全盘 IO）
+    registry_state_file: str = "data/llm_registry.json"
+    scan_cache_file: str = "data/llm_scan_cache.json"
+
+
 class ModelGateCfg(BaseModel):
     """模型投产门禁状态机（E-14：更新即重评投产门禁）。
 
@@ -645,6 +725,7 @@ class AppConfig(BaseSettings):
     backup: BackupCfg = BackupCfg()
     watchdog: WatchdogCfg = WatchdogCfg()
     disk_space: DiskSpaceCfg = DiskSpaceCfg()
+    llm: LlmCfg = LlmCfg()
     # 注意字段名 modelgate（非 model_gate）：E-14 专项测试/部署用环境变量
     # SCAN_MODELGATE__ENABLED=true 开启完整门禁链（env 解析按小写段匹配）。
     modelgate: ModelGateCfg = ModelGateCfg()
@@ -712,12 +793,17 @@ def _leaf_paths(node: Any, prefix: tuple[str, ...] = ()) -> set[tuple[str, ...]]
 
     分支判定：dict 且**所有键均为合法标识符**（即"配置段"，键为字段名）→ 继续下钻；
     否则（标量 / list / 非标识符键的映射如 class_conf 的 {0:0.30,...}）→ 视为单个叶子。
+    空映射（如 class_review_conf: {}）视为单个叶子——它仍是已声明键，不得判"缺失"。
 
     这避免了 schema.yaml（用 `bool`/`str` 等类型注解作叶值）与 default.yaml
     （用真实值，class_conf 是 int 键映射）在形状上的结构性误报：两侧都按
     "标识符键=配置段、其余=单叶子" 归一化，路径精确对齐。
     """
-    if isinstance(node, dict) and all(isinstance(k, str) and _IDENT_RE.match(k) for k in node):
+    if (
+        isinstance(node, dict)
+        and node
+        and all(isinstance(k, str) and _IDENT_RE.match(k) for k in node)
+    ):
         out: set[tuple[str, ...]] = set()
         for k, v in node.items():
             out |= _leaf_paths(v, prefix + (str(k),))

@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 import threading
 from pathlib import Path
@@ -34,13 +35,17 @@ def token_file_path(data_dir: str | Path) -> Path:
 
 
 def _write_token_file(path: Path, token: str) -> None:
-    """令牌落盘（仅本机用户可读为尽力而为，见模块 docstring）。"""
+    """令牌落盘（仅本机用户可读为尽力而为，见模块 docstring）。
+
+    原子写（临时文件 + os.replace）：Tauri 壳在端口就绪后读本文件注入
+    WebView，直接 truncate 旧文件存在"壳侧读到空/半截 token → 前端持续
+    401"的窗口（重签发恰逢读取时）。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = path.open("w", encoding="utf-8")
-    try:
+    tmp = path.with_name(f"{path.name}.tmp")
+    with tmp.open("w", encoding="utf-8") as fd:
         fd.write(token)
-    finally:
-        fd.close()
+    os.replace(tmp, path)
     try:
         # POSIX：仅属主可读写；Windows 上此调用被忽略，依赖数据目录继承的
         # 用户级 ACL（其他普通用户默认不可读）——尽力而为，不做强承诺。

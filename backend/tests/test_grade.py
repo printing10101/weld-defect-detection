@@ -321,3 +321,66 @@ def test_disclaimer_for_no_copy_includes_source_note() -> None:
     text = disclaimer_for(tables)
     assert "非标准授权正本" in text
     assert "数值转录自 2026 年公开解读" in text
+
+
+def _det_u(
+    class_id: DefectClass, uncertainty: float, w_px: float = 10, h_px: float = 10
+) -> Detection:
+    return Detection(
+        id="d",
+        bbox=BBox(0, 0, w_px, h_px),
+        class_id=class_id,
+        score=0.5,
+        uncertainty=uncertainty,
+    )
+
+
+class TestPerClassReviewRouting:
+    """逐类复核阈值路由（class_review_uncertainty，键=DefectClass.value）。
+
+    逐类温度校准后各类置信度尺度系统分化（§15.4），复核灰区门槛按类设定：
+    未列出的类回落全局 review_uncertainty。
+    """
+
+    def test_relaxed_class_avoids_review(self) -> None:
+        # 气孔 u=0.55 超全局 0.5 会触发；逐类放宽到 0.6 → 不转人工
+        grader = Nb47013Grader(
+            _AUTHORIZED, review_uncertainty=0.5, class_review_uncertainty={0: 0.6}
+        )
+        res = grader.grade([_det_u(DefectClass.POROSITY, 0.55)], _ctx(40))
+        assert res.need_review is False
+        assert not any("复核灰区" in b for b in res.basis)
+
+    def test_tightened_class_routes_to_review(self) -> None:
+        # 咬边 u=0.45 低于全局 0.5 不触发；逐类收紧到 0.4 → 转人工 + 依据落文本
+        grader = Nb47013Grader(
+            _AUTHORIZED, review_uncertainty=0.5, class_review_uncertainty={5: 0.4}
+        )
+        res = grader.grade([_det_u(DefectClass.UNDERCUT, 0.45)], _ctx(40))
+        assert res.need_review is True
+        assert any("复核灰区" in b and "咬边" in b for b in res.basis)
+
+    def test_unlisted_class_falls_back_to_global(self) -> None:
+        # 未列出的类回落全局阈值：u=0.55 > 0.5 触发，u=0.45 不触发
+        grader = Nb47013Grader(
+            _AUTHORIZED, review_uncertainty=0.5, class_review_uncertainty={5: 0.4}
+        )
+        assert grader.grade([_det_u(DefectClass.POROSITY, 0.55)], _ctx(40)).need_review is True
+        assert grader.grade([_det_u(DefectClass.POROSITY, 0.45)], _ctx(40)).need_review is False
+
+    def test_registry_passthrough(self) -> None:
+        from backend.domain.grade.registry import get_grader
+
+        grader = get_grader(
+            "NB/T47013.2-2015",
+            _AUTHORIZED,
+            review_uncertainty=0.5,
+            class_review_uncertainty={5: 0.4},
+        )
+        res = grader.grade([_det_u(DefectClass.UNDERCUT, 0.45)], _ctx(40))
+        assert res.need_review is True
+
+    def test_empty_mapping_keeps_history_behavior(self) -> None:
+        grader = Nb47013Grader(_AUTHORIZED, review_uncertainty=0.4)
+        assert grader.grade([_det_u(DefectClass.POROSITY, 0.45)], _ctx(40)).need_review is True
+        assert grader.grade([_det_u(DefectClass.POROSITY, 0.35)], _ctx(40)).need_review is False

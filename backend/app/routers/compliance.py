@@ -225,7 +225,10 @@ def build_deliverable(
 
     key = spec.upper()
     if key not in _BUILDERS:
-        raise HTTPException(status_code=404, detail=f"未知交付物编号：{spec}（V-02~V-05）")
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": f"未知交付物编号：{spec}（V-02~V-05）"},
+        )
     report = {"V-02": build_v02, "V-03": build_v03, "V-04": build_v04, "V-05": build_v05}[key](
         *(() if key in ("V-02", "V-05") else (reg,))
     )

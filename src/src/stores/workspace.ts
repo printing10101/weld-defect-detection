@@ -17,5 +17,14 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     operator.value = getOperatorName();
   }
 
-  return { operator, setOperator };
+  /** 菜单/快捷键「打开影像/批量导入」的待处理意图：
+   *  目标视图挂载（或已挂载视图 watch 到）后消费并弹出文件选择器，
+   *  使菜单动作与页面内点击选片等效（桌面软件"文件→打开"语义）。 */
+  const pendingFileOpen = ref<"image" | "batch" | null>(null);
+
+  function requestFileOpen(kind: "image" | "batch"): void {
+    pendingFileOpen.value = kind;
+  }
+
+  return { operator, setOperator, pendingFileOpen, requestFileOpen };
 });

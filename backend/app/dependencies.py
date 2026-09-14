@@ -32,8 +32,11 @@ from backend.infra.standards.tables_source import FileTableSource
 from backend.infra.timeutil import fmt_naive_utc
 
 if TYPE_CHECKING:
+    from backend.evaluation.gate_rejects import GateRejectStore
     from backend.infra.backup import BackupScheduler
     from backend.infra.disk_space import DiskWatchdog
+    from backend.infra.llm_registry import LlmRegistry
+    from backend.infra.llm_server import LlamaServerManager
     from backend.infra.watchdog import MemoryWatchdog
 
 _LOG = logging.getLogger("scandetection.dependencies")
@@ -182,11 +185,6 @@ class ResilientDetector:
             self.consecutive_failures = 0
         return dets
 
-    def infer_tta(self, image, conf, iou, class_conf=None, scales=(0.8, 1.0, 1.25)):
-        # infer_tta 是 YoloDetector 的增强能力、非 DefectDetector 协议契约
-        with self._rw.read():
-            return self._inner.infer_tta(image, conf, iou, class_conf, scales)  # type: ignore[attr-defined]
-
 
 class Registry:
     """应用共享状态容器（单例）。"""
@@ -256,8 +254,38 @@ class Registry:
         self.disk_watchdog: DiskWatchdog | None = None
         # S-12 定期备份调度器：默认 None（lifespan 按 config.backup.interval_hours 装配）。
         self.backup_scheduler: BackupScheduler | None = None
+        # 本地大模型（llama.cpp）随软件启停：默认 None（lifespan 按 config.llm 装配）。
+        self.llm_manager: LlamaServerManager | None = None
+        # 本地大模型注册表（发现清单 + 选中指针）：与 llm_manager 同批装配。
+        self.llm_registry: LlmRegistry | None = None
         # 登录服务实例（app.auth 在首次登录流程挂载，见 auth.get_auth_service）
         self._auth_service: object | None = None
+        # E-05 拦截留档台账（懒建单例，见 gate_reject_store()）：全进程共享
+        # 一个引擎——BatchManager 每任务新建 pipeline，引擎若随 pipeline/请求
+        # 累积则长跑批量下连接池永不释放。
+        self._gate_reject_store: GateRejectStore | None = None
+        # 缺陷图谱样本库（懒建单例，见 atlas_store()）。
+        self._atlas_store: object | None = None
+
+    def gate_reject_store(self) -> GateRejectStore:
+        """拦截留档台账（E-05）懒建单例：首次访问才连接 DB。"""
+        if self._gate_reject_store is None:
+            from backend.evaluation.gate_rejects import GateRejectStore as _Store
+
+            self._gate_reject_store = _Store(str(_resolve_path(self.config.paths.db_path)))
+        return self._gate_reject_store
+
+    def atlas_store(self):
+        """缺陷图谱样本库懒建单例（首次访问才连接 DB，模式同 gate_reject_store）。"""
+        if self._atlas_store is None:
+            from backend.infra.atlas_store import AtlasStore
+
+            self._atlas_store = AtlasStore(str(_resolve_path(self.config.paths.db_path)))
+        return self._atlas_store
+
+    def atlas_dir(self) -> Path:
+        """图谱局部图落盘目录（data/atlas，随安装根锚定）。"""
+        return Path(_resolve_path(str(Path(self.config.paths.data_dir) / "atlas")))
 
     def eval_report(self, model_id: str) -> dict | None:
         """读取某模型的评估报告。"""
@@ -523,12 +551,18 @@ class Registry:
     def _build_grader(self) -> StandardGrader:
         """按配置装配默认标准判定器（NB/T47013，多标准适配见 grader_for）。
 
-        统一经 get_grader 装配，使 config.detect.review_conf 在所有路径生效
+        统一经 get_grader 装配，使 config.detect.review_conf /
+        class_review_conf 在所有路径生效
         （此前 _build_grader 与 registry.get_grader 的 Nb47013Grader 构造签名分叉）。
         """
         sc = self.config.standard
         tables = load_standard_tables(sc.default_id, filename=sc.tables_filename)
-        return get_grader(sc.default_id, tables, review_uncertainty=self.config.detect.review_conf)
+        return get_grader(
+            sc.default_id,
+            tables,
+            review_uncertainty=self.config.detect.review_conf,
+            class_review_uncertainty=self.config.detect.class_review_conf,
+        )
 
     def grader_for(self, standard_id: str) -> StandardGrader:
         """按 standard_id 路由判定器。
@@ -539,6 +573,39 @@ class Registry:
         if standard_id == self.config.standard.default_id:
             return self.grader
         return get_grader(standard_id)
+
+    def apply_llm_selection(self) -> dict:
+        """把 LLM 注册表中选中的模型推成生效配置，并热重启引擎。
+
+        选中项的两种落法（推导在 ``infra.llm_registry.effective_llm_cfg``）：
+        - 本地 GGUF → ``mode=managed`` + ``model_file``（由本进程拉起 llama-server）；
+        - 已有服务   → ``mode=external`` + ``external_endpoint``（只连不拉起）。
+
+        旧引擎经 ``stop()`` 回收：**自拉起的进程会被终止；收编/外部实例不会被杀**
+        （``stop`` 对 adopted 实例是 no-op），所以复用用户已在跑的服务是安全的。
+        新引擎 ``start_async``（模型加载可达数十秒，不能阻塞请求线程）——立即返回的
+        ``engine`` 状态可能是 ``starting``，调用方轮询 ``/llm/status`` 取最终态。
+        """
+        from backend.infra.llm_registry import LlmRegistry
+        from backend.infra.llm_server import LlamaServerManager
+
+        base = self.config.llm
+        if self.llm_registry is None:
+            self.llm_registry = LlmRegistry(base)
+        eff = self.llm_registry.effective_llm_cfg(base)
+
+        old = self.llm_manager
+        if old is not None:
+            old.stop()
+
+        if not eff.enabled:
+            self.llm_manager = None
+            return {"reloaded": False, "reason": "disabled", "mode": "", "endpoint": ""}
+
+        mgr = LlamaServerManager(eff, resolve_config_path(self.config.paths.data_dir) / "llm")
+        self.llm_manager = mgr
+        mgr.start_async()
+        return {"reloaded": True, "mode": eff.mode, "endpoint": mgr.endpoint}
 
     def activate_model(self, model_id: str, actor: str | None = None) -> ModelEntry:
         """运行时热切换检测器权重。
@@ -686,32 +753,47 @@ class Registry:
         return entry
 
     def _auto_evaluate(self, model_id: str) -> None:
-        """后台线程：对刚激活的模型跑 Golden Set 评估（非阻塞、fail-soft）。"""
-        import threading
+        """后台线程：对刚激活的模型跑 Golden Set 评估（非阻塞、fail-soft）。
+
+        与 run_candidate_evaluation 同一纪律：EVAL_GATE 闸内构建独立检测器。
+        评估流量不得复用活跃 ResilientDetector——Golden 集中的坏图推理异常会
+        累加其连续失败计数，达到阈值即误触发生产模型的自动回退与降级告警。
+        """
 
         def _job() -> None:
             try:
+                entry = self.model_registry.get(model_id)
+                if entry is None:
+                    _LOG.warning("自动评估跳过（模型不存在）: %s", model_id)
+                    return
                 from backend.evaluation.run_eval import run_golden_evaluation
 
-                pp_fn = None
-                if self.config.preprocess.enabled:
-                    pp = self.preprocessor
-                    gamma = self.config.preprocess.gamma
-
-                    pp_fn = lambda gray: pp.enhance(pp.denoise(gray), gamma)
-
-                run_golden_evaluation(
-                    model_id,
-                    self.detector,
-                    golden_dir=_resolve_path(self.config.eval.golden_dir),
-                    eval_dir=self.eval_dir,
-                    experiments_dir=_resolve_path(self.config.eval.experiments_dir),
-                    drift_baseline_path=_resolve_path(self.config.eval.drift_baseline_path),
-                    conf=self.config.detect.infer_conf,
-                    iou=self.config.detect.infer_iou,
-                    class_conf=self.config.detect.class_conf,
-                    preprocess_fn=pp_fn,
-                )
+                with EVAL_GATE:
+                    det = get_detector(
+                        "trained_yolo",
+                        model_uri=entry.uri,
+                        backend=self.config.model.backend,
+                        providers=self.config.model.providers,
+                        # 与生产推理同参（tiling/温度校准），指标才与线上可比
+                        tile_size=self.config.detect.tile_size,
+                        tile_overlap=self.config.detect.tile_overlap,
+                        tile_trigger_side=self.config.detect.tile_trigger_side,
+                        tile_max_count=self.config.detect.tile_max_count,
+                        tile_merge_iou=self.config.detect.tile_merge_iou,
+                        class_temperature=self._class_temperature_for(entry.uri),
+                    )
+                    run_golden_evaluation(
+                        model_id,
+                        det,
+                        golden_dir=_resolve_path(self.config.eval.golden_dir),
+                        eval_dir=self.eval_dir,
+                        experiments_dir=_resolve_path(self.config.eval.experiments_dir),
+                        drift_baseline_path=_resolve_path(self.config.eval.drift_baseline_path),
+                        conf=self.config.detect.infer_conf,
+                        iou=self.config.detect.infer_iou,
+                        class_conf=self.config.detect.class_conf,
+                        preprocess_fn=self._preprocess_fn(),
+                    )
             except FileNotFoundError as exc:
                 _LOG.warning("自动评估跳过（Golden Set 缺失）: %s", exc)
             except Exception as exc:  # noqa: BLE001 - 评估失败不应影响已成功的激活
@@ -732,6 +814,8 @@ class Registry:
                 "status": "ok",
                 "degraded": self.detector_degraded,
                 "app_version": "0.1.0",
+                # 访客模式开关（登录页据此显示/隐藏访客入口；无鉴权端点仅暴露布尔位）
+                "guest_mode": bool(self.config.auth.guest_mode),
                 "detector": self.detector_kind,
                 "detector_degraded": self.detector_degraded,
                 "sync": {
@@ -739,6 +823,10 @@ class Registry:
                     "pending": self.syncer.pending_count,
                 },
                 **self.model.status,
+                # C-2 信息泄漏收口：/health 属 open_routers（无鉴权），model.status
+                # 的 uri 是解析后的安装绝对路径——降为文件名，避免向本机任意进程
+                # 泄漏目录结构（active_version 已含指纹，可观测性不受损）。
+                "uri": Path(self.model.status.get("uri", "")).name,
                 # S-17 运行期回退可观测：degraded 标记已含于上，附回退计数/时间。
                 "resilience": {
                     "rollback_count": getattr(self.detector, "rollback_count", 0),
@@ -754,6 +842,12 @@ class Registry:
                     self.disk_watchdog.snapshot()
                     if self.disk_watchdog is not None
                     else {"enabled": False}
+                ),
+                # 本地大模型（llama.cpp）状态（未装配时 enabled=false 显式呈现）。
+                "llm": (
+                    self.llm_manager.status()
+                    if self.llm_manager is not None
+                    else {"enabled": False, "state": "disabled"}
                 ),
             }
 

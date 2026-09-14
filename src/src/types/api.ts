@@ -49,12 +49,195 @@ export interface HealthResponse {
   uri: string;
   backend: string;
   active_version: string | null;
+  /** 访客模式开关（登录页据此显示/隐藏「访客入口」按钮） */
+  guest_mode?: boolean;
 }
 
 /* ── 真实后端契约（镜像 backend/app/routers/report.py · records.py · review.py）── */
 
 /** 顶层视图（菜单栏/工具栏/标签页导航目标） */
-export type ViewId = "journey" | "archive" | "batch" | "device" | "viewer" | "std-eval";
+export type ViewId =
+  | "journey"
+  | "archive"
+  | "batch"
+  | "device"
+  | "viewer"
+  | "std-eval"
+  | "admin"
+  | "llm";
+
+/* ── 本地大模型（镜像 backend/app/routers/llm.py · infra/llm_registry.py）── */
+
+/** 模型来源：本机 GGUF 文件 / 已有 llama 兼容服务。 */
+export type LlmSource = "local" | "service";
+
+/** 引擎加载方式：managed=本进程拉起 llama-server；external=只连已有服务。 */
+export type LlmMode = "managed" | "external";
+
+/**
+ * 引擎状态。注意 `ready` 的判据是 `/health` 与 `/v1/models` **双双**可用，
+ * 不是只看前者——llama-server 的 /health 免鉴权，单看它会把「要密钥、
+ * 客户端根本用不了」的实例报成就绪（假绿）。
+ */
+export type LlmEngineState =
+  | "starting"
+  | "ready"
+  | "error"
+  | "unavailable"
+  | "auth_required"
+  | "disabled"
+  | "stopped";
+
+/** 显存可行性判定（backend/infra/gguf_meta.estimate_vram 的结论）。 */
+export interface LlmVramOut {
+  weights_bytes: number;
+  kv_cache_bytes: number | null;
+  overhead_bytes: number;
+  needed_bytes: number | null;
+  free_vram_bytes: number | null;
+  /** full_gpu / tight / partial_offload / infeasible / unknown */
+  verdict: string;
+  advice: string;
+  notes: string[];
+}
+
+/** 一条可选模型（本地 GGUF 或服务端已加载模型）。 */
+export interface LlmModelOut {
+  id: string;
+  name: string;
+  display_name: string;
+  source: LlmSource;
+  /** 本地模型的文件路径；服务条目为空串。 */
+  path: string;
+  /** 服务条目的端点；本地条目为空串。 */
+  endpoint: string;
+  size_bytes: number;
+  architecture: string;
+  quant: string;
+  /** **模型支持上限**，不是运行时 `-c` 实际值，两者不可混为一谈。 */
+  max_ctx: number | null;
+  is_embedding: boolean;
+  available: boolean;
+  error: string | null;
+  active: boolean;
+  /** 同一模型多副本时，`primary` 为择一保留的主条目。 */
+  primary: boolean;
+  duplicate_of: string | null;
+  duplicate_count: number;
+  /** 服务条目的显存判定为 null（不占本机额外显存）。 */
+  vram: LlmVramOut | null;
+  notes: string[];
+}
+
+/** 引擎（llama-server 进程 / 外部端点）运行状态。 */
+export interface LlmEngineOut {
+  enabled: boolean;
+  mode: LlmMode | string;
+  state: LlmEngineState | string;
+  endpoint: string;
+  /** true = 复用外部已在跑的实例，退出时不回收。 */
+  adopted: boolean;
+  error: string | null;
+  /** 面向用户的可执行指引（如「先启动本机 llama 服务」）。 */
+  advice: string | null;
+  exit_code?: number;
+}
+
+export interface LlmSelectionOut {
+  active_id: string | null;
+  mode: string | null;
+  endpoint: string;
+  model_path: string;
+}
+
+export interface LlmScanProgressOut {
+  dirs: number;
+  found: number;
+  current: string;
+}
+
+export interface LlmScanOut {
+  /** idle / running / done / cancelled / error */
+  state: string;
+  roots: string[];
+  declared_dirs: string[];
+  progress: LlmScanProgressOut;
+  found: number;
+  elapsed_sec: number | null;
+  error: string | null;
+}
+
+export interface LlmGpuOut {
+  name: string;
+  total_bytes: number;
+  free_bytes: number;
+}
+
+/** 已有 llama 兼容端点探测结果。 */
+export interface LlmServiceOut {
+  host: string;
+  port: number;
+  base_url: string;
+  openai_base_url: string;
+  reachable: boolean;
+  needs_auth: boolean;
+  health_ok: boolean;
+  models: string[];
+  error: string | null;
+}
+
+export interface LlmStatusOut {
+  engine: LlmEngineOut;
+  selection: LlmSelectionOut;
+  scan: LlmScanOut;
+  gpu: LlmGpuOut | null;
+  model_dirs: string[];
+  counts: { local: number; service: number; available: number; total: number };
+}
+
+export interface LlmModelsOut {
+  active_id: string | null;
+  selection: LlmSelectionOut;
+  gpu: LlmGpuOut | null;
+  scan: LlmScanOut;
+  /** 是否含"跑不动"的条目（前端不折叠、只标注）。 */
+  counts: {
+    local: number;
+    service: number;
+    available: number;
+    total: number;
+    infeasible: number;
+  };
+  services: LlmServiceOut[];
+  models: LlmModelOut[];
+}
+
+export interface LlmServicesOut {
+  services: LlmServiceOut[];
+}
+
+export interface LlmScanResponseOut {
+  ok: boolean;
+  started: boolean;
+  status: LlmScanOut;
+}
+
+export interface LlmSelectOut {
+  ok: boolean;
+  active: string | null;
+  mode: string;
+  endpoint: string;
+  model_path: string;
+  reloaded: boolean;
+  engine: LlmEngineOut;
+  warning: string | null;
+}
+
+export interface LlmDirsOut {
+  ok: boolean;
+  model_dirs: string[];
+  config_model_dirs: string[];
+}
 
 /** 底片印字（扫描日期/编号）识别结论快照（镜像 ReportOut.stamp / run_inspection 结果） */
 export interface FilmStampOut {
@@ -64,6 +247,76 @@ export interface FilmStampOut {
   confidence: number | null;
   need_review: boolean;
 }
+
+/**
+ * 《射线检测报告》汇总表补充信息字段（镜像 backend/domain/report/meta_fields.py，
+ * 键为前后端+PDF 填充三方约定；缺省/留空栏在报告中留空供手工补填）。
+ */
+export interface ReportMetaField {
+  key: string;
+  label: string;
+  /** 输入示例/占位提示 */
+  ph?: string;
+}
+
+export const REPORT_META_GROUPS: readonly { title: string; fields: readonly ReportMetaField[] }[] = [
+  {
+    title: "工程信息",
+    fields: [
+      { key: "client_unit", label: "委托单位" },
+      { key: "project_name", label: "工程名称" },
+      { key: "project_category", label: "工程类别/检测时机", ph: "如 锅炉安装/焊后" },
+      { key: "test_address", label: "检测地址", ph: "如 施工现场" },
+    ],
+  },
+  {
+    title: "工件概况",
+    fields: [
+      { key: "material", label: "材质", ph: "如 20G" },
+      { key: "part_no", label: "工件编号" },
+      { key: "groove_type", label: "坡口形式", ph: "如 V" },
+      { key: "surface_status", label: "表面状况", ph: "如 符合要求" },
+      { key: "weld_process", label: "焊接方式", ph: "如 GTAW" },
+      { key: "heat_treatment", label: "热处理状态" },
+    ],
+  },
+  {
+    title: "技术要求",
+    fields: [
+      { key: "tech_level", label: "检测技术等级", ph: "A / AB / B" },
+      { key: "accept_level", label: "合格级别（验收要求）", ph: "Ⅰ / Ⅱ / Ⅲ / Ⅳ" },
+      { key: "record_no", label: "原始记录编号" },
+      { key: "scatter_control", label: "散射线控制" },
+    ],
+  },
+  {
+    title: "检测器材及工艺参数",
+    fields: [
+      { key: "source_kind", label: "源种类", ph: "X射线 / γ源" },
+      { key: "device_no", label: "设备型号/编号" },
+      { key: "focus_size", label: "焦点尺寸", ph: "如 2.0×2.0mm" },
+      { key: "film_model", label: "胶片型号" },
+      { key: "film_size", label: "胶片规格", ph: "如 180×80mm" },
+      { key: "film_class", label: "胶片分类等级", ph: "如 C5" },
+      { key: "screen_way", label: "增感方式", ph: "如 Pb" },
+      { key: "iqi_position", label: "像质计摆放", ph: "源侧 / 胶片侧" },
+      { key: "screens", label: "前屏/后屏", ph: "如 0.03/0.03mm" },
+      { key: "technique", label: "透照方式", ph: "如 双壁双影" },
+      { key: "focus_distance", label: "F（焦距）" },
+      { key: "source_distance", label: "f（源至工件）" },
+      { key: "film_distance", label: "b（工件至胶片）" },
+      { key: "tube_voltage", label: "管电压", ph: "如 190kV" },
+      { key: "tube_current", label: "管电流", ph: "如 5mA" },
+      { key: "exposure_time", label: "曝光时间", ph: "如 1.5min" },
+      { key: "develop_method", label: "冲洗条件", ph: "手工 / 自动" },
+      { key: "developer", label: "显影液配方" },
+      { key: "develop_temp", label: "洗片温度", ph: "如 22℃" },
+    ],
+  },
+];
+
+/** 报告补充信息（键 → 用户填写值；进入 POST /report 的 report_meta 表单字段） */
+export type ReportMeta = Record<string, string>;
 
 /** POST /api/v1/report → ReportOut */
 export interface ReportOut {
@@ -80,9 +333,55 @@ export interface ReportOut {
   disposition_label: string | null;
   /** readonly：useJourney 的 readonly 深度只读化后保持可赋值 */
   disposition_actions: readonly string[];
+  /** 门禁降级/屏蔽告警（黑度越界/翻拍降级/印字区屏蔽等"为什么转人工"） */
+  warnings?: readonly string[];
+  /** 判定依据/熔断原因快照（与报告 PDF"判定依据"章节同源） */
+  basis?: readonly string[];
+  /** 底片黑度与门禁结论 */
+  density?: number | null;
+  density_ok?: boolean | null;
+  iqi_pass?: boolean | null;
+  /** IQI 验证明细 {type, achieved, required, grade} */
+  iqi_detail?: Record<string, unknown> | null;
+  /** 翻拍影像降级模式（绝对黑度不可测） */
+  photo_mode?: boolean;
+  /** 检测工作模式：balanced | recall_first | precision_first */
+  detect_mode?: string | null;
+  /** 印字区误检屏蔽数量（detect.mask_stamp_zone） */
+  stamp_zone_masked?: number;
+  /** 单张评片查重：与历史影像内容完全相同的记录摘要 */
+  duplicates?: readonly Record<string, unknown>[];
+  /** 报告补充信息回显（清洗后快照，报告页渲染样张式首页预览用） */
+  report_meta?: ReportMeta;
+  /** 首页预览所需表单回显（工件名称/焊缝编号/签字人/标准引用） */
+  workpiece_no?: string | null;
+  weld_no?: string | null;
+  signer?: string | null;
+  standard_ref?: string | null;
   pdf_url: string;
   /** 底片印字性质快照（重新生成模式无 fresh 识别结果时为 null） */
   stamp?: FilmStampOut | null;
+  /**
+   * AI 预筛级别标记：true 表示 joint_level 来自"底片质量未达标但用户显式请求
+   * 预筛"的通道，级别不具合规效力（basis 首条给出降级原因，界面须显著标识）。
+   */
+  grade_preliminary?: boolean;
+}
+
+/** GET /api/v1/report/{report_id}/narrative → ReportNarrativeOut */
+export interface ReportNarrativeOut {
+  report_id: string;
+  /** ok=已生成；disabled/unavailable/failed/empty=未生成（见 reason） */
+  status: "ok" | "disabled" | "unavailable" | "failed" | "empty";
+  /** 评片结论正文（status=ok 时有效） */
+  text: string;
+  /** 实际使用的本地模型标识（llama-server 为权重文件名） */
+  model: string;
+  /** 未生成原因（面向评片员的可读说明，非堆栈） */
+  reason: string;
+  elapsed_ms: number;
+  /** 强制免责声明：AI 撰述不构成等级/合格判定 */
+  disclaimer: string;
 }
 
 /** GET /api/v1/records → items[]（镜像 repository._image_to_dict） */
@@ -113,6 +412,8 @@ export interface RecordItem {
   stamp_orientation?: "normal" | "mirrored" | null;
   stamp_confidence?: number | null;
   stamp_need_review?: boolean;
+  /** 最新报告编号（档案行「查看报告」入口；旧版本后端无此字段） */
+  report_id?: string | null;
   created_at: string | null;
 }
 
@@ -151,6 +452,8 @@ export interface ReviewOut {
   stage: string;
   need_review: boolean;
   review_count: number;
+  /** 人工确认缺陷是否成功自动回流训练池（false 时详见后端日志） */
+  training_pool_synced: boolean;
 }
 
 /**
@@ -169,7 +472,7 @@ export const PIPELINE_STAGES: readonly string[] = [
 
 /* ── 主动学习（ · POST /api/v1/active/…）── */
 
-/** 高价值样本候选（主动学习采样结果） */
+/** 高价值样本候选（主动学习采样结果，POST /active/sample 响应） */
 export interface ActiveCandidate {
   detection_id: string;
   class_id: number;
@@ -597,5 +900,27 @@ export interface AccountOut {
 /** POST /auth/bootstrap 响应（引导窗口，私钥一次性下发） */
 export interface BootstrapOut extends AccountOut {
   private_key: string | null;
+}
+
+/* ── C-14 受控导出（POST /api/v1/export/…）── */
+
+/** 导出申请（POST /export/requests 响应 / GET /export/requests/{id}） */
+export interface ExportRequestOut {
+  request_id: string;
+  subject: string;
+  reason: string | null;
+  requested_by: string;
+  status: string; // pending | approved | rejected | ...
+  decided_by: string | null;
+  decided_at: string | null;
+  token_expires_at: string | null;
+  used_at: string | null;
+  created_at: string | null;
+}
+
+/** POST /export/requests/{id}/token 响应：一次性令牌（明文仅本次返回） */
+export interface ExportTokenOut {
+  token: string;
+  expires_in_sec: number;
 }
 

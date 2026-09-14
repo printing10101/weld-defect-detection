@@ -13,7 +13,7 @@ import uuid
 from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from backend.infra.db import Base, CarrierRecord, ExportRequestRecord, create_db_engine
@@ -234,18 +234,27 @@ class ExportStore:
             return [self._to_dict(r) for r in session.scalars(stmt)]
 
     def decide(self, request_id: str, *, decided_by: str, approved: bool) -> dict[str, Any]:
-        """保密员批准/拒绝（仅 pending 态可决策）。"""
+        """保密员批准/拒绝（仅 pending 态可决策）。
+
+        check-then-act 竞态收口：读-改-写模式下两个并发事务都能读到 pending
+        再各自提交（双批准）；改为条件 UPDATE（参数化占位符，按受影响行数
+        判定），仅一个事务能把 pending 推离 pending。
+        """
         status = "approved" if approved else "rejected"
         with Session(self._engine) as session, session.begin():
             rec = session.get(ExportRequestRecord, request_id)
             if rec is None:
                 raise KeyError(f"export request not found: {request_id}")
-            if rec.status != "pending":
+            res = session.execute(
+                text(
+                    "UPDATE export_requests SET status = :st, decided_by = :by, "
+                    "decided_at = :at WHERE id = :rid AND status = 'pending'"
+                ),
+                {"st": status, "by": decided_by, "at": _now(), "rid": request_id},
+            )
+            if res.rowcount == 0:
                 raise ValueError(f"export request status is {rec.status!r}, expected 'pending'")
-            rec.status = status
-            rec.decided_by = decided_by
-            rec.decided_at = _now()
-            session.flush()
+            session.refresh(rec)
             return self._to_dict(rec)
 
     def issue_token(self, request_id: str, *, token_hash: str, ttl_sec: int) -> dict[str, Any]:
@@ -262,18 +271,30 @@ class ExportStore:
             return self._to_dict(rec)
 
     def consume_token(self, token_hash: str) -> dict[str, Any] | None:
-        """核销一次性令牌：命中且未过期未使用 → 标记 consumed 并返回申请行；否则 None。"""
+        """核销一次性令牌：命中且未过期未使用 → 标记 consumed 并返回申请行；否则 None。
+
+        令牌双花防护：used_at 置位走条件 UPDATE（WHERE used_at IS NULL，参数化
+        占位符），并发核销同一令牌时仅一个事务受影响行数 >0，其余返回 None。
+        """
         with Session(self._engine) as session, session.begin():
             rec = session.scalars(
                 select(ExportRequestRecord).where(ExportRequestRecord.token_hash == token_hash)
             ).first()
-            if rec is None or rec.used_at is not None:
+            if rec is None:
                 return None
-            if rec.token_expires_at is None or rec.token_expires_at < _now():
+            now = _now()
+            if rec.token_expires_at is None or rec.token_expires_at < now:
                 return None
-            rec.used_at = _now()
-            rec.status = "consumed"
-            session.flush()
+            res = session.execute(
+                text(
+                    "UPDATE export_requests SET used_at = :at, status = 'consumed' "
+                    "WHERE id = :rid AND used_at IS NULL"
+                ),
+                {"at": now, "rid": rec.id},
+            )
+            if res.rowcount == 0:
+                return None
+            session.refresh(rec)
             return self._to_dict(rec)
 
     @staticmethod

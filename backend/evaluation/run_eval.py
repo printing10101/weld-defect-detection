@@ -31,6 +31,7 @@ from backend.evaluation.harness import (
     detection_metrics,
     golden_set_fingerprint,
     save_eval_report,
+    shape_fidelity_metrics,
 )
 from backend.evaluation.tracking import ExperimentTracker, build_model_card
 
@@ -117,6 +118,31 @@ def _aggregate(per_image: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _aggregate_shape_fidelity(per_image: list[dict[str, Any]]) -> dict[str, Any]:
+    """逐图形状保真按"匹配对数"加权聚合（不能简单平均图均值）。
+
+    每图返回的是该图内匹配对的均值；不同图匹配对数量差异很大，直接对图取平均
+    会让只有 1 对匹配的图与 20 对的图等权。故按 n_matched 加权。
+    全无匹配时各指标为 None（与单图语义一致，避免用 0 冒充"完美"）。
+    """
+    tot = sum(int(m.get("n_matched", 0)) for m in per_image)
+    if tot == 0:
+        return {"n_matched": 0, "center_err": None, "scale_err": None, "aspect_err": None}
+    out: dict[str, Any] = {"n_matched": tot}
+    for key in ("center_err", "scale_err", "aspect_err"):
+        num = 0.0
+        den = 0
+        for m in per_image:
+            v = m.get(key)
+            n = int(m.get("n_matched", 0))
+            if v is None or n == 0:
+                continue
+            num += float(v) * n
+            den += n
+        out[key] = round(num / den, 4) if den else None
+    return out
+
+
 def _build_baseline(samples: list[dict[str, Any]]) -> dict[str, Any]:
     """从一批样本聚合漂移基线（尺寸中位数/置信度均值/类别占比）。"""
     sizes = [float(s.get("L_mm", 0.0)) for s in samples]
@@ -162,6 +188,7 @@ def run_golden_evaluation(
         raise FileNotFoundError(f"golden set empty: {golden_dir}")
 
     per_image: list[dict[str, Any]] = []
+    per_image_shape: list[dict[str, Any]] = []
     all_samples: list[dict[str, Any]] = []
     for img_path, targets in pairs:
         gray, _ = load_image(img_path)
@@ -176,6 +203,8 @@ def run_golden_evaluation(
             for d in detections
         ]
         per_image.append(detection_metrics(preds, targets))
+        # 形状保真：补 mAP@0.5 的边界/长宽比盲区（诊断性，不进回归门禁）
+        per_image_shape.append(shape_fidelity_metrics(preds, targets))
         for d in detections:
             all_samples.append(
                 {
@@ -186,12 +215,14 @@ def run_golden_evaluation(
             )
 
     metrics = _aggregate(per_image)
+    shape_fidelity = _aggregate_shape_fidelity(per_image_shape)
     golden_fingerprint = golden_set_fingerprint(golden_dir)
     report_path = save_eval_report(
         model_id,
         metrics,
         eval_dir=eval_dir,
         golden_fingerprint=golden_fingerprint,
+        extra={"shape_fidelity": shape_fidelity},
     )
 
     # ---- 漂移基线：首跑建立，后续比较 ----
@@ -226,15 +257,21 @@ def run_golden_evaluation(
         "image_count": len(pairs),
         "class_ratio": class_ratio_now,
     }
+    # 模型卡指标：在 mAP/召回/精确之上附形状保真（嵌套键，平铺读取方不受影响）。
+    card_metrics = {**metrics, "shape_fidelity": shape_fidelity}
     model_card = build_model_card(
         model_id=model_id,
         version=model_id.split("::")[-1] if "::" in model_id else model_id,
-        metrics=metrics,
+        metrics=card_metrics,
         data_summary=data_summary,
         limitations=[
             "仅基于固定 Golden Set 评估，不代表全部工况泛化；",
             "小样本/少标注时 mAP 不稳定，须结合人工复核；",
             "安全关键缺陷（裂纹/未熔合/未焊透）零容忍，模型未检出即漏判风险。",
+            (
+                "shape_fidelity 为诊断指标（非门禁）：aspect_err 偏大意味着 §5.4 形状"
+                "归类与 §6.2 评级可能失真，mAP 高不代表形状可信。"
+            ),
         ],
         ethics=[
             "本系统为辅助判定，最终级别须由持证评片员确认；",
@@ -247,19 +284,26 @@ def run_golden_evaluation(
         params={"model_id": model_id, "golden_fingerprint": golden_fingerprint},
     )
     tracker.log_metrics(run_id, {k: v for k, v in metrics.items() if isinstance(v, (int, float))})
+    # shape_fidelity 的标量一并入 Run（None 会被 MLflow 语义拒绝，跳过）
+    tracker.log_metrics(
+        run_id,
+        {f"shape_{k}": float(v) for k, v in shape_fidelity.items() if isinstance(v, (int, float))},
+    )
     tracker.log_artifact(run_id, str(report_path))
 
     _LOG.info(
-        "golden eval model=%s mAP50=%.4f gt=%d drift=%s run=%s",
+        "golden eval model=%s mAP50=%.4f gt=%d drift=%s run=%s aspect_err=%s",
         model_id,
         metrics["mAP50"],
         metrics["gt_total"],
         drift["drift"],
         run_id,
+        shape_fidelity.get("aspect_err"),
     )
     return {
         "model_id": model_id,
         "metrics": metrics,
+        "shape_fidelity": shape_fidelity,
         "golden_fingerprint": golden_fingerprint,
         "drift": drift,
         "model_card": model_card,

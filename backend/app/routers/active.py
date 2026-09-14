@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from backend.app.dependencies import Registry, get_registry
 from backend.domain.active_learning import (
@@ -57,6 +57,18 @@ class ExportIn(BaseModel):
     # 人工复核改判类别：{detection_id: 新 class_id}（如误检气孔改判裂纹）
     class_overrides: dict[str, int] = {}
 
+    @field_validator("class_overrides")
+    @classmethod
+    def _check_override_class(cls, v: dict[str, int]) -> dict[str, int]:
+        # 越界类别若入库会直写训练池标注、污染重训数据（defects 本体在
+        # _to_detection 处另行校验，此处覆盖同样必须卡住）。
+        for k, cid in v.items():
+            if not 0 <= int(cid) < len(DefectClass):
+                raise ValueError(
+                    f"class_overrides[{k}] 类别越界: {cid}（0~{len(DefectClass) - 1}）"
+                )
+        return v
+
 
 class ExportOut(BaseModel):
     label_file: str
@@ -73,7 +85,12 @@ class PoolOut(BaseModel):
 
 
 def _pool_dir(reg: Registry) -> Path:
-    return Path(reg.config.paths.data_dir) / "active" / "training_pool"
+    # 经 resolve_config_path 锚定安装根（并遵循 data_dir 覆盖）：直接拼
+    # config.paths.data_dir 是 CWD 锚定，打包/Tauri 启动（CWD≠安装根）时
+    # 训练池会落错目录树，与 FilePoolStore/训练脚本的取数约定分裂。
+    from backend.infra.config import resolve_config_path
+
+    return resolve_config_path(str(Path(reg.config.paths.data_dir) / "active" / "training_pool"))
 
 
 def _pool_store(reg: Registry) -> FilePoolStore:

@@ -3,8 +3,12 @@
  * 破坏性操作二次确认对话框（GB/T 25000.51 易用性-用户差错防御性）。
  * 供删除复核缺陷、取消批次等不可逆动作在执行前确认；
  * 纯前端组件，不依赖原生 dialog（Tauri WebView 无 window.confirm 保障）。
+ * 焦点管理：打开即聚焦「取消」（危险操作默认安全侧），ESC 关闭，Tab 在面板内循环，
+ * 避免 Enter/Tab 泄漏到触发按钮再次启动危险路径。
  */
-defineProps<{
+import { nextTick, onBeforeUnmount, ref, watch } from "vue";
+
+const props = defineProps<{
   open: boolean;
   title: string;
   message: string;
@@ -14,6 +18,46 @@ defineProps<{
 }>();
 
 const emit = defineEmits<{ confirm: []; cancel: [] }>();
+
+const panel = ref<HTMLDivElement | null>(null);
+const cancelBtn = ref<HTMLButtonElement | null>(null);
+
+function onKeydown(e: KeyboardEvent): void {
+  if (!props.open) return;
+  if (e.key === "Escape") {
+    e.stopPropagation();
+    emit("cancel");
+    return;
+  }
+  if (e.key === "Tab" && panel.value) {
+    // 简单焦点陷阱：面板内循环
+    const focusables = panel.value.querySelectorAll<HTMLElement>("button");
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+}
+
+watch(
+  () => props.open,
+  (open) => {
+    if (open) {
+      window.addEventListener("keydown", onKeydown, true);
+      void nextTick(() => cancelBtn.value?.focus());
+    } else {
+      window.removeEventListener("keydown", onKeydown, true);
+    }
+  },
+);
+
+onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown, true));
 </script>
 
 <template>
@@ -24,6 +68,7 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>();
       @click.self="emit('cancel')"
     >
       <div
+        ref="panel"
         class="cd-panel"
         role="alertdialog"
         aria-modal="true"
@@ -37,6 +82,7 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>();
         </p>
         <div class="cd-foot">
           <button
+            ref="cancelBtn"
             type="button"
             class="cd-btn"
             @click="emit('cancel')"

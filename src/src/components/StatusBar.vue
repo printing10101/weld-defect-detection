@@ -3,11 +3,13 @@
  *  就绪 | 后端连接状态 | 模型状态 | 记录总数 | 操作员 | 系统时间。
  *  后端状态复用 App.vue 的 BACKEND_UP/DOWN 窗口事件；时间每秒刷新。 */
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import { BACKEND_DOWN_EVENT, BACKEND_UP_EVENT } from "../services/api";
+import { BACKEND_DOWN_EVENT, BACKEND_UP_EVENT, apiHostLabel } from "../services/api";
 
 const backend = ref<"connecting" | "up" | "down">("connecting");
 const modelStatus = ref("加载中");
 const now = ref(new Date());
+/** 服务地址随配置解析（此前硬编码 127.0.0.1:18773，改 VITE_API_BASE 即误导）。 */
+const host = apiHostLabel();
 let timer: number | undefined;
 
 function onUp(): void {
@@ -46,7 +48,7 @@ function fmtTime(d: Date): string {
       {{ backend === "up" ? "系统就绪" : backend === "down" ? "推理服务未连接" : "正在连接推理服务" }}
     </div>
     <div class="cell sep">
-      服务端 127.0.0.1:18773
+      服务端 {{ host }}
     </div>
     <div class="cell sep">
       评定模型：<span

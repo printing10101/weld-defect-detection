@@ -28,7 +28,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import tempfile
 import threading
 import zipfile
@@ -126,16 +125,18 @@ def create_backup(
         }
         (stage / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
-        # 写入 zip（压缩），再把 zip 拷到目标路径；用临时文件避免半包落到最终名。
-        fd, tmp_zip = tempfile.mkstemp(suffix=".zip", prefix="scan_backup_", dir=str(stage))
+        # 写入 zip（压缩），再把 zip 落到目标路径。临时文件建在目标同目录：
+        # mkstemp 在 %TEMP%（stage）时与目标常跨卷，shutil.move 退化为
+        # copy2+unlink（非原子），崩溃即在最终名留半包；同目录 + os.replace
+        # 保证原子覆盖（Windows/POSIX 语义一致）。
+        fd, tmp_zip = tempfile.mkstemp(
+            suffix=".zip", prefix="scan_backup_", dir=str(archive_path.parent)
+        )
         os.close(fd)
-        Path(tmp_zip).unlink()
         with zipfile.ZipFile(tmp_zip, "w", zipfile.ZIP_DEFLATED) as zf:
             for f in stage.iterdir():
-                if f.name == os.path.basename(tmp_zip):
-                    continue
                 zf.write(f, arcname=f.name)
-        shutil.move(tmp_zip, archive_path)
+        os.replace(tmp_zip, archive_path)
 
     return {
         "manifest": manifest,
@@ -193,7 +194,9 @@ def restore_backup(archive_path: Path, destinations: dict[str, Path]) -> Manifes
                 tmp_path.write_bytes(data)
                 if _hash_bytes(tmp_path.read_bytes(), algo) != manifest["entries"][key]["sha256"]:
                     raise ValueError(f"restore verification failed: {key}")
-                shutil.move(str(tmp_path), dest)
+                # os.replace：同卷原子覆盖（shutil.move 对已存在目标在 Windows
+                # 上退化为 copy2+unlink，恢复中途崩溃会留半写的 DB 文件）。
+                os.replace(tmp_path, dest)
             finally:
                 if tmp_path.exists():
                     tmp_path.unlink()

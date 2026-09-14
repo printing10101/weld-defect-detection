@@ -311,3 +311,101 @@ def test_batch_manager_prune_keeps_retryable_snapshots(tmp_path: Path) -> None:
         assert len(names) == bm._max_snapshot_files
     finally:
         bm.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# 暂停/恢复（派发闸门）：pending 任务退回待派发列表，恢复后重新入队
+# ---------------------------------------------------------------------------
+
+
+class _GatePipeline:
+    """每个任务都阻塞在 release 事件上：让「暂停发生在任务之间」可被确定性构造。"""
+
+    def __init__(self) -> None:
+        import threading
+
+        self.release = threading.Event()
+
+    def run_inspection(self, **options: Any):
+        self.release.wait(timeout=10.0)
+        return {"image_id": str(options["image_path"]), "report_id": "r1"}
+
+
+def _wait_status(bm: BatchManager, batch_id: str, pred, timeout_s: float = 15.0) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_s
+    last = bm.status(batch_id)
+    while time.monotonic() < deadline:
+        last = bm.status(batch_id)
+        assert last is not None
+        if pred(last):
+            return last
+        time.sleep(0.05)
+    raise AssertionError(f"等待批次状态超时: {last}")
+
+
+def _submit_gated(tmp_path: Path, n: int) -> tuple[BatchManager, str, _GatePipeline]:
+    gate = _GatePipeline()
+    bm = BatchManager(
+        lambda: gate, workers=1, per_image_estimate_sec=0.1, batch_dir=tmp_path / "batch"
+    )
+    items = []
+    for i in range(n):
+        p = tmp_path / f"g{i}.png"
+        p.write_bytes(b"x")
+        items.append(BatchItem(p))
+    batch_id = bm.submit(items)
+    return bm, batch_id, gate
+
+
+def test_batch_pause_holds_pending_and_resume_finishes(tmp_path: Path) -> None:
+    """暂停：running 任务自然结束，pending 退回待派发；恢复后全部完成。"""
+    bm, batch_id, gate = _submit_gated(tmp_path, 4)
+    try:
+        # 等 task1 真正进入 running（阻塞在 gate 上）
+        _wait_status(bm, batch_id, lambda s: s["tasks"][0]["status"] == "running")
+        assert bm.pause(batch_id) is True
+        gate.release.set()
+        # running 任务完成后，其余任务被暂停闸门拦回：无 running、done=1、paused
+        settled = _wait_status(
+            bm,
+            batch_id,
+            lambda s: (
+                s["status"] == "paused"
+                and s["done"] == 1
+                and all(t["status"] == "pending" for t in s["tasks"][1:])
+            ),
+        )
+        assert settled["cancelled"] == 0
+        resumed = bm.resume(batch_id)
+        assert resumed == 3
+        finished = _wait_finished(bm, batch_id)
+        assert finished["done"] == 4
+    finally:
+        bm.shutdown()
+
+
+def test_batch_cancel_while_paused_converges(tmp_path: Path) -> None:
+    """暂停中取消：退回任务被直接标 cancelled，批次收敛 finished（不悬挂）。"""
+    bm, batch_id, gate = _submit_gated(tmp_path, 4)
+    try:
+        _wait_status(bm, batch_id, lambda s: s["tasks"][0]["status"] == "running")
+        assert bm.pause(batch_id) is True
+        gate.release.set()
+        _wait_status(
+            bm,
+            batch_id,
+            lambda s: (
+                s["status"] == "paused"
+                and s["done"] == 1
+                and all(t["status"] == "pending" for t in s["tasks"][1:])
+            ),
+        )
+        assert bm.cancel(batch_id) is True
+        finished = _wait_status(bm, batch_id, lambda s: s["status"] == "finished")
+        assert finished["done"] == 1
+        assert finished["cancelled"] == 3
+        # 取消后 resume 是 no-op（无退回任务、状态不再翻转）
+        assert bm.resume(batch_id) == 0
+        assert bm.status(batch_id)["status"] == "finished"
+    finally:
+        bm.shutdown()

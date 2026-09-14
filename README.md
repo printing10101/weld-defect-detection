@@ -17,7 +17,10 @@ TDR/底片误报率）、混淆矩阵、L1–L4 系统分级、漏检/误检/误
 - **数据脱敏**：DICOM 患者标签与 JPEG EXIF 清理 + 隐私残留审计
   （`python -m backend.training.anonymize_images`，DB50/T 1807 §8.3.2）
 - **检测与评级**：YOLO/ONNX 推理，7 类缺陷（气孔/夹渣/未焊透/未熔合/裂纹/咬边/内凹），
-  圆形缺陷点数法、条形缺陷限值、综合评级，多标准可扩展
+  圆形缺陷点数法、条形缺陷限值、综合评级，多标准可扩展；
+  检测工作模式三档（balanced / recall_first / precision_first，高检出/高准确双档）
+- **缺陷图谱库**：人工筛选典型缺陷样本（局部裁图，支持加密副本；类别/级别/
+  工件号检索），供培训、比对与复核参考；发布/撤销全程审计留痕
 - **人工复核**：逐缺陷/综合级别复核 + κ 一致性 + 仲裁；缺陷增删、类型修改、
   位置调整全程审计留痕
 - **可解释性**：torch 后端真 Grad-CAM 类激活热力图；ONNX 部署路径自动回退
@@ -27,9 +30,10 @@ TDR/底片误报率）、混淆矩阵、L1–L4 系统分级、漏检/误检/误
 - **训练侧**：数据集构建（分层划分 + 互斥校验）、三人标注一致性仲裁、
   主动学习、伪标签回流
 - **部署后评估闭环**（`python -m backend.training.post_deploy_eval`）：部署权重
-  在带标注评估集上自动产出实测 mAP/逐类 AP/召回/精确 + ECE 置信度校准 +
-  回归对比，落盘评估报告 + 模型卡（`data/model_cards/`）+ 实验记录
-  （`data/experiments/experiments.jsonl`）；评估域如实标注 synthetic/real
+  在带标注评估集上自动产出实测 mAP/逐类 AP/召回/精确 + POD 按尺寸检出概率曲线
+  （Wilson 置信区间）+ ECE 置信度校准 + 回归对比，落盘评估报告 + 模型卡
+  （`data/model_cards/`）+ 实验记录（`data/experiments/experiments.jsonl`）；
+  评估域如实标注 synthetic/real
 - **评价体系**：DB50/T 1807-2025 全套指标与记录表（`python -m backend.evaluation.run_std_eval`）；
   规格专项指标——量化一致性（Bland–Altman + 相对误差≤5%）、评级一致率（≥95% 且 κ≥0.8）、
   置信度校准（ECE≤0.05）（`python -m backend.evaluation.run_spec_eval`）

@@ -1,15 +1,15 @@
 """进程级外联防护（C-16 零外联检测）。
 
 单机纯离线部署的核心软件侧防线：在进程内 monkeypatch
-``socket.socket.connect`` 与 ``urllib.request.OpenerDirector.open``，
-对每次外联目的地址做白名单校验——
+``socket.socket.connect`` / ``socket.socket.connect_ex`` 与
+``urllib.request.OpenerDirector.open``，对每次外联目的地址做白名单校验——
 
 - 本机回环（127.0.0.0/8、::1/128）恒放行（前后端 / 标注器 / TestClient
   通信必需，代码级保证、不随配置丢失）；
 - 其余目的地址须落在 ``egress.allow_cidrs`` 登记的网段内（默认空）；
-- 非白名单目的 → 阻断（抛 :class:`EgressBlockedError`，原 connect/open
-  不会执行）+ 安全告警入库（alerts，level=high）+ 主审计链留痕
-  （action=egress_blocked）。
+- 非白名单目的 → 阻断（connect 抛 :class:`EgressBlockedError`；connect_ex
+  保持非异常语义返回 ECONNREFUSED；原 open 不执行）+ 安全告警入库
+  （alerts，level=high）+ 主审计链留痕（action=egress_blocked）。
 
 装配点在 app 启动（main.lifespan，任何请求处理前）；进程级、幂等——
 重复装配只更新白名单/开关，不重复打补丁。``egress.enabled=false`` 时
@@ -26,6 +26,7 @@
 
 from __future__ import annotations
 
+import errno
 import ipaddress
 import logging
 import socket
@@ -144,6 +145,7 @@ def set_block_recorder(recorder: Callable[[str, int | None, str], None]) -> None
 
 
 _ORIG_SOCKET_CONNECT = socket.socket.connect
+_ORIG_SOCKET_CONNECT_EX = socket.socket.connect_ex
 _ORIG_OPENER_OPEN = urllib.request.OpenerDirector.open
 
 
@@ -163,6 +165,19 @@ def _guarded_socket_connect(sock_self, address):
     if parsed is not None and _guard is not None:
         _guard.check(parsed[0], parsed[1], context="socket")
     return _ORIG_SOCKET_CONNECT(sock_self, address)
+
+
+def _guarded_socket_connect_ex(sock_self, address):
+    # connect_ex 是 connect 的非异常式变体（部分客户端库用它做连接探测），
+    # 不同样纳管即是"零外联"白名单的旁路。保持 connect_ex 语义：被拦时
+    # 返回错误码（ECONNREFUSED）而非抛异常。
+    parsed = _address_host(address)
+    if parsed is not None and _guard is not None:
+        try:
+            _guard.check(parsed[0], parsed[1], context="socket_ex")
+        except Exception:  # noqa: BLE001 - 外联拦截 fail-closed：校验异常按拒绝连接处理
+            return errno.ECONNREFUSED
+    return _ORIG_SOCKET_CONNECT_EX(sock_self, address)
 
 
 def _guarded_opener_open(opener_self, fullurl, data=None, timeout=_SOCK_DEFAULT_TIMEOUT):
@@ -187,9 +202,10 @@ def configure_egress_guard(enabled: bool, allow_cidrs: list[str]) -> EgressGuard
     with _guard_lock:
         if not _patched:
             socket.socket.connect = _guarded_socket_connect  # type: ignore[method-assign]
+            socket.socket.connect_ex = _guarded_socket_connect_ex  # type: ignore[method-assign]
             urllib.request.OpenerDirector.open = _guarded_opener_open  # type: ignore[method-assign]
             _patched = True
-            _LOG.info("egress guard patched (socket.connect / OpenerDirector.open)")
+            _LOG.info("egress guard patched (socket.connect(.ex) / OpenerDirector.open)")
         _guard = EgressGuard(allow_cidrs) if enabled else None
         if _guard is None:
             _LOG.warning("egress guard 已按配置关闭（egress.enabled=false）——仅建议单机调试使用")

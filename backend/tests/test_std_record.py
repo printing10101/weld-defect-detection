@@ -183,13 +183,16 @@ def client(tmp_path: Path, monkeypatch, eval_result) -> TestClient:
         return p
 
     app.dependency_overrides[_auth.get_principal] = _fake_principal
-    # 隔离：评价产物/人员记录都指向 tmp_path
-    # 隔离：评价产物/人员记录用环境变量指向 tmp（生产代码已废除 CWD 相对解析，
-    # chdir 隔离不再有效——这正是本次路径统一要消除的语义）
+    # 隔离：直接 override Registry 单例的配置属性——生产端点经 reg.config
+    # 读取（DI 口径，与 _auth_principal_override 同理可测）；env 只影响请求期
+    # load_config()，该口径已随配置读取统一废除。
+    from backend.app.dependencies import get_registry
+
+    reg = get_registry()
     eval_dir = tmp_path / "data" / "eval"
     eval_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("SCAN_STD_EVAL__EVAL_DIR", str(eval_dir))
-    monkeypatch.setenv("SCAN_STD_EVAL__PERSONNEL_PATH", str(eval_dir / "std_personnel.json"))
+    monkeypatch.setattr(reg.config.std_eval, "eval_dir", str(eval_dir))
+    monkeypatch.setattr(reg.config.std_eval, "personnel_path", str(eval_dir / "std_personnel.json"))
     eval_json = eval_dir / "std_eval.json"
     eval_json.write_text(
         json.dumps(

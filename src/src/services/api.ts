@@ -5,14 +5,15 @@
  */
 import type {
   ActiveExportIn,
+  AccountOut,
   BootstrapOut,
   ChallengeOut,
   LoginOut,
   MeOut,
   ActiveExportOut,
   ActivePoolOut,
-  ActiveSampleIn,
-  ActiveSampleOut,
+  ExportRequestOut,
+  ExportTokenOut,
   BatchRetryOut,
   BatchStatusOut,
   BatchSubmitOut,
@@ -24,9 +25,16 @@ import type {
   DeviceIn,
   DeviceOut,
   HealthResponse,
+  LlmDirsOut,
+  LlmModelsOut,
+  LlmScanResponseOut,
+  LlmSelectOut,
+  LlmServicesOut,
+  LlmStatusOut,
   RecordsResponse,
   ReportOut,
   ReportDetectionsOut,
+  ReportNarrativeOut,
   ReviewDefectMutateOut,
   ReviewIn,
   ReviewOut,
@@ -42,14 +50,28 @@ import { clearToken, getToken } from "./authToken";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "/api/v1";
 
-/** 后端统一错误包：{error:{code,message,detail}} 或 HTTPException 的 {detail:{code,message}}。 */
+/** 服务地址（状态栏展示用）：把配置的 BASE 解析成可读的 host:port。 */
+export function apiHostLabel(): string {
+  if (/^https?:\/\//.test(BASE)) {
+    try {
+      return new URL(BASE).host;
+    } catch {
+      /* fallthrough */
+    }
+  }
+  return `${window.location.host || "127.0.0.1"}（同源代理）`;
+}
+
+/** 后端统一错误包：{error:{code,message,detail}} 或 HTTPException 的 {detail:{code,message}}。
+ *  message 面向操作员直接展示（纯中文文案），机器可读的 code 走独立字段，
+ *  不再拼进 message（此前界面会出现「HTTP_ERROR: HTTP 500」这类技术前缀）。 */
 export class ApiRequestError extends Error {
   readonly status: number;
   readonly code: string;
   readonly detail: unknown;
 
   constructor(status: number, code: string, message: string, detail: unknown) {
-    super(`${code}: ${message}`);
+    super(message);
     this.name = "ApiRequestError";
     this.status = status;
     this.code = code;
@@ -68,6 +90,8 @@ export const AUTH_UNAUTHORIZED_EVENT = "auth:unauthorized";
 const REQUEST_TIMEOUT_MS = 30_000;
 /** 上传/批量/报告生成：大底片或百张批量易超 30s，单独放宽超时。 */
 const UPLOAD_TIMEOUT_MS = 120_000;
+/** 本地大模型评片结论：本地 4B 模型纯 CPU 推理可能数十秒（GPU 通常 <10s），再放宽一档。 */
+const NARRATIVE_TIMEOUT_MS = 180_000;
 /** 仅对「后端不可达（连接被拒）」做指数退避重试；超时与 HTTP 错误不重试（避免重复提交）。 */
 const MAX_NETWORK_RETRIES = 2;
 const RETRY_BASE_MS = 400;
@@ -114,35 +138,51 @@ async function rawRequest<T>(path: string, init: RequestInit, timeoutMs = REQUES
   // 任意成功响应（含 4xx/5xx 已被上层转换为错误前）都说明后端在线，清除离线态
   window.dispatchEvent(new CustomEvent(BACKEND_UP_EVENT));
 
-  if (!res.ok) {
-    let code = "HTTP_ERROR";
-    let message = res.statusText || `HTTP ${res.status}`;
-    let detail: unknown = null;
-    try {
-      const body = (await res.json()) as {
-        error?: { code?: string; message?: string; detail?: unknown };
-        detail?: { code?: string; message?: string };
-      };
-      if (body?.error) {
-        code = body.error.code ?? code;
-        message = body.error.message ?? message;
-        detail = body.error.detail ?? null;
-      } else if (body?.detail) {
-        // HTTPException 默认包体为 {detail:{code,message}}（401/403 等）
-        code = body.detail.code ?? code;
-        message = body.detail.message ?? message;
-      }
-    } catch {
-      /* 非 JSON 响应：保留 statusText */
-    }
-    if (res.status === 401) {
-      // 会话无效/过期（C-07 空闲超时由后端判定）：清除本地登录态并通知 App 跳转
-      clearToken();
-      window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT));
-    }
-    throw new ApiRequestError(res.status, code, message, detail);
-  }
+  if (!res.ok) await throwForResponse(res);
   return (await res.json()) as T;
+}
+
+/** 统一错误包解析（rawRequest / downloadExportBlob 共用）：非 2xx 抛 ApiRequestError。 */
+async function throwForResponse(res: Response): Promise<never> {
+  const statusTextZh: Record<number, string> = {
+    400: "请求参数有误",
+    401: "登录状态已失效，请重新登录",
+    403: "当前账号无权限执行此操作",
+    404: "请求的资源不存在",
+    409: "与当前状态冲突，请刷新后重试",
+    413: "文件超过大小上限",
+    422: "提交的内容未通过校验",
+    429: "请求过于频繁，请稍后再试",
+    500: "服务内部错误",
+    502: "推理服务不可用",
+    503: "服务暂不可用，正在处理中",
+  };
+  let code = "HTTP_ERROR";
+  let message = statusTextZh[res.status] ?? `请求失败（HTTP ${res.status}）`;
+  let detail: unknown = null;
+  try {
+    const body = (await res.json()) as {
+      error?: { code?: string; message?: string; detail?: unknown };
+      detail?: { code?: string; message?: string };
+    };
+    if (body?.error) {
+      code = body.error.code ?? code;
+      message = body.error.message ?? message;
+      detail = body.error.detail ?? null;
+    } else if (body?.detail) {
+      // HTTPException 默认包体为 {detail:{code,message}}（401/403 等）
+      code = body.detail.code ?? code;
+      message = body.detail.message ?? message;
+    }
+  } catch {
+    /* 非 JSON 响应：保留上方中文兜底文案 */
+  }
+  if (res.status === 401) {
+    // 会话无效/过期（C-07 空闲超时由后端判定）：清除本地登录态并通知 App 跳转
+    clearToken();
+    window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT));
+  }
+  throw new ApiRequestError(res.status, code, message, detail);
 }
 
 /** JSON POST 样板统一出口（headers/body 构造收敛一处）。 */
@@ -198,12 +238,20 @@ export function createReport(form: FormData): Promise<ReportOut> {
 export function listRecords(params?: {
   level?: string;
   workpiece?: string;
+  classId?: number;
+  dateFrom?: string;
+  dateTo?: string;
+  needReview?: boolean;
   page?: number;
   size?: number;
 }): Promise<RecordsResponse> {
   const q = new URLSearchParams();
   if (params?.level) q.set("level", params.level);
   if (params?.workpiece) q.set("workpiece", params.workpiece);
+  if (params?.classId !== undefined) q.set("class", String(params.classId));
+  if (params?.dateFrom) q.set("from", params.dateFrom);
+  if (params?.dateTo) q.set("to", params.dateTo);
+  if (params?.needReview !== undefined) q.set("need_review", params.needReview ? "true" : "false");
   q.set("page", String(params?.page ?? 1));
   q.set("size", String(params?.size ?? 50));
   const qs = q.toString();
@@ -213,11 +261,6 @@ export function listRecords(params?: {
 /** 提交一次人工复核（初评/复评/仲裁），结果由后端计算并返回。 */
 export function submitReview(body: ReviewIn): Promise<ReviewOut> {
   return postJson<ReviewOut>("/review", body);
-}
-
-/** 主动学习：从一次评片检出中采样高价值样本（优先人工标注，）。 */
-export function activeSample(body: ActiveSampleIn): Promise<ActiveSampleOut> {
-  return postJson<ActiveSampleOut>("/active/sample", body);
 }
 
 /** 主动学习：人工确认缺陷回流训练池（YOLO 标注 + 版本指纹，）。 */
@@ -238,6 +281,72 @@ export function submitBatch(form: FormData): Promise<BatchSubmitOut> {
   return request<BatchSubmitOut>("/batch", { method: "POST", body: form }, UPLOAD_TIMEOUT_MS);
 }
 
+/** 提交批量评片（带上传进度回调）：XMLHttpRequest 才能拿到上传字节数，
+ *  百张大底片上传期间给操作员百分比反馈；timeout 10 分钟（上传完即返回）。 */
+export function submitBatchWithProgress(
+  form: FormData,
+  onProgress: (pct: number) => void,
+  signal?: AbortSignal,
+): Promise<BatchSubmitOut> {
+  return new Promise<BatchSubmitOut>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${BASE}/batch`);
+    xhr.timeout = 600_000;
+    const token = getToken();
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    const op = getOperatorName();
+    if (op) xhr.setRequestHeader("X-Operator-Name", op);
+    const ipcToken = getIpcToken();
+    if (ipcToken) xhr.setRequestHeader("X-IPC-Token", ipcToken);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as BatchSubmitOut);
+        } catch {
+          reject(new ApiRequestError(0, "BAD_RESPONSE", "服务响应格式异常", null));
+        }
+        return;
+      }
+      let code = "HTTP_ERROR";
+      let message = `提交失败（HTTP ${xhr.status}）`;
+      try {
+        const body = JSON.parse(xhr.responseText) as {
+          error?: { code?: string; message?: string };
+          detail?: { code?: string; message?: string };
+        };
+        code = body?.error?.code ?? body?.detail?.code ?? code;
+        message = body?.error?.message ?? body?.detail?.message ?? message;
+      } catch {
+        /* 非 JSON 响应：保留兜底文案 */
+      }
+      if (xhr.status === 401) {
+        clearToken();
+        window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT));
+      }
+      reject(new ApiRequestError(xhr.status, code, message, null));
+    };
+    xhr.onerror = () => {
+      window.dispatchEvent(new CustomEvent(BACKEND_DOWN_EVENT));
+      reject(
+        new ApiRequestError(0, "BACKEND_UNREACHABLE", "无法连接本地推理服务，请确认服务已启动", null),
+      );
+    };
+    xhr.ontimeout = () => {
+      reject(new ApiRequestError(0, "TIMEOUT", "上传超时（>10 分钟），请减少单批数量后重试", null));
+    };
+    if (signal) {
+      signal.addEventListener("abort", () => {
+        xhr.abort();
+        reject(new ApiRequestError(0, "ABORTED", "上传已取消", null));
+      });
+    }
+    xhr.send(form);
+  });
+}
+
 /** 批次进度与逐任务结果。 */
 export function getBatchStatus(batchId: string): Promise<BatchStatusOut> {
   return request<BatchStatusOut>(`/batch/${batchId}`);
@@ -251,6 +360,16 @@ export function listBatches(): Promise<BatchSummaryOut[]> {
 /** 取消批次：未启动任务不再执行。 */
 export function cancelBatch(batchId: string): Promise<{ ok: boolean }> {
   return request<{ ok: boolean }>(`/batch/${batchId}/cancel`, { method: "POST" });
+}
+
+/** 暂停批次：未启动任务停止派发（running 任务自然结束），可恢复。 */
+export function pauseBatch(batchId: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/batch/${batchId}/pause`, { method: "POST" });
+}
+
+/** 恢复暂停的批次：被退回的待派发任务重新入队。 */
+export function resumeBatch(batchId: string): Promise<{ ok: boolean; resumed: number }> {
+  return request<{ ok: boolean; resumed: number }>(`/batch/${batchId}/resume`, { method: "POST" });
 }
 
 /** 断点续跑：重跑本批 failed/cancelled 任务。 */
@@ -303,6 +422,21 @@ export function verifyReport(reportId: string): Promise<VerifyOut> {
 /** 主动学习：取报告对应影像的缺陷明细（像素 bbox + 置信度/不确定性），供人工复核后回流训练池。 */
 export function getReportDetections(reportId: string): Promise<ReportDetectionsOut> {
   return request<ReportDetectionsOut>(`/report/${reportId}/detections`);
+}
+
+/**
+ * 本地大模型评片结论（按需生成，不落库）。
+ *
+ * 生成失败不抛错：后端以 status（ok/disabled/unavailable/failed）+ reason
+ * 如实返回，调用方据此展示原因而非报错——大模型不可用不应影响评片主链路。
+ * 超时给足：本地 4B 模型单轮结论在 CPU 上可能数十秒。
+ */
+export function getReportNarrative(reportId: string): Promise<ReportNarrativeOut> {
+  return request<ReportNarrativeOut>(
+    `/report/${reportId}/narrative`,
+    {},
+    NARRATIVE_TIMEOUT_MS,
+  );
 }
 
 /** 复核添加缺陷框（operator 取请求头操作员，reason 审计必填）。 */
@@ -376,6 +510,50 @@ export function reportPdfUrl(reportId: string): string {
   return withAccessToken(`${BASE}/report/${encodeURIComponent(reportId)}/pdf`);
 }
 
+/* ── C-14 受控导出：申请 → 保密员审批 → 领一次性令牌 → 携令牌下载 ── */
+
+/** 申请导出（任意已登录角色）；subject 形如 report:<report_id>。 */
+export function createExportRequest(subject: string, reason?: string): Promise<ExportRequestOut> {
+  return postJson<ExportRequestOut>("/export/requests", { subject, reason: reason || null });
+}
+
+/** 领取一次性导出令牌（申请批准后；明文仅本次返回，后端只存 SM3 哈希）。 */
+export function issueExportToken(requestId: string): Promise<ExportTokenOut> {
+  return postJson<ExportTokenOut>(`/export/requests/${encodeURIComponent(requestId)}/token`, {});
+}
+
+/** 查询导出申请状态（受控导出面板轮询审批结论，申请人不必盲试领取）。 */
+export function getExportRequest(requestId: string): Promise<ExportRequestOut> {
+  return request<ExportRequestOut>(`/export/requests/${encodeURIComponent(requestId)}`);
+}
+
+/** 受控导出下载（Blob）：window.open 无法携带 X-Export-Token 自定义头，一次性
+ *  令牌下载走 fetch→Blob→objectURL；登录会话/IPC 凭据与普通请求同源注入。 */
+export async function downloadExportBlob(path: string, exportToken?: string): Promise<Blob> {
+  const headers: Record<string, string> = { "X-Operator-Name": getOperatorName() };
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const ipcToken = getIpcToken();
+  if (ipcToken) headers["X-IPC-Token"] = ipcToken;
+  const et = exportToken?.trim();
+  if (et) headers["X-Export-Token"] = et;
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, { headers });
+  } catch {
+    window.dispatchEvent(new CustomEvent(BACKEND_DOWN_EVENT));
+    throw new ApiRequestError(
+      0,
+      "BACKEND_UNREACHABLE",
+      "无法连接本地推理服务，请确认服务已启动（默认地址 127.0.0.1:18773）",
+      null,
+    );
+  }
+  window.dispatchEvent(new CustomEvent(BACKEND_UP_EVENT));
+  if (!res.ok) await throwForResponse(res);
+  return await res.blob();
+}
+
 /** 为直链 URL 追加 access_token 查询参数（已登录时）；未登录原样返回。 */
 function withAccessToken(url: string): string {
   const token = getToken();
@@ -429,4 +607,128 @@ export function logout(): Promise<{ ok: boolean }> {
 /** 当前登录身份。 */
 export function getMe(): Promise<MeOut> {
   return request<MeOut>("/auth/me");
+}
+
+/* ── 账号管理（sysadmin 专属；私钥丢失/人员变动在界面内自助处置） ── */
+
+/** 列出全部三员账号（含锁定状态/失败计数）。 */
+export function listAccounts(): Promise<AccountOut[]> {
+  return request<AccountOut[]>("/auth/accounts");
+}
+
+/** 创建三员账号（返回账号档案；私钥随后用 issueKeypair 一次性签发展示）。 */
+export function createAccount(body: {
+  username: string;
+  role: "sysadmin" | "secadmin" | "auditor";
+}): Promise<AccountOut> {
+  return postJson<AccountOut>("/auth/accounts", body);
+}
+
+/** 为账号重新签发 SM2 软证书（私钥丢失/疑似泄露后的补救；私钥一次性返回）。 */
+export function issueKeypair(
+  accountId: string,
+): Promise<{ account_id: string; public_key: string; private_key: string }> {
+  return request<{ account_id: string; public_key: string; private_key: string }>(
+    `/auth/accounts/${encodeURIComponent(accountId)}/keypair`,
+    { method: "POST" },
+  );
+}
+
+/** 启用/停用账号（停用同时吊销其全部会话）。 */
+export function setAccountStatus(
+  accountId: string,
+  status: "active" | "disabled",
+): Promise<AccountOut> {
+  return request<AccountOut>(`/auth/accounts/${encodeURIComponent(accountId)}/status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+}
+
+/** 引导状态查询（公开）：系统是否还没有任何账号（登录页据此自动展开引导）。 */
+export function bootstrapStatus(): Promise<{ needs_bootstrap: boolean; guest_mode: boolean }> {
+  return request<{ needs_bootstrap: boolean; guest_mode: boolean }>("/auth/bootstrap/status");
+}
+
+/** 库内影像 PNG 预览拉取（Blob）：走统一请求管道，404/401 等错误可直接
+ *  归因（此前直链 <img> 的 onerror 把 404/401 都误报成「格式不支持」）。 */
+export async function fetchImagePreviewBlob(imageId: string): Promise<Blob> {
+  const res = await fetch(`${BASE}/images/${encodeURIComponent(imageId)}/preview.png`, {
+    headers: await authedHeaders(),
+  });
+  if (!res.ok) await throwForResponse(res);
+  return await res.blob();
+}
+
+/** 业务请求头（Authorization / X-IPC-Token / X-Operator-Name），供 fetch 直连场景复用。 */
+async function authedHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { "X-Operator-Name": getOperatorName() };
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const ipcToken = getIpcToken();
+  if (ipcToken) headers["X-IPC-Token"] = ipcToken;
+  return headers;
+}
+
+/* ── 本地大模型（backend/app/routers/llm.py）────────────────────────────
+ * 超时口径：/llm/models 与 /llm/services 要串探测多个本机端点，
+ * 单端点超时 3s、端点数为 4 → 给 60s 留足余量；/llm/status 不探测端点，30s 足够。
+ */
+
+/** 引擎 + 选中 + 扫描 + GPU 汇总（不探测端点，响应快）。 */
+export function getLlmStatus(): Promise<LlmStatusOut> {
+  return request<LlmStatusOut>("/llm/status", { method: "GET" }, 30_000);
+}
+
+/** 全部可选模型（本地 GGUF + 已有服务）。includeServices=false 时零网络调用。 */
+export function listLlmModels(includeServices = true): Promise<LlmModelsOut> {
+  return request<LlmModelsOut>(
+    `/llm/models?include_services=${includeServices ? "true" : "false"}`,
+    { method: "GET" },
+    60_000,
+  );
+}
+
+/** 探测本机已有的 llama 兼容端点（Ollama / LM Studio / 自建 llama.cpp）。 */
+export function listLlmServices(): Promise<LlmServicesOut> {
+  return request<LlmServicesOut>("/llm/services", { method: "GET" }, 60_000);
+}
+
+/** 启动模型发现扫描（后台任务，立即返回；进度看 /llm/status 的 scan 字段）。 */
+export function startLlmScan(): Promise<LlmScanResponseOut> {
+  return request<LlmScanResponseOut>("/llm/scan", { method: "POST" });
+}
+
+/** 取消进行中的扫描（已扫到的部分结果保留，取消不等于丢数据）。 */
+export function cancelLlmScan(): Promise<LlmScanResponseOut> {
+  return request<LlmScanResponseOut>("/llm/scan/cancel", { method: "POST" });
+}
+
+/** 选中模型并热应用到引擎（sysadmin）。不可用条目后端返回 409，不静默接受。 */
+export function selectLlmModel(modelId: string): Promise<LlmSelectOut> {
+  return request<LlmSelectOut>(
+    `/llm/models/${encodeURIComponent(modelId)}/select`,
+    { method: "POST" },
+    60_000,
+  );
+}
+
+/** 放弃显式选中，回落到配置文件默认（sysadmin）。 */
+export function clearLlmSelection(): Promise<LlmSelectOut> {
+  return request<LlmSelectOut>("/llm/selection", { method: "DELETE" }, 60_000);
+}
+
+/** 添加模型目录（须真实存在）；仅登记扫描范围，不复制任何文件。 */
+export function addLlmDir(path: string): Promise<LlmDirsOut> {
+  return request<LlmDirsOut>("/llm/dirs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+}
+
+/** 移除模型目录记录（只移除登记，不删除磁盘文件）。 */
+export function removeLlmDir(path: string): Promise<LlmDirsOut> {
+  return request<LlmDirsOut>(`/llm/dirs?path=${encodeURIComponent(path)}`, { method: "DELETE" });
 }

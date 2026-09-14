@@ -8,11 +8,21 @@ pool 目录的 mkdir / 写标注 / 列文件 / 指纹 / manifest 读写 IO 均�
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 from backend.domain.interfaces import PoolStore
 from backend.evaluation.harness import golden_set_fingerprint
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    """临时文件 + os.replace 原子写：崩溃中断不得留下半截文件
+    （截断的 YOLO 标注会被训练脚本当有效数据静默消费，污染训练集）。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.tmp")
+    tmp.write_text(content, encoding="utf-8")
+    os.replace(tmp, path)
 
 
 class FilePoolStore(PoolStore):
@@ -31,7 +41,7 @@ class FilePoolStore(PoolStore):
         """
         self._root.mkdir(parents=True, exist_ok=True)
         out = self._root / f"{Path(stem).name}.txt"
-        out.write_text(content, encoding="utf-8")
+        _atomic_write_text(out, content)
         return out
 
     def list_labels(self) -> list[str]:
@@ -61,8 +71,7 @@ class FilePoolStore(PoolStore):
     def save_manifest(self, manifest: dict[str, Any]) -> Path:
         """持久化 manifest 到 pool_dir 同级（data/active/pool_manifest.json）。"""
         path = self._manifest_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        _atomic_write_text(path, json.dumps(manifest, ensure_ascii=False, indent=2))
         return path
 
     def _manifest_path(self) -> Path:

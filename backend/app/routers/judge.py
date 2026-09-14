@@ -33,6 +33,8 @@ class JudgeRequest(BaseModel):
     # 未标定禁定级：缺省 None，
     # 由 grader 对 None 熔断（422 GRADING_AMBIGUOUS），禁止回退 1.0 mm/px 假标定。
     pixel_spacing_mm: float | None = None
+    # 管外径（G18 工程上下文）：当前规则库暂无管径条款，仅记录备查
+    pipe_outer_diameter_mm: float | None = None
     standard_id: str = "NB/T47013.2-2015"
     defects: list[JudgeDefectIn] = []
 
@@ -68,6 +70,7 @@ def judge(
         modality=Modality.GENERIC,
         pixel_spacing_mm=req.pixel_spacing_mm,
         base_metal_thickness_mm=req.base_metal_thickness_mm,
+        pipe_outer_diameter_mm=req.pipe_outer_diameter_mm,
     )
     try:
         # 多标准适配：按 standard_id 路由判定器（默认 NB/T47013；骨架/未知标准熔断 422）

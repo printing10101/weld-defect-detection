@@ -28,11 +28,15 @@ data/scan.db-wal
 data/images/
 data/reports/
 data/real_label/
+data/llm/
 data/training/
 data/external/
 data/compare/
 data/runs/
 data/batch/
+# 真实底片衍生产物不入库（INSTINCTS：权重与真实工业数据不入库）
+data/atlas/
+data/rejects/
 data/demo/
 data/prelabels/
 backend/data/
@@ -54,6 +58,9 @@ src/src-tauri/target/
 src/python_embed/
 # 本地模型副本（安装包由 backend/models/weights 注入，不入库）
 models/weights/
+# 本地大模型运行时与权重（llama.cpp 二进制 + GGUF，随安装包分发，不入库）
+tools/llama/
+models/llm/
 nul
 
 # 本地构建/调试产物（不入库）：tauri-cli 安装/构建日志、下载的二进制包、
@@ -139,3 +146,6 @@ data/real_judgments/
 *.pem
 *.key
 !**/*.example
+
+# 本地大模型评片端到端验证的一次性数据目录（scripts/verify_local_llm_report.py）
+.verify-run-*/

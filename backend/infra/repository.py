@@ -224,10 +224,11 @@ class InspectionRepository:
         date_from: str | None = None,
         date_to: str | None = None,
         workpiece: str | None = None,
+        need_review: bool | None = None,
         page: int = 1,
         size: int = 20,
     ) -> tuple[list[dict[str, Any]], int]:
-        """多条件检索：级别/缺陷类别/日期范围/工件号，分页。"""
+        """多条件检索：级别/缺陷类别/日期范围/工件号/待复核，分页。"""
         size = max(1, min(size, _PAGE_MAX))
         page = max(1, page)
         conds: list[Any] = []
@@ -246,6 +247,8 @@ class InspectionRepository:
             # 转义 LIKE 通配符，避免 %/_ 被当作掩码造成误匹配/全表扫描
             esc = workpiece.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             conds.append(ImageRecord.workpiece_no.ilike(f"%{esc}%", escape="\\"))
+        if need_review:
+            conds.append(ImageRecord.need_review.is_(True))
 
         with Session(self._engine) as session:
             total = int(
@@ -261,12 +264,13 @@ class InspectionRepository:
                 )
             )
             items = [self._image_to_dict(r) for r in rows]
-            # 批量附加缺陷计数（一次 IN 查询）
+            # 批量附加缺陷计数（一次 IN 查询；过滤软删除，与 get_image 口径一致）
             if items:
                 ids = [it["image_id"] for it in items]
                 cnt_rows = session.execute(
                     select(DefectRecord.image_id, func.count())
                     .where(DefectRecord.image_id.in_(ids))
+                    .where(DefectRecord.deleted_at.is_(None))
                     .group_by(DefectRecord.image_id)
                 ).all()
                 cnt_map = {rid: c for rid, c in cnt_rows}
@@ -275,6 +279,18 @@ class InspectionRepository:
             else:
                 for it in items:
                     it["defect_count"] = 0
+            # 附加最新报告编号（档案行「查看报告」入口；无报告为 None）
+            if items:
+                rep_rows = session.execute(
+                    select(ReportRecord.image_id, ReportRecord.id)
+                    .where(ReportRecord.image_id.in_(ids))
+                    .order_by(ReportRecord.generated_at.desc())
+                ).all()
+                rep_map: dict[str, str] = {}
+                for rid, rep_id in rep_rows:
+                    rep_map.setdefault(rid, rep_id)  # generated_at 降序 → 首见即最新
+                for it in items:
+                    it["report_id"] = rep_map.get(it["image_id"])
             return items, total
 
     def stats(self) -> dict[str, Any]:
@@ -292,7 +308,11 @@ class InspectionRepository:
             by_class = {
                 _class_name(cid): n
                 for cid, n in session.execute(
-                    select(DefectRecord.class_id, func.count()).group_by(DefectRecord.class_id)
+                    select(DefectRecord.class_id, func.count())
+                    .where(
+                        DefectRecord.deleted_at.is_(None)
+                    )  # 软删除不计入分布（口径同 get_image）
+                    .group_by(DefectRecord.class_id)
                 ).all()
             }
             return {"total": total, "by_level": by_level, "by_class": by_class}
@@ -793,6 +813,7 @@ class InspectionRepository:
             "stamp_orientation": rec.stamp_orientation,
             "stamp_confidence": rec.stamp_confidence,
             "stamp_need_review": bool(rec.stamp_need_review),
+            "report_meta": dict(rec.report_meta or {}),
             "created_at": _fmt_dt(rec.created_at),
         }
 

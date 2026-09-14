@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 from backend.domain.detect.gradcam import grad_cam_map, letterbox_rgb
+from backend.domain.detect.torch_compat import trusted_torch_load
 from backend.domain.dto import BBox, DefectClass, Detection
 from backend.domain.explain import attention_heatmap
 
@@ -78,7 +79,9 @@ class TestGradCamReal:
         if not _PT.exists():
             pytest.skip(f"无 torch 权重：{_PT}")
 
-        model = ultralytics.YOLO(str(_PT))
+        # torch>=2.6 下旧版 ultralytics 加载整包 .pt 需受信加载垫片（与生产同路径）
+        with trusted_torch_load():
+            model = ultralytics.YOLO(str(_PT))
         img_path = sorted((_ROOT / "data" / "training" / "test" / "images").glob("*.png"))
         if not img_path:
             pytest.skip("无合成测试图")

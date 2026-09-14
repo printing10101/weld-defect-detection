@@ -5,7 +5,185 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **真实定检底片端到端暴露的一批问题（8bit JPEG 扫描件批量实测）**：
+  - **印字区误检过滤（detect.mask_stamp_zone，默认开）**：真实底片的编号/
+    日期铅字与中心标是首要误检源（实测某真实底片 27/27 检出全落印字带，
+    焊缝本体零检出——合成训练域未见过边缘印字模式）。印字 OCR 读到的全部
+    文本框外扩后，中心落入的检出判为印字误检并屏蔽；屏蔽不静默——数量进
+    响应 `stamp_zone_masked`/`warnings` 与审计。实测 PG101-1-1 屏蔽 8 个
+    （27→19）。纯函数 `filter_stamp_zone` + `read_stamp_aligned`（印字框
+    经胶片区偏移映射回整图坐标，与检测框同系，消除裁剪/整图坐标错位）。
+  - **印字识别支持四方向**：此前仅正向/水平镜像；背面装反（180°倒置）或
+    翻面扫描的底片印字全部 missing。现补试 rotated/flipped 取最高置信度，
+    并把日期模式扩展到真实底片常见的两位年份中文格式（23年1月8日）。
+    实测 PG102 系（倒置扫描）从全部 missing 恢复为 present/rotated。
+  - **/detect 预检接口补齐胶片区屏蔽**：/report 链路会把胶片区外背景填充
+    为胶片中位灰阶，/detect 此前直接整图推理，预览误检多于报告链路（亮
+    背景/翻拍边框被误检）。两链路收敛到共享助手
+    `detect_film_region_trusted` + `film_background_fill`（domain/film_region），
+    消除分叉；/detect 同样应用印字区过滤。
+  - **/report 响应透出门禁降级原因**：ReportOut 新增 `warnings/basis/
+    density/density_ok/iqi_pass/iqi_detail/photo_mode/detect_mode`——客户端
+    此前只拿到 need_review 布尔，看不到"黑度越界/翻拍降级/dpi 未定"这些
+    原因（只写在 PDF 里）。前端 types/api.ts 契约同步（前后端契约测试锚定）。
+  - **单张评片查重提示**：批量查重的单张对应物——管线落库前按内容哈希查
+    历史，命中时响应 `duplicates` 携带记录摘要 + warnings 提示"与 N 张历史
+    影像内容完全相同"（仅提示不阻断；实测同一文件字节级重复的两个文件名
+    各评一次即命中）。
+
 ### 新增
+
+- **技术路线差距修复第一批（对照 2026-09 项目评审 PPT，详见 docs/技术路线差距清单.md，
+  本批落地 G01/G07/G13/G14/G17/G18/G20/G21）**：
+  - **鲁棒性扰动验证（G07，evaluation/robustness.py）**：亮度增益/偏移、Gamma、
+    对比度四族灰度扰动模拟扫描/曝光差异，输出逐条件检出保持率、长边量化偏差、
+    新增误检三项稳定性指标与阈值判定（技术路线任务1"质量与鲁棒性验证"）；
+    空 GT 判不通过（诚实口径）。
+  - **条形缺陷中心线长度（G13）**：PCA 主轴分 bin 质心折线测弧长，`length_mm`
+    对条形缺陷（长宽比>3）改用中心线口径——矩形长边量"弦"系统性低估弯曲裂纹，
+    条形限值评级偏松；圆形/退化回退矩形口径，`Geometry.centerline_mm` 同步输出。
+  - **钟点位/轴向位置/最近邻间距（G14/G17）**：/detect 响应新增
+    `clock_position`（"H:MM" 半小时精度，请求提供焊缝圆心 `weld_cx/weld_cy`
+    时输出，不从底片反推几何）、`axial_position_mm`（胶片长边走向投影，走向由
+    胶片区外接框判定）、`nearest_defect_id/nearest_gap_mm`（最近邻边缘间距，
+    47013 同线合并 gap 的 2D 推广）；未标定时物理量一律 None。
+  - **验收级别参与合格性判定（G20）**：`recommend()` 新增 `accept_level`，
+    报告"合格级别"栏（设计/合同要求）现真实参与判定（级别 ≤ 验收级别 → 合格）；
+    零容忍/深孔/复核兜底不因验收等级放宽；无法识别的自由文本回退默认口径不
+    阻塞出片。评片与重出报告两处接线。
+  - **管径上下文通道（G18）**：`ImageMeta`/judge API 新增
+    `pipe_outer_diameter_mm`；当前 47013.2 规则库无管径条款，存在时在判定依据
+    中记录"Φxx 记录备查"（证明输入被接收且未被使用），为小径管规则留缝。
+  - **复核结论自动回流训练池（G21）**：`apply_review` 级别落定后自动把人工
+    确认缺陷导出 YOLO 标注并刷新 manifest（此前依赖人工补调 /active/export，
+    专家改判滞留业务库）；失败不回滚复核，`training_pool_synced` 字段 +
+    ERROR 日志显式暴露。
+  - **报告二维码追溯（G01）**：报告每页页脚右下角嵌入追溯二维码
+    （`RT-TRACE|report_id|指纹前16位`，不含业务数据），新增
+    `GET /report/trace/{code}` 扫码核验端点（档案存在性 + 指纹一致性）；
+    生成失败 fail-soft 不阻断出片；依赖 qrcode==8.2。
+
+- **检测工作模式（高检出/高准确双档）**：对标商业评片软件的"双模式"
+  实践，`detect.mode` 三档——`balanced`（标定阈值原样）/`recall_first`
+  （整体放宽，初筛/复核兜底，漏检代价高的场景）/`precision_first`
+  （整体收紧，终审定级压误报）。实现为对 `infer_conf`/`class_conf` 统一
+  缩放（`domain/detect/thresholds.py` 纯函数，裁剪到 [0.01, 0.95]），类间
+  相对次序保持 ADR-010 标定不变（裂纹最低/气孔最高），避免另维护两份
+  逐类表漂移失步。配置键 `mode/recall_conf_scale/precision_conf_scale`
+  三处同步（schema.yaml/default.yaml/`DetectCfg`）；评片主链路与
+  `POST /detect`（新增 `mode` 表单字段，显式给 `conf` 时以调用方为准）
+  均生效，响应与日志带 `detect_mode` 可观测。
+- **POD 曲线（按缺陷尺寸的检出概率）**：`evaluation/harness.py` 新增
+  `pod_curve`（工作点 POD：真值在操作阈值下存在同类 IoU≥阈值的预测即记
+  检出；特征长度 sqrt(面积) 分位数等频分箱，Wilson 95% 置信区间，NDT
+  可靠性口径 MIL-HDBK-1823A）。`training/post_deploy_eval` 评估报告新增
+  `pod` 节并在模型卡记录 `pod_overall/pod_bins`；最小尺寸箱 POD<0.8
+  （n≥10）时模型卡如实声明小缺陷漏检风险。此前 mAP/召回是聚合量，
+  "多大的缺陷开始漏"落到尺寸轴上才可回答。
+- **缺陷图谱样本库（defect_atlas）**：人工筛选沉淀的典型缺陷样本库
+  （培训/比对/复核参考，对标商业评片软件的"缺陷图谱"产品线），与
+  defects 事实记录分离、显式发布/撤销并留主审计链。API：
+  `POST /atlas`（按源缺陷发布：从落盘影像裁缺陷局部图——支持静态加密
+  副本，随 `security.encrypt` 密文落盘到 `data/atlas/`，重复发布 409）、
+  `GET /atlas`（类/级别/工件号过滤分页检索）、`GET /atlas/{id}`、
+  `GET /atlas/{id}/crop.png`（密文自动解密）、`DELETE /atlas/{id}`
+  （必须留撤销原因）。迁移 0013；`AtlasStore`/裁图工具在
+  `infra/atlas_store.py`，Registry 懒建单例（模式同 gate_reject_store）。
+
+- **本地大模型随软件启停（llama.cpp / Qwen3-4B）**：新增
+  `backend/infra/llm_server.py`（`LlamaServerManager`）把 llama-server
+  纳入主应用生命周期——lifespan 装配期后台拉起（独立线程，不阻塞端口
+  绑定与 registry 装配，实测 ~9s 就绪），就绪判定 `GET /health` 200；
+  应用退出时 terminate→kill 回收。Windows 以 **Job Object
+  （KILL_ON_JOB_CLOSE）** 兜底：壳（Tauri）对后端是硬杀、Python 退出钩子
+  不执行，由 OS 保证"后端死 → llama-server 同死"（已端到端验证：硬杀
+  后端，18780 端口随之释放），Linux 用 PR_SET_PDEATHSIG 同语义；看门狗
+  线程按 `max_restart` 上限复活意外退出的进程，`/health` 新增 `llm`
+  字段（state/endpoint/error，进程死未及巡检时如实降格 starting）。
+  服务收敛于回环：`llm.host` 仅接受 127.0.0.0/8、::1、localhost（非回环
+  拒绝拉起/探测），健康探测先 getaddrinfo 解析并校验全部结果为回环再以
+  IP 字面量建连（封死 DNS rebinding），子进程 argv 列表 + shell=False，
+  关闭 llama-server 内置 Web UI。二进制（`tools/llama/`，CUDA 版
+  llama.cpp）与权重（`models/llm/Qwen3-4B-Q4_K_M.gguf`）均不入库
+  （.gitignore），随安装包分发；`server_exe`/`model_file`/`n_ctx`/
+  `n_gpu_layers` 等全部配置化（default.yaml + schema.yaml + `LlmCfg`，
+  env `SCAN_LLM__ENABLED` 可覆盖），二进制/模型缺失、启动超时一律降级
+  不阻断主应用启动；测试默认 `SCAN_LLM__ENABLED=false`，生命周期由
+  `test_llm_server.py` 以测试替身进程专项覆盖（9 例：状态机/启停回收/
+  看门狗重启/超时回收/回环校验）。OpenAI 兼容端点
+  `http://127.0.0.1:18780/v1`（对话/补全），供评片辅助判读等上层能力调用。
+
+- **报告补充信息（report_meta）全链路贯通 + 前端按样张分区录入**：新增
+  `backend/domain/report/meta_fields.py` 作为字段白名单唯一事实源（工程信息/
+  工件概况/技术要求/检测器材及工艺参数 33 键，`sanitize_report_meta` 清洗：
+  未知键/空值丢弃、超长截断、宽容不阻断）。API `POST /report` 新增
+  `report_meta` 表单字段（JSON 串，非法 JSON 422），落库 `images.report_meta`
+  （迁移 0012），`ReportOut` 回显 `report_meta/workpiece_no/weld_no/signer/
+  standard_ref`（standard_ref 去除版本号尾注重复）。PDF 汇总表对应空格自动
+  填充；表单提供合格级别（验收要求）时按级别序判定合格（Ⅰ<Ⅱ<Ⅲ<Ⅳ），
+  未提供沿用 NB/T47013 惯例（Ⅰ/Ⅱ 合格）。前端：`types/api.ts` 新增
+  `REPORT_META_GROUPS` 分组字段模式；评片表单新增可折叠《射线检测报告》
+  补充信息区（4 组 fieldset 双列栅格，全选填）；报告页新增**样张式首页
+  预览表**（与打印 PDF 同源同款 21 列合并网格：委托单位/工程/工件概况/
+  技术要求/器材参数/检测情况/结论及说明/签字专用章），标题改为《射线
+  检测报告》；pro.css 新增 fset/fgrid 表单组与 rt 样张预览表样式。
+
+### 变更
+
+- **报告版式对齐正式 RT 样张**（`backend/infra/reporting/pdf_reporter.py`）：
+  按传统《射线检测报告》纸质样张 1:1 重排 PDF 报告——第 1 页为大标题 +
+  `NO:` 编号 + 21 列合并网格汇总表（委托单位/工程名称/工件概况/技术要求/
+  检测器材及工艺参数/检测情况分级张数统计/检测结论及说明/检测·审核签字 +
+  检测单位检测专用章），软件已知字段（工件/标准/黑度/丝号/级别/缺陷统计/
+  签字日期）自动填入，未知工艺字段留空供机构打印后手工补填；第 2 页起为
+  《射线检测底片评定表》（序号/焊缝管口编号/片号/黑度/识别丝号/缺陷性质
+  与缺陷尺寸/缺陷部位/评定等级/备注），一行一缺陷、同焊缝同片号纵向合并、
+  空行补满整页，缺陷尺寸采用样张代号记法（`D:Φ1.4`/`E:L=6.2`，类别映射
+  A裂纹/B未焊透/C未熔合/D圆形/E条形/F内凹/G咬边）；末页附图（标注影像 +
+  送检底片 + 判定依据/免责声明/防伪指纹，PDF/A 转写与 SM2 签名 sidecar
+  链路不变）。页脚改为样张同款『共 N 页　第 M 页』（数字带下划线，含首
+  页）；字体由黑体改为宋体（simsun.ttc 优先，与样张同款），正文 12pt、
+  大标题 18pt；原封面/注意事项页取消，注意事项中的 AI 辅助声明并入结论
+  栏第 4 条。
+
+### 新增
+
+- **训练侧数据泄漏审计**（`backend/domain/labeling/leakage.py` +
+  `backend/training/audit_dataset_leakage.py`）：在既有互斥校验（字节 md5 +
+  感知哈希）之上引入**同源底片等价类**——过采样副本（`os{N}_`）、跨源同名
+  去重副本（新引入 `dup{N}_` 写盘前缀）与 copy-paste 合成图
+  （`cp_/rcp_{序号}_{src}_x_{tgt}`）经并查集与亲本底片归并成组（组代表取
+  类内最小编号底片名）。评估图只要与训练图同源，指标即被乐观污染
+  （RIAWELC 基准 24k 图整体虚高的教训：patch 级随机划分令同一底片的衍生图
+  跨 split）。落地三件套：①`build_dataset` 层内**整组划分**
+  （`_split_stratum`，同组图像永不跨 split，字节/感知重复因此天然同
+  split）；②划分后自动跑泄漏审计，报告落盘
+  `data/training/leakage_audit.json`（跨 split 重复簇/感知疑似对/跨 split
+  同源组三维结论，构建失败现场也留痕），`enforce_groups=True` 时分组越界
+  升级为阻断；③独立 CLI
+  `python -m backend.training.audit_dataset_leakage --train ... --test ...`
+  （可审计任意目录组，含外部基准复现 RIAWELC 式审计；存在泄漏退出码 1，
+  供训练前 CI 拦截）。配套：配置漂移校验将空映射视为已声明叶子
+  （`class_review_conf: {}` 不再误报缺失）。
+- **逐类复核阈值路由**（`detect.class_review_conf`，键=DefectClass.value）：
+  Nb47013Grader 的人工兜底由全局 `review_conf` 升级为**逐类灰区门槛**
+  （未列出的类回落全局），`get_grader` 新增 `class_review_uncertainty`
+  贯穿装配链（dependencies → registry → grader）。依据：逐类温度校准后
+  各类置信度尺度系统分化（§15.4 实测过自信/欠自信方向相反，全局单一阈值
+  不可行），u_score 已落校准尺度，逐类阈值才与校准成果对齐。路由触发时
+  依据落文本（"检出置信度处于复核灰区，转人工复核：咬边(不确定度0.45>
+  阈值0.40)"），报告/审计可解释"为何转人工"；默认空映射 = 行为与历史
+  完全一致。
+
+### 变更
+
+- **数据集写盘去重前缀**：跨源同名图（同一张图多源摄入，如 user 与
+  synthetic 各有一份 `rare1`）在写盘唯一化时改用 `dup{N}_` 前缀
+  （原复用过采样的 `os{N}_`，语义混淆）；`os` 专属过采样副本语义。两者均被
+  同源分组剥离。行为影响：跨源同名图因同组必然落入同一 split（历史行为
+  为随机散落，构成字节级跨 split 泄漏，只是小样本时仅告警未阻断）。
 
 - **底片印字识别（扫描日期/编号，正向/镜像）**：评片链路新增"底片印字"阶段
   （`backend/domain/stamp.py`，RapidOCR-ONNX 引擎，纯 pip 依赖随包分发），
@@ -126,6 +304,12 @@
   锚点选择从"存在即可"改为**优先含权重文件的目录**（`<安装根>/models/weights`
   空目录恒真存在，导致 `mark_active_by_uri` 反复告警"权重目录中未找到"、模型
   管理页权重清单为空）；状态文件等非目录路径语义不变。
+- 模型注册表状态文件卸载残留（冒烟测试"卸载零残留"断言抓出）：
+  `model_registry.json` 此前按安装根直锚、不跟随 `SCANDETECTION_USER_DATA_DIR`
+  重定向，打包版把它写进安装目录 `data\`（卸载器清单之外）——现改走
+  `resolve_data_path` 与 db/影像/IPC 令牌同源落用户数据目录；`_save_state`
+  写失败降级为告警（活跃指针可由启动期 `mark_active_by_uri` 重算），不再可能
+  中断装配。
 - `infer_tta` 跨视角集成统计的坐标系错位：views 中误存缩放后坐标系的框，与还原
   到原图系的保留检出做 IoU 匹配会错位、集成不确定性系统性虚高。
 

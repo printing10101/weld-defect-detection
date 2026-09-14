@@ -55,10 +55,6 @@ class Principal:
     username: str
     role: str  # sysadmin | secadmin | auditor
 
-    @property
-    def is_admin(self) -> bool:
-        return self.role in ("sysadmin", "secadmin")
-
 
 class AuthError(Exception):
     """认证/授权失败（由路由层转 HTTP；code 与统一错误包对齐）。"""
@@ -76,12 +72,15 @@ class AuthError(Exception):
 
 
 class ChallengeStore:
-    """进程内挑战表：{challenge_id: (nonce_hex, expires_at, used)}。"""
+    """进程内挑战表：{challenge_id: (nonce_hex, expires_at)}。
+
+    一次一用由 consume 的 pop 语义保证（取走即销毁）；无需 used 标志。
+    """
 
     def __init__(self, ttl_sec: float = _CHALLENGE_TTL_DEFAULT) -> None:
         self._ttl = ttl_sec
         self._lock = threading.Lock()
-        self._items: dict[str, tuple[str, float, bool]] = {}
+        self._items: dict[str, tuple[str, float]] = {}
 
     def issue(self) -> tuple[str, str]:
         """签发挑战，返回 (challenge_id, nonce_hex)。"""
@@ -91,24 +90,24 @@ class ChallengeStore:
         nonce = secrets.token_hex(16)
         with self._lock:
             self._gc()
-            self._items[challenge_id] = (nonce, time.monotonic() + self._ttl, False)
+            self._items[challenge_id] = (nonce, time.monotonic() + self._ttl)
         return challenge_id, nonce
 
     def consume(self, challenge_id: str) -> str:
-        """取走挑战明文（一次一用）：无效/过期/已用抛 AuthError。"""
+        """取走挑战明文（一次一用）：无效/过期抛 AuthError。"""
         with self._lock:
             self._gc()
             item = self._items.pop(challenge_id, None)
         if item is None:
             raise AuthError(401, "CHALLENGE_INVALID", "挑战不存在或已使用（一次一用）")
-        _nonce, expires, used = item
-        if used or expires < time.monotonic():
+        _nonce, expires = item
+        if expires < time.monotonic():
             raise AuthError(401, "CHALLENGE_EXPIRED", "挑战已过期（60s 有效）")
         return _nonce
 
     def _gc(self) -> None:
         now = time.monotonic()
-        for k in [k for k, (_, exp, _) in self._items.items() if exp < now]:
+        for k in [k for k, (_, exp) in self._items.items() if exp < now]:
             self._items.pop(k, None)
 
 
@@ -423,6 +422,5 @@ def require_role(*roles: str):
             "FORBIDDEN",
             f"当前角色 {principal.role!r} 无权执行该操作（需 {'/'.join(roles)}）",
         )
-        return principal
 
     return _dep

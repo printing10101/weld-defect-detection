@@ -206,7 +206,11 @@ def _sm2_verify(public_key_hex: str, signature_hex: str, data: bytes) -> bool:
 
 
 def _check_report_signature(rep: dict, recomputed: str) -> SignatureCheckOut:
-    """读取报告签名 sidecar 并验签；无 sidecar 的旧报告返回 valid=None。"""
+    """读取报告签名 sidecar 并验签；无 sidecar 的旧报告返回 valid=None。
+
+    pdf_path 直读 DB 值：与 records 的影像路径同口径——服务端数据支持外部
+    路径（test_diconde_route 契约），不强制 reports_dir 锚定。
+    """
     from backend.infra.reporting.pdf_reporter import read_signature_sidecar
 
     pdf_path = rep.get("pdf_path")
@@ -282,4 +286,51 @@ def verify_report(
         generated_at=rep.get("generated_at"),
         reason=None if valid else "mismatch",
         signature=signature,
+    )
+
+
+class TraceOut(BaseModel):
+    """追溯码扫码核验结果（G01）。
+
+    archive_found/hash_match 供扫码端判定"档案是否存在 + 码是否被伪造"；
+    verify_url 提示进一步做完整防篡改校验。响应不含业务数据（工件号/级别）。
+    """
+
+    code: str
+    archive_found: bool
+    hash_match: bool  # 码内指纹前缀与档案 report_hash 前缀一致（False=码与档案不符）
+    verify_url: str  # 完整校验端点路径（POST /report/{id}/verify）
+    generated_at: str | None = None
+
+
+@router.get("/report/trace/{code}", response_model=TraceOut)
+def trace_report(code: str, reg: Annotated[Registry, Depends(get_registry)]) -> TraceOut:
+    """二维码追溯查询（G01）：解析 RT-TRACE 码，核验档案存在性与指纹一致性。
+
+    二维码可能被拍照伪造/篡改：即使 archive_found=True 也必须核对
+    hash_match，并以 verify_url 的完整校验结果为准。
+    """
+    from backend.infra.reporting.qrcode import parse_trace_code
+
+    parsed = parse_trace_code(code)
+    if parsed is None:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "INVALID_TRACE_CODE", "message": "追溯码格式非法"},
+        )
+    report_id, hash_prefix = parsed
+    rep = reg.repository.get_report(report_id)
+    if rep is None:
+        # 档案不存在也返回 200（archive_found=False）：扫码核验是查询语义，
+        # 404 会让扫码端无法区分"码坏"与"档案已删"。
+        return TraceOut(
+            code=code, archive_found=False, hash_match=False, verify_url=f"/api/v1/report/{report_id}/verify"
+        )
+    stored = rep.get("report_hash") or ""
+    return TraceOut(
+        code=code,
+        archive_found=True,
+        hash_match=bool(stored) and stored.startswith(hash_prefix),
+        verify_url=f"/api/v1/report/{report_id}/verify",
+        generated_at=str(rep.get("generated_at")) if rep.get("generated_at") else None,
     )

@@ -16,14 +16,18 @@ import time
 import uuid
 from pathlib import Path
 
-import numpy as np
-
 from backend.app.dependencies import Registry
+from backend.domain.active_learning import (
+    export_training_labels,
+    save_pool_manifest,
+    training_pool_manifest,
+)
 from backend.domain.density import check_density, estimate_density
+from backend.domain.detect.thresholds import resolve_class_conf
 from backend.domain.dto import BBox, DefectClass, DefectShape, Detection, ImageMeta, Modality
 from backend.domain.errors import GradingAmbiguousError, IQIFailError
 from backend.domain.film_region import FilmRegionCfg as DomainFilmRegionCfg
-from backend.domain.film_region import detect_film_region
+from backend.domain.film_region import detect_film_region_trusted, film_background_fill
 from backend.domain.gate_adapters import iqi_cfg_from_settings, pseudo_cfg_from_settings
 from backend.domain.iqi import enrich_grade, verify_iqi
 from backend.domain.preprocess.metrics import QualityCfg as DomainQualityCfg
@@ -33,11 +37,12 @@ from backend.domain.quantify import MaskRefineCfg, get_quantifier
 from backend.domain.recommend import recommend
 from backend.domain.review import ReviewDecision, ReviewRole, resolve_review
 from backend.domain.spacing import resolve_spacing as _resolve_spacing  # 单一真源（§T8/§6）
-from backend.domain.stamp import StampCfg, read_stamp
+from backend.domain.stamp import StampCfg, filter_stamp_zone, read_stamp_aligned
 from backend.domain.standards.tables.loader import disclaimer_for
 from backend.evaluation.gate_rejects import GateRejectStore
 from backend.infra.config import resolve_config_path
 from backend.infra.image_loader import load_image, read_gray
+from backend.infra.pool_store import FilePoolStore
 
 _LOG = logging.getLogger("scandetection.pipeline")
 
@@ -86,7 +91,10 @@ def _derive_deep_hole(
                 interior = estimate_density(crop, bit_depth)
                 if interior > base_density * DEEP_HOLE_DENSITY_RATIO:
                     flag = True
-        except Exception:  # noqa: BLE001 - 任意异常（越界/空裁切）都不应阻断评片
+        except Exception as exc:  # noqa: BLE001 - 任意异常（越界/空裁切）都不应阻断评片
+            # 静默吞掉会让"深孔判定整体失效"无从排查（如密度数组形状异常），
+            # 至少留 debug 级日志。
+            _LOG.debug("deep hole derivation failed for %s: %s", d.id, exc)
             flag = False
         out.append(
             Detection(
@@ -143,13 +151,25 @@ def _check_bit_depth(bit_depth: int | None, gate) -> tuple[bool, str]:
     return True, ""
 
 
+def _preliminary_basis(reasons: list[str]) -> str:
+    """AI 预筛级别的强声明（置于 basis 首条）。
+
+    预筛通道的合规前提是**不静默**：级别虽然输出了，但降级原因必须与级别同时
+    出现在报告依据里，评片员一眼能看出"这不是正式级别、为什么不是"。
+    """
+    detail = "；".join(reasons) if reasons else "底片质量门禁未通过"
+    return (
+        f"⚠ AI 预筛级别（非正式级别）：底片质量未达标准要求——{detail}。"
+        "该级别仅供 AI 辅助预筛参考，不得作为验收/合格判定依据，"
+        "须由持证人依标准原文重新评定"
+    )
+
+
 class InspectionPipeline:
     """一次完整评片的用例编排。"""
 
     def __init__(self, reg: Registry) -> None:
         self._reg = reg
-        # 拦截留档台账懒建：仅在不合格底片归档时连接 DB（见 _gate_reject_store）
-        self._reject_store_cache: GateRejectStore | None = None
 
     def run_inspection(
         self,
@@ -168,6 +188,8 @@ class InspectionPipeline:
         witness: str | None = None,
         content_sha256: str | None = None,
         batch_no: str | None = None,
+        report_meta: dict[str, str] | None = None,
+        allow_preliminary_grade: bool = False,
     ) -> dict:
         """执行全链路并落库+生成报告，返回结果 dict。
 
@@ -195,9 +217,8 @@ class InspectionPipeline:
         # 翻拍影像（相机拍灯箱，8bit、无原始密度数组）绝对黑度不可测且 IQI
         # 识别不可靠 → photo_mode 下门禁按 density.photo_policy 处置。
         fr = reg.config.film_region
-        film = None
-        if fr.enabled:
-            film = detect_film_region(
+        film = (
+            detect_film_region_trusted(
                 gray,
                 DomainFilmRegionCfg(
                     min_area_frac=fr.min_area_frac,
@@ -206,10 +227,9 @@ class InspectionPipeline:
                     surround_min_frac=fr.surround_min_frac,
                 ),
             )
-        if film is not None and not (film.is_photo or film.area_frac >= 0.7):
-            # 分割结果既非翻拍、也不占大幅面（如 Otsu 只锁到焊缝条带）→ 不可信。
-            # 必须按整图处理：据此掩膜会把条带外的真实缺陷一并屏蔽掉。
-            film = None
+            if fr.enabled
+            else None
+        )
         photo_mode = bool(
             film is not None
             and film.is_photo
@@ -338,13 +358,10 @@ class InspectionPipeline:
         # 4. 预处理 + 检测 + 量化（ 基线 /  训练模型，同一接口）
         # 预处理（保边去噪+增强）后送检测；黑度/IQI/伪缺陷/质量门禁已在原始
         # 影像上完成，不受增强影响。检测源保持整图尺寸（缺陷框坐标系与
-        # 原图/落库一致），仅把胶片区外背景填充为胶片中位灰阶，防止灯箱
+        # 原图/落库一致），胶片区外背景填充为胶片中位灰阶，防止灯箱
         # 亮背景/翻拍边框被误检为缺陷。
-        detect_src = gray
-        if film is not None and not bool(film.mask.all()):
-            detect_src = gray.copy()
-            detect_src[~film.mask] = int(np.median(eval_gray))
         dc = reg.config.detect
+        detect_src = film_background_fill(gray, film)
         pp_cfg = reg.config.preprocess
         enhanced = detect_src
         preprocess_params: dict = {"enabled": False, "gamma": None}
@@ -361,9 +378,42 @@ class InspectionPipeline:
                 "clahe_clip": pp_cfg.clahe_clip,
                 "clahe_grid": pp_cfg.clahe_grid,
             }
-        detections = reg.detector.infer(
-            enhanced, conf=dc.infer_conf, iou=dc.infer_iou, class_conf=dc.class_conf
+        # 底片印字识别须先于检测：命中印字框供下方 stamp-zone 误检过滤使用
+        # （框经 read_stamp_aligned 映射回整图坐标，与检测框同系）；
+        # 落库/缺印字复核语义与原 5.5 步完全一致（读数前移不改变任何判定）。
+        _sc = reg.config.stamp
+        stamp = read_stamp_aligned(
+            gray,
+            StampCfg(enabled=_sc.enabled, min_conf=_sc.min_conf, max_side=_sc.max_side),
+            film=film,
         )
+        # 工作模式阈值解析（balanced 恒等；recall/precision 档对逐类表统一缩放，
+        # 类间相对关系不变）。缩放后的逐类表传给检测器，未列类回落缩放后的
+        # infer_conf——回落语义与标定表保持一致。
+        infer_conf, class_conf_eff = resolve_class_conf(
+            dc.infer_conf,
+            dc.class_conf,
+            dc.mode,
+            recall_scale=dc.recall_conf_scale,
+            precision_scale=dc.precision_conf_scale,
+        )
+        detections = reg.detector.infer(
+            enhanced, conf=infer_conf, iou=dc.infer_iou, class_conf=class_conf_eff
+        )
+        # 印字区误检过滤（detect.mask_stamp_zone）：真实底片的编号/日期铅字是
+        # 首要误检源（实测 27/27 检出全落印字带）。OCR 读到的全部文本框（含
+        # 中心标/片号等非日期编号铅字）外扩后吞掉检测中心的检出判为印字误检；
+        # 屏蔽不静默——数量进响应 warnings 与审计留痕，绝不静默丢弃。
+        stamp_masked = 0
+        if dc.mask_stamp_zone:
+            zones = stamp.text_boxes or stamp.boxes
+            if zones:
+                detections, masked_list = filter_stamp_zone(detections, zones)
+                stamp_masked = len(masked_list)
+                if stamp_masked:
+                    gate_warnings.append(
+                        f"已屏蔽印字区误检 {stamp_masked} 个（印字/铅字文本框外扩匹配）"
+                    )
         # 深孔推导：缺陷内部黑度显著高于母材 → 标 deep_hole（直判 IV 的前置信号）。
         # 必须在判定/落库前完成，使 grader 与 defect_rows 都能消费到该标记。
         detections = _derive_deep_hole(detections, meta, density, meta.bit_depth)
@@ -385,15 +435,27 @@ class InspectionPipeline:
             base_metal_thickness_mm=base_metal_thickness_mm,
         )
         try:
-            if not evaluable:  # force 出片：底片不合格不得作为评定依据
-                raise GradingAmbiguousError("底片不可评（黑度/IQI 不合格），不输出级别")
+            grade_preliminary = False
+            if not evaluable:
+                if not allow_preliminary_grade:
+                    # force 出片：底片不合格不得作为评定依据
+                    raise GradingAmbiguousError("底片不可评（黑度/IQI 不合格），不输出级别")
+                # AI 预筛通道（调用方显式请求）：底片质量未达标仍计算级别，但
+                # **必须**强标记 + 强声明——级别照常输出，可它不构成验收依据。
+                # 这是"可见的降级"而非"静默错判"：basis 首条与 need_review 都会
+                # 告诉评片员"这不是正式级别"。
+                grade_preliminary = True
             grade = reg.grader.grade(detections, context)
             joint_level: str | None = grade.joint_level.value
             per_grade = [g.value for g in grade.per_defect_grade]
             basis = list(grade.basis)
             need_review = bool(grade.need_review)
             std_version = grade.standard_version
+            if grade_preliminary:
+                basis = [_preliminary_basis(reasons), *basis]
+                need_review = True
         except GradingAmbiguousError as exc:
+            grade_preliminary = False
             joint_level = None
             per_grade = []
             # 保留熔断原因：报告与审计需可追溯（丢弃将无从解释为何无级别）
@@ -407,19 +469,12 @@ class InspectionPipeline:
         # 质量门禁未达阈值且非阻断模式（block_on_quality=False）时仅告警，并入人工复核标记。
         need_review = bool(need_review or quality_warn)
 
-        # 5.5 底片印字识别（扫描日期/编号，正向/镜像）：作为底片性质落库供档案
-        # 检索/追溯。缺印字的处置分两种语义：
+        # 5.5 底片印字裁决（read_stamp 已前移到检测前，见第 4 步）：缺印字的
+        # 处置分两种语义：
         # - 单图评片（batch_no=None）：缺印字即转人工复核（确认底片身份）；
         # - 批量评片（batch_no 非空）：缺印字**不**立即转复核，延迟到批次收尾
         #   按批内印字占比裁决（Registry._apply_batch_stamp_policy）——大批底片
         #   普遍无印字时豁免（缺印字是批次常态而非异常），占比达标才补标记。
-        # 任何异常已在 read_stamp 内降级，识别结论永不阻断评片主链路。
-        # （infra 配置段还含批量豁免字段，构造域层 StampCfg 时显式取识别相关项。）
-        _sc = reg.config.stamp
-        stamp = read_stamp(
-            eval_gray,
-            StampCfg(enabled=_sc.enabled, min_conf=_sc.min_conf, max_side=_sc.max_side),
-        )
         stamp_deferred = batch_no is not None
         stamp_need_review = bool(stamp.status == "missing" and not stamp_deferred)
         if stamp_need_review:
@@ -436,12 +491,14 @@ class InspectionPipeline:
 
         # 合规处置建议：消费评级输出，独立适配器（domain/recommend），
         # 不参与判定；熔断时降级为「需人工复核」，永不阻塞出片。
+        # 报告"合格级别"栏作为验收等级参与合格性判定（G20）。
         rec = recommend(
             joint_level,
             detections,
             need_review=need_review,
             standard_id=std_id,
             disclaimer=disclaimer,
+            accept_level=(report_meta or {}).get("accept_level"),
         )
         disposition = rec.disposition
         disposition_label = rec.disposition_label
@@ -482,6 +539,8 @@ class InspectionPipeline:
             "content_hash": content_sha256,
             # 批量追溯归属 + 底片印字（扫描日期/编号）性质快照
             "batch_no": batch_no,
+            # 报告补充信息（《射线检测报告》汇总表字段，路由层已白名单清洗）
+            "report_meta": dict(report_meta or {}),
             "stamp_status": stamp.status,
             "stamp_text": stamp.text,
             "stamp_orientation": stamp.orientation,
@@ -498,59 +557,39 @@ class InspectionPipeline:
         # 未标定（spacing_known=False）时量化走伪值 1.0 mm/px，mm 字段是
         # "像素=毫米"的伪物理量——落库置 None（与 /detect 的 calibrated=False
         # 语义对齐），禁止下游把伪尺寸当真实几何量消费。
-        if spacing_known:
-            defect_rows = [
-                {
-                    "id": f"{image_id}:{d.id}",  # 全局唯一主键（同一影像内由 d.id 区分）
-                    "image_id": image_id,
-                    "class_id": d.class_id.value,
-                    "bbox_px": [d.bbox.x, d.bbox.y, d.bbox.w, d.bbox.h],
-                    "shape": _shape_of(d, g, dc.round_aspect_max).value,
-                    "length_mm": g.length_mm,
-                    "width_mm": g.width_mm,
-                    "area_mm2": g.area_mm2,
-                    "perimeter_mm": g.perimeter_mm,
-                    "position_x": g.position_x_mm,
-                    "position_y": g.position_y_mm,
-                    "confidence": d.score,
-                    "uncertainty": d.uncertainty,
-                    "joint_level": per_grade[i] if i < len(per_grade) else None,
-                    "need_review": need_review,
-                    "standard_id": std_id,
-                    "standard_version": std_version,
-                }
-                for i, (d, g) in enumerate(quantified)
-            ]
-        else:
-            defect_rows = [
-                {
-                    "id": f"{image_id}:{d.id}",
-                    "image_id": image_id,
-                    "class_id": d.class_id.value,
-                    "bbox_px": [d.bbox.x, d.bbox.y, d.bbox.w, d.bbox.h],
-                    "shape": _shape_of(d, g, dc.round_aspect_max).value,
-                    "length_mm": None,
-                    "width_mm": None,
-                    "area_mm2": None,
-                    "perimeter_mm": None,
-                    "position_x": None,
-                    "position_y": None,
-                    "confidence": d.score,
-                    "uncertainty": d.uncertainty,
-                    "joint_level": per_grade[i] if i < len(per_grade) else None,
-                    "need_review": need_review,
-                    "standard_id": std_id,
-                    "standard_version": std_version,
-                }
-                for i, (d, g) in enumerate(quantified)
-            ]
+        defect_rows = [
+            {
+                "id": f"{image_id}:{d.id}",  # 全局唯一主键（同一影像内由 d.id 区分）
+                "image_id": image_id,
+                "class_id": d.class_id.value,
+                "bbox_px": [d.bbox.x, d.bbox.y, d.bbox.w, d.bbox.h],
+                "shape": _shape_of(d, g, dc.round_aspect_max).value,
+                "length_mm": g.length_mm if spacing_known else None,
+                "width_mm": g.width_mm if spacing_known else None,
+                "area_mm2": g.area_mm2 if spacing_known else None,
+                "perimeter_mm": g.perimeter_mm if spacing_known else None,
+                "position_x": g.position_x_mm if spacing_known else None,
+                "position_y": g.position_y_mm if spacing_known else None,
+                "confidence": d.score,
+                "uncertainty": d.uncertainty,
+                "joint_level": per_grade[i] if i < len(per_grade) else None,
+                "need_review": need_review,
+                "standard_id": std_id,
+                "standard_version": std_version,
+            }
+            for i, (d, g) in enumerate(quantified)
+        ]
         # 报告行先占位（pdf_path 待生成后回填）
         report_row = {
             "id": report_id,
             "image_id": image_id,
             "joint_level": joint_level,
             "pdf_path": "",
-            "standard_ref": f"{std_id} {std_version}".strip(),
+            "standard_ref": (
+                std_id
+                if std_version and std_id.endswith(std_version)
+                else f"{std_id} {std_version}".strip()
+            ),
             "signer": signer,
             "basis": basis,
         }
@@ -569,6 +608,7 @@ class InspectionPipeline:
                 "need_review": need_review,
                 "evaluable": evaluable,
                 "defect_count": len(quantified),
+                "stamp_zone_masked": stamp_masked,
             },
             note="force" if force else None,
         )
@@ -582,7 +622,7 @@ class InspectionPipeline:
         dt = time.perf_counter() - t0
         _LOG.info(
             "inspection done image_id=%s level=%s defects=%d density_ok=%s iqi_pass=%s "
-            "evaluable=%s need_review=%s photo_mode=%s stamp=%s/%s (%.1f ms)",
+            "evaluable=%s need_review=%s photo_mode=%s detect_mode=%s stamp=%s/%s (%.1f ms)",
             image_id,
             joint_level,
             len(quantified),
@@ -591,6 +631,7 @@ class InspectionPipeline:
             evaluable,
             need_review,
             photo_mode,
+            dc.mode,
             stamp.status,
             stamp.orientation,
             dt * 1000,
@@ -599,29 +640,51 @@ class InspectionPipeline:
             "image_id": image_id,
             "report_id": report_id,
             "joint_level": joint_level,
+            # AI 预筛级别标记：True=底片质量未达标但用户显式请求了预筛级别，
+            # 级别不具合规效力（basis 首条已给出降级原因，前端须显著标识）。
+            # 只出现在响应里，不落库（ImageRecord 无此列，语义由 joint_level + basis 承载）。
+            "grade_preliminary": grade_preliminary,
             "need_review": need_review,
             "evaluable": evaluable,
             "density": round(density, 3),
             "density_ok": density_ok,
             "iqi_pass": bool(iqi.passed),
+            "iqi_detail": {
+                "type": iqi.iqi_type,
+                "achieved": iqi.achieved,
+                "required": iqi.required,
+                "grade": iqi.grade,
+            },
             "defect_count": len(quantified),
             "photo_mode": photo_mode,
+            "detect_mode": dc.mode,
+            # 门禁降级原因透出：客户端须能看到"为什么转人工复核"
+            # （黑度越界/dpi 未定/印字区屏蔽等），而非只拿到 need_review 布尔
             "warnings": [*gate_warnings, *photo_warnings],
+            "basis": basis,
+            "stamp_zone_masked": stamp_masked,
             "disclaimer": disclaimer,
             "disposition": disposition,
             "disposition_label": disposition_label,
             "disposition_actions": disposition_actions,
             "pdf_path": pdf_path,
+            "report_meta": dict(report_meta or {}),
+            # 报告页样张式首页预览所需的表单回显字段
+            "workpiece_no": workpiece_no,
+            "weld_no": weld_no,
+            "signer": signer,
+            "standard_ref": f"{std_id} {std_version}".strip(),
             "stamp": stamp.summary(need_review=stamp_need_review),
         }
 
     def _gate_reject_store(self) -> GateRejectStore:
-        """拦截留档台账（懒建）：只在首次归档时连接 DB，避免无关评片多开引擎。"""
-        if self._reject_store_cache is None:
-            self._reject_store_cache = GateRejectStore(
-                str(resolve_config_path(self._reg.config.paths.db_path))
-            )
-        return self._reject_store_cache
+        """拦截留档台账（E-05）：代理到 Registry 懒建单例（全进程一个引擎）。
+
+        此前缓存在 pipeline 实例上——BatchManager 每任务新建 pipeline，
+        每个触发过拦截的 pipeline 各建一个 SQLAlchemy engine（+create_all）
+        且永不 dispose，长跑批量下连接池随任务累积。
+        """
+        return self._reg.gate_reject_store()
 
     def _archive_gate_reject(
         self,
@@ -648,23 +711,31 @@ class InspectionPipeline:
         except Exception as exc:  # noqa: BLE001 - 归档故障不得阻断门禁拦截
             _LOG.error("不合格底片归档失败 reject_id=%s: %s", reject_id, exc)
             detail["archive_error"] = str(exc)
-        self._gate_reject_store().add(
-            reject_id=reject_id,
-            image_id=image_id,
-            reject_reason="；".join(reasons)[:256],
-            detail=detail,
-            dpi=dpi,
-            bit_depth=bit_depth,
-            operator=operator or "system",
-        )
-        reg.repository.append_audit(
-            actor=operator or "system",
-            action="gate_reject",
-            object_type="image",
-            object_id=reject_id,
-            before=None,
-            after={"reasons": list(reasons), "dpi": dpi, "bit_depth": bit_depth},
-        )
+        try:
+            self._gate_reject_store().add(
+                reject_id=reject_id,
+                image_id=image_id,
+                reject_reason="；".join(reasons)[:256],
+                detail=detail,
+                dpi=dpi,
+                bit_depth=bit_depth,
+                operator=operator or "system",
+            )
+        except Exception as exc:  # noqa: BLE001 - 台账故障不得掩盖门禁拦截本身
+            # 调用方在本方法返回后抛 IQIFailError(409)（重拍语义）；台账/审计
+            # 异常若上抛会把设计好的 409 变 500，客户端无从判断该重拍。
+            _LOG.error("gate_rejects 台账写入失败 reject_id=%s: %s", reject_id, exc)
+        try:
+            reg.repository.append_audit(
+                actor=operator or "system",
+                action="gate_reject",
+                object_type="image",
+                object_id=reject_id,
+                before=None,
+                after={"reasons": list(reasons), "dpi": dpi, "bit_depth": bit_depth},
+            )
+        except Exception as exc:  # noqa: BLE001 - 审计故障不得掩盖门禁拦截本身
+            _LOG.error("gate_reject 审计写入失败 reject_id=%s: %s", reject_id, exc)
         return reject_id
 
     def _persist_reject(self, src: Path, reject_id: str, suffix: str) -> Path:
@@ -672,20 +743,7 @@ class InspectionPipeline:
         rejects_dir = Path(resolve_config_path(self._reg.config.gate.rejects_dir))
         rejects_dir.mkdir(parents=True, exist_ok=True)
         dest = rejects_dir / f"{reject_id}{suffix}"
-        # 加密为默认主路径：密钥不可用（env 与本地密钥文件均失败）时拒绝明文
-        # 落盘并留痕——静态加密失效宁可阻断归档，不可静默降级（GB/T 28452
-        # 用户数据保密性口径）。单次 write_bytes 直接写密文，明文不落盘。
-        if self._reg.config.security.encrypt:
-            from backend.infra.crypto import CryptoKeyError, default_crypto_provider
-
-            try:
-                cipher = default_crypto_provider()
-            except CryptoKeyError as exc:
-                _LOG.error("静态加密密钥不可用（%s）：拒绝将不合格底片以明文落盘", exc)
-                raise
-            dest.write_bytes(cipher.encrypt(src.read_bytes()))
-        else:
-            shutil.copyfile(src, dest)
+        self._write_encrypted_copy(src, dest, what="不合格底片")
         return dest
 
     def regenerate_report(self, image_id: str, template: str = "standard") -> dict:
@@ -724,6 +782,8 @@ class InspectionPipeline:
             need_review=bool(image.get("need_review", False)),
             standard_id=str(image.get("standard_id") or "NB/T47013.2-2015"),
             disclaimer=disclaimer_for(self._reg.grader.tables),  # type: ignore[attr-defined]
+            # 复核后重出报告同样按报告"合格级别"栏判定（与首评同口径）
+            accept_level=(image.get("report_meta") or {}).get("accept_level"),
         )
         return {
             "image_id": image_id,
@@ -732,35 +792,55 @@ class InspectionPipeline:
             "need_review": bool(image.get("need_review", False)),
             "evaluable": bool(image.get("evaluable", True)),
             "defect_count": len(stored_defects),
+            "density": image.get("density"),
+            "density_ok": image.get("density_ok"),
+            "iqi_pass": image.get("iqi_pass"),
+            "iqi_detail": image.get("iqi_detail"),
+            "photo_mode": False,
+            "detect_mode": self._reg.config.detect.mode,
+            "warnings": [],
+            "basis": list((image.get("report") or {}).get("basis") or []),
+            "stamp_zone_masked": 0,
             "disclaimer": disclaimer_for(self._reg.grader.tables),  # type: ignore[attr-defined]
             "disposition": rec.disposition,
             "disposition_label": rec.disposition_label,
             "disposition_actions": list(rec.actions),
             "pdf_path": pdf_path,
+            "report_meta": dict(image.get("report_meta") or {}),
+            "workpiece_no": image.get("workpiece_no"),
+            "weld_no": image.get("weld_no"),
+            "signer": (image.get("report") or {}).get("signer"),
+            "standard_ref": (image.get("report") or {}).get("standard_ref"),
         }
+
+    def _write_encrypted_copy(self, src: Path, dest: Path, *, what: str) -> None:
+        """影像副本加密落盘（_persist_image/_persist_reject 共用）。
+
+        encrypt=True（默认）时以 SDC2 国密信封写密文，密钥来自 env
+        SCAN_CRYPTO_KEY 或本地持久密钥文件 data/.crypto_key（首启自动生成，
+        见 crypto.py）；密钥不可用（env 与本地密钥文件均失败）时拒绝明文
+        落盘并留痕——静态加密失效宁可阻断归档，不可静默降级（GB/T 28452
+        用户数据保密性口径）。单次 write_bytes 直接写密文，明文不落盘。
+        """
+        if not self._reg.config.security.encrypt:
+            shutil.copyfile(src, dest)
+            return
+        from backend.infra.crypto import CryptoKeyError, default_crypto_provider
+
+        try:
+            # 进程内共享 provider（密钥来源不变时复用）：免除每张影像重复
+            # 的 SM2 点乘/KDF 开销（gmssl 纯 Python，单次数十 ms）。
+            cipher = default_crypto_provider()
+        except CryptoKeyError as exc:
+            _LOG.error("静态加密密钥不可用（%s）：拒绝将%s以明文落盘", exc, what)
+            raise
+        dest.write_bytes(cipher.encrypt(src.read_bytes()))
 
     def _persist_image(self, src: Path, image_id: str, suffix: str) -> Path:
         images_dir = Path(resolve_config_path(self._reg.config.paths.images_dir))
         images_dir.mkdir(parents=True, exist_ok=True)
         dest = images_dir / f"{image_id}{suffix}"
-        # 静态加密：encrypt=True（默认）时影像副本以 SDC2 国密信封落盘，
-        # 密钥来自 env SCAN_CRYPTO_KEY 或本地持久密钥文件 data/.crypto_key
-        # （首启自动生成，见 crypto.py）。密钥不可用时拒绝明文落盘并留痕——
-        # 宁可阻断本次入库，不可静默降级明文（GB/T 28452 用户数据保密性）。
-        # 单次 write_bytes 直接写密文：明文自始至终不落盘。
-        if self._reg.config.security.encrypt:
-            from backend.infra.crypto import CryptoKeyError, default_crypto_provider
-
-            try:
-                # 进程内共享 provider（密钥来源不变时复用）：免除每张影像重复
-                # 的 SM2 点乘/KDF 开销（gmssl 纯 Python，单次数十 ms）。
-                cipher = default_crypto_provider()
-            except CryptoKeyError as exc:
-                _LOG.error("静态加密密钥不可用（%s）：拒绝将影像副本以明文落盘", exc)
-                raise
-            dest.write_bytes(cipher.encrypt(src.read_bytes()))
-        else:
-            shutil.copyfile(src, dest)
+        self._write_encrypted_copy(src, dest, what="影像副本")
         return dest
 
     # ---- 人工复核缺陷增删改（DB50/T 1807-2025 ）----
@@ -907,6 +987,49 @@ class InspectionPipeline:
             "defect_count": len(defects),
         }
 
+    def _sync_review_to_training_pool(
+        self, reg: Registry, image_id: str, image: dict, defects: list[dict]
+    ) -> str:
+        """复核结论落定后把人工确认缺陷自动回流训练池（G21）。
+
+        此前回流依赖人工补调 POST /active/export，专家改判的类别/边界长期
+        滞留业务库进不了训练数据。按 DB 现状（复核后的值）导出 YOLO 标注并
+        刷新 manifest。返回失败原因（空串=成功）：影像不可读/训练池写失败
+        不阻断复核主流程，但状态随响应暴露，不静默吞掉。
+        """
+        try:
+            gray = read_gray(str(image.get("path") or "")) if image.get("path") else None
+            if gray is None:
+                return "image_unreadable"
+            dets: list[Detection] = []
+            for d in defects:
+                bbox = d.get("bbox_px")
+                if not bbox or "class_id" not in d:
+                    continue
+                dets.append(
+                    Detection(
+                        id=str(d.get("id", "")),
+                        bbox=BBox(*(float(v) for v in bbox[:4])),
+                        class_id=DefectClass(int(d["class_id"])),
+                        score=float(d.get("confidence", 0.0)),
+                        uncertainty=float(d.get("uncertainty", 1.0)),
+                    )
+                )
+            pool_dir = Path(
+                resolve_config_path(
+                    str(Path(reg.config.paths.data_dir) / "active" / "training_pool")
+                )
+            )
+            store = FilePoolStore(pool_dir)
+            export_training_labels(
+                image_id, dets, float(gray.shape[1]), float(gray.shape[0]), store=store
+            )
+            save_pool_manifest(store, training_pool_manifest(store))
+            return ""
+        except Exception as exc:  # noqa: BLE001 —— 回流是旁路动作，任何失败都不回滚复核
+            _LOG.error("训练池自动回流失败 image_id=%s: %s", image_id, exc)
+            return f"export_failed: {exc}"
+
     def apply_review(
         self,
         *,
@@ -991,6 +1114,14 @@ class InspectionPipeline:
             note=f"role={role_enum.value}",
         )
 
+        # 复核结论落定（级别确认/仲裁）→ 人工确认缺陷自动回流训练池（G21）。
+        # 与重出报告同条件：结论未定时缺陷集还不是"人工确认标注"。
+        training_pool_synced = True
+        if decision.final_level is not None:
+            training_pool_synced = (
+                self._sync_review_to_training_pool(reg, image_id, image, defects) == ""
+            )
+
         return {
             "image_id": image_id,
             "reviewer": reviewer,
@@ -1003,4 +1134,5 @@ class InspectionPipeline:
             "stage": decision.stage.value,
             "need_review": decision.need_review,
             "review_count": summary["review_count"],
+            "training_pool_synced": training_pool_synced,
         }

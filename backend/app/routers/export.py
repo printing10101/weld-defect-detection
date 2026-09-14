@@ -222,8 +222,10 @@ def _fmt_window(dt: datetime) -> str:
 def _batch_export_alert(reg: Registry, principal: Principal) -> None:
     """异常行为告警（C-22）：窗口期内同一操作者导出下载次数达阈值 → high 告警。
 
-    计数来源为主审计链 action=export_download 的持久记录（含历史进程）；
-    仅在"恰好跨越阈值"的那一刻告警一次，后续导出不再重复告警（防刷屏）。
+    计数来源为主审计链 action=export_download 的持久记录（含历史进程），按
+    操作者过滤（list_audit actor=）。窗口计数用 >= 判定 + 跨窗口去重（安全
+    审计链查同窗口内该操作者是否已告警）——原实现只在"恰好等于阈值"那一
+    次告警，审计链分页截断（>500 条）会使其永不触发（审计 C-7）。
     告警失败不掩盖已成功的下载语义。
     """
     cfg = reg.config.alerts.batch_export
@@ -232,13 +234,22 @@ def _batch_export_alert(reg: Registry, principal: Principal) -> None:
     window_start = _fmt_window(
         datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=cfg.window_min)
     )
-    entries, _total = reg.repository.list_audit(action="export_download", limit=500)
-    recent = [
-        e
-        for e in entries
-        if e["actor"] == principal.username and (e["created_at"] or "") >= window_start
-    ]
-    if len(recent) != cfg.threshold:  # 未达阈值，或已越过（只告警跨越那一次）
+    entries, total = reg.repository.list_audit(
+        action="export_download", actor=principal.username, limit=500
+    )
+    recent = [e for e in entries if (e["created_at"] or "") >= window_start]
+    # 该操作者的审计条目超出单页上限：真实计数只会更多，按阈值兜底判定。
+    count = max(len(recent), cfg.threshold) if total > len(entries) else len(recent)
+    if count < cfg.threshold:
+        return
+    # 跨窗口去重：同窗口内该操作者已告警过则不重复（防刷屏）。
+    prior, _ = reg.security_store.list_security_audit(action="alert_raised", limit=50)
+    if any(
+        p.get("object_id") == "batch_export"
+        and ((p.get("after") or {}).get("actor") == principal.username)
+        and (p.get("created_at") or "") >= window_start
+        for p in prior
+    ):
         return
     try:
         reg.security_store.raise_alert(
@@ -246,12 +257,12 @@ def _batch_export_alert(reg: Registry, principal: Principal) -> None:
             level="high",
             message=(
                 f"批量导出告警：{principal.username} 在 {cfg.window_min} 分钟内"
-                f"导出下载 {len(recent)} 次（阈值 {cfg.threshold}）"
+                f"导出下载 {count} 次（阈值 {cfg.threshold}）"
             ),
             detail={
                 "actor": principal.username,
                 "window_min": cfg.window_min,
-                "count": len(recent),
+                "count": count,
                 "threshold": cfg.threshold,
             },
         )
@@ -261,7 +272,7 @@ def _batch_export_alert(reg: Registry, principal: Principal) -> None:
             object_type="alert",
             object_id="batch_export",
             before=None,
-            after={"actor": principal.username, "count": len(recent)},
+            after={"actor": principal.username, "count": count},
             note="C-22 批量导出异常行为告警",
         )
     except Exception as exc:  # noqa: BLE001 - 告警失败不影响导出本身

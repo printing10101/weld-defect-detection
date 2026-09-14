@@ -134,7 +134,9 @@ def restore(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not archive_path.is_file():
-        raise HTTPException(status_code=404, detail="archive not found")
+        raise HTTPException(
+            status_code=404, detail="备份文件不存在（data/backups 下未找到该归档名）"
+        )
 
     verify_backup(archive_path)  # 先完整校验（含 SHA），失败不落任何破坏
 

@@ -144,13 +144,15 @@ def get_grader(
     standard_id: str,
     tables: StandardTables | None = None,
     review_uncertainty: float | None = None,
+    class_review_uncertainty: dict[int, float] | None = None,
 ) -> StandardGrader:
     """按 standard_id 装配判定器。
 
     - NB/T47013.2-2015：必须提供已授权数值表（authorized 熔断由 Nb47013Grader 自身执行）；
     - 语义化熔断标准：tables 可为 None（grade 直接熔断，不读表）；
     - 未知标准：抛 GradingAmbiguousError（422，需人工复核）；
-    - review_uncertainty：仅 Nb47013Grader 消费（人工兜底阈值），其余适配器忽略。
+    - review_uncertainty / class_review_uncertainty：仅 Nb47013Grader 消费
+     （人工兜底阈值：全局 / 逐类覆盖，键=DefectClass.value），其余适配器忽略。
     """
     impl = _GRADERS.get(standard_id)
     if impl is None:
@@ -159,8 +161,14 @@ def get_grader(
         )
     if impl is Nb47013Grader and tables is None:
         raise GradingAmbiguousError(f"标准 {standard_id} 数值表缺失，禁止输出级别，需人工复核")
-    if impl is Nb47013Grader and review_uncertainty is not None:
-        return impl(tables, review_uncertainty=review_uncertainty)  # type: ignore[arg-type]
+    if impl is Nb47013Grader and (
+        review_uncertainty is not None or class_review_uncertainty is not None
+    ):
+        return impl(
+            tables,
+            review_uncertainty=review_uncertainty if review_uncertainty is not None else 0.5,
+            class_review_uncertainty=class_review_uncertainty,
+        )  # type: ignore[arg-type]
     return impl(tables)  # type: ignore[arg-type]  # 熔断类不读表，tables=None 合法
 
 

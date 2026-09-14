@@ -10,6 +10,8 @@ awaiting_review 暂缓态，由人工逐项复核（跳过/仍检测）后再继
 
 from __future__ import annotations
 
+import logging
+import shutil
 import uuid
 from hashlib import sha256
 from pathlib import Path
@@ -21,6 +23,8 @@ from pydantic import BaseModel
 from backend.app.batch_queue import BatchItem
 from backend.app.dependencies import Registry, get_operator_name, get_registry
 from backend.infra.config import resolve_config_path
+
+_LOG = logging.getLogger("scandetection")
 
 router = APIRouter(tags=["batch"])
 
@@ -261,11 +265,17 @@ def submit_batch(
         batch_id = reg.batch_manager.submit(items, hold=hold)
     except HTTPException:
         # 413/415/422 等由本函数有意抛出，必须原样上抛，不可被下方 except 吞掉转 500。
+        # 此时 submit 未发生，batch_dir 是孤儿暂存（cleanup_dirs 未登记），须清理。
+        shutil.rmtree(batch_dir, ignore_errors=True)
         raise
     except Exception as exc:
+        # 提交失败同样清理孤儿暂存目录；不回传 str(exc)——可能含内部绝对路径/
+        # SQL 细节，全局 _unhandled_handler 也不透传，细节只进日志。
+        shutil.rmtree(batch_dir, ignore_errors=True)
+        _LOG.exception("batch submit failed")
         raise HTTPException(
             status_code=500,
-            detail={"code": "BATCH_SUBMIT_FAILED", "message": str(exc)},
+            detail={"code": "BATCH_SUBMIT_FAILED", "message": "批次提交失败，请查看后端日志"},
         ) from exc
 
     duplicates: list[BatchDuplicateOut] = []
@@ -384,6 +394,42 @@ def batch_status(
         duplicates=[BatchDuplicateOut(**d) for d in batch.get("duplicates", [])],
         stamp_summary=BatchStampSummaryOut(**stamp_summary) if stamp_summary else None,
     )
+
+
+class BatchResumeOut(BaseModel):
+    ok: bool
+    resumed: int
+
+
+@router.post("/batch/{batch_id}/pause", response_model=CancelOut)
+def pause_batch(
+    batch_id: str,
+    reg: Annotated[Registry, Depends(get_registry)],
+) -> CancelOut:
+    """暂停批次：未启动任务停止派发（running 任务等待自然结束），可恢复。"""
+    ok = reg.batch_manager.pause(batch_id)
+    if not ok:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": f"batch not found: {batch_id}"},
+        )
+    return CancelOut(ok=True)
+
+
+@router.post("/batch/{batch_id}/resume", response_model=BatchResumeOut)
+def resume_batch(
+    batch_id: str,
+    reg: Annotated[Registry, Depends(get_registry)],
+) -> BatchResumeOut:
+    """恢复暂停的批次：被退回的待派发任务重新入队。"""
+    try:
+        resumed = reg.batch_manager.resume(batch_id)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": f"batch not found: {batch_id}"},
+        ) from exc
+    return BatchResumeOut(ok=True, resumed=resumed)
 
 
 @router.post("/batch/{batch_id}/cancel", response_model=CancelOut)

@@ -29,6 +29,7 @@ from backend.domain.detect.calibration import (
     apply_class_temperature,
     temperature_transform,
 )
+from backend.domain.detect.torch_compat import trusted_torch_load
 from backend.domain.detect.uncertainty import (
     ensemble_uncertainty_stats,
     estimate_ensemble_uncertainty,
@@ -94,7 +95,9 @@ class YoloDetector:
             from ultralytics import YOLO  # type: ignore[import-not-found]
         except ImportError as e:  # pragma: no cover
             raise RuntimeError("未安装 ultralytics，无法加载 torch/yolo 权重") from e
-        self._yolo_model = YOLO(model_uri)
+        # torch>=2.6 weights_only 默认值变更的兼容（本机受信权重，见 torch_compat 说明）
+        with trusted_torch_load():
+            self._yolo_model = YOLO(model_uri)
 
     def _load_onnx(self, model_uri: str) -> None:
         try:

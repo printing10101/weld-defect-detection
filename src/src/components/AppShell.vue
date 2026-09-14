@@ -4,8 +4,9 @@
  *  当前工作区由 Vue Router 驱动，操作员状态来自 Pinia workspace store。
  *  快捷键：Ctrl+1..6 切换工作区，Ctrl+O/Ctrl+Shift+O 打开影像/批量导入。
  *  帮助菜单提供「快捷键」「关于」模态（桌面软件标准 About 对话框）。 */
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
+import pkg from "../../package.json";
 import type { ViewId } from "../types/api";
 import MenuBar from "./MenuBar.vue";
 import RibbonBar from "./RibbonBar.vue";
@@ -21,6 +22,7 @@ const workspace = useWorkspaceStore();
 const view = computed<ViewId>(() => routeNameToViewId(route.name));
 const operator = computed(() => workspace.operator);
 const helpModal = ref<"none" | "shortcuts" | "about">("none");
+const appVersion = pkg.version;
 
 const TABS: { id: ViewId; label: string }[] = [
   { id: "journey", label: "单幅评定" },
@@ -29,24 +31,59 @@ const TABS: { id: ViewId; label: string }[] = [
   { id: "device", label: "设备标定" },
   { id: "viewer", label: "底片观察" },
   { id: "std-eval", label: "系统评价" },
+  { id: "llm", label: "本地大模型" },
 ];
 function goto(v: ViewId): void {
   router.push({ name: v });
 }
 
+/** 菜单/快捷键「打开影像/批量导入」：先下发意图再跳转，
+ *  目标视图（含已挂载场景）经 workspace 消费意图并弹出文件选择器。 */
+function openImage(): void {
+  workspace.requestFileOpen("image");
+  goto("journey");
+}
+function openBatch(): void {
+  workspace.requestFileOpen("batch");
+  goto("batch");
+}
+
+/* ── 检测人员信息：自建输入对话框。
+ *  Tauri WebView 不实现 window.prompt（恒返回 null，此前该菜单点了永远没反应），
+ *  项目内已有同款结论（ConfirmDialog 注释），交互一律走自建对话框。 ── */
+const operatorDialogOpen = ref(false);
+const operatorDraft = ref("");
+const operatorInput = ref<HTMLInputElement | null>(null);
+
 function editOperator(): void {
-  const name = window.prompt("检测人员姓名（用于报告签署与审计追溯）", operator.value);
-  if (name === null) return; // 取消
-  workspace.setOperator(name);
+  operatorDraft.value = operator.value;
+  operatorDialogOpen.value = true;
+  void nextTick(() => operatorInput.value?.focus());
+}
+
+function confirmOperator(): void {
+  workspace.setOperator(operatorDraft.value.trim());
+  operatorDialogOpen.value = false;
+}
+
+/* ── 退出：尽力 window.close()；Tauri 主窗口通常不允许脚本关闭，
+ *  300ms 后仍在运行则如实告知操作员正确的退出方式（此前点了毫无反应）。 ── */
+const exitHintOpen = ref(false);
+
+function exitApp(): void {
+  window.close();
+  window.setTimeout(() => {
+    exitHintOpen.value = true;
+  }, 300);
 }
 
 function onAction(id: string): void {
   switch (id) {
     case "open-image":
-      goto("journey");
+      openImage();
       break;
     case "open-batch":
-      goto("batch");
+      openBatch();
       break;
     case "view-journey":
       goto("journey");
@@ -66,6 +103,12 @@ function onAction(id: string): void {
     case "view-std-eval":
       goto("std-eval");
       break;
+    case "view-llm":
+      goto("llm");
+      break;
+    case "view-admin":
+      goto("admin");
+      break;
     case "operator":
       editOperator();
       break;
@@ -76,10 +119,24 @@ function onAction(id: string): void {
       helpModal.value = "about";
       break;
     case "exit":
-      window.close();
+      exitApp();
       break;
   }
 }
+
+/* ── 帮助模态键盘支持：ESC 关闭 + 打开时焦点落「确定」（此前焦点留在触发按钮，
+ *  Enter 会再次打开模态；也没有任何键盘关闭途径） ── */
+const helpOkBtn = ref<HTMLButtonElement | null>(null);
+
+function onModalKeydown(e: KeyboardEvent): void {
+  if (e.key === "Escape" && helpModal.value !== "none") {
+    helpModal.value = "none";
+  }
+}
+
+watch(helpModal, (v) => {
+  if (v !== "none") void nextTick(() => helpOkBtn.value?.focus());
+});
 
 function onKeydown(e: KeyboardEvent): void {
   if (!(e.ctrlKey || e.metaKey)) return;
@@ -90,14 +147,21 @@ function onKeydown(e: KeyboardEvent): void {
   else if (k === "4") goto("device");
   else if (k === "5") goto("viewer");
   else if (k === "6") goto("std-eval");
-  else if (k === "o" && e.shiftKey) goto("batch");
-  else if (k === "o") goto("journey");
+  else if (k === "7") goto("llm");
+  else if (k === "o" && e.shiftKey) openBatch();
+  else if (k === "o") openImage();
   else return;
   e.preventDefault();
 }
 
-onMounted(() => window.addEventListener("keydown", onKeydown));
-onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
+onMounted(() => {
+  window.addEventListener("keydown", onKeydown);
+  window.addEventListener("keydown", onModalKeydown);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onKeydown);
+  window.removeEventListener("keydown", onModalKeydown);
+});
 </script>
 
 <template>
@@ -128,7 +192,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 
     <main class="main">
       <RouterView v-slot="{ Component }">
-        <component :is="Component" @archive="goto('archive')" />
+        <component
+          :is="Component"
+          @archive="goto('archive')"
+        />
       </RouterView>
     </main>
 
@@ -140,12 +207,18 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
       class="overlay"
       @click.self="helpModal = 'none'"
     >
-      <div class="dialog">
+      <div
+        class="dialog"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="helpModal === 'shortcuts' ? '键盘快捷键' : '关于'"
+      >
         <div class="d-head">
           {{ helpModal === "shortcuts" ? "键盘快捷键" : "关于" }}
           <button
             type="button"
             class="x"
+            aria-label="关闭"
             @click="helpModal = 'none'"
           >
             ×
@@ -165,7 +238,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
               <tr><td>设备标定</td><td>Ctrl+4</td></tr>
               <tr><td>底片观察</td><td>Ctrl+5</td></tr>
               <tr><td>系统评价</td><td>Ctrl+6</td></tr>
-              <tr><td>退出</td><td>Alt+F4</td></tr>
+              <tr><td>本地大模型</td><td>Ctrl+7</td></tr>
+              <tr><td>退出</td><td>Alt+F4 / 窗口关闭按钮</td></tr>
             </tbody>
           </table>
         </div>
@@ -178,7 +252,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             射线焊缝缺陷智能检测系统
           </p>
           <p class="ver">
-            版本 0.1.0 · 本地化部署
+            版本 {{ appVersion }} · 本地化部署
           </p>
           <p class="ver">
             依据 NB/T 47013.2-2015 执行焊缝缺陷智能评定<br>
@@ -187,11 +261,99 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         </div>
         <div class="d-foot">
           <button
+            ref="helpOkBtn"
             type="button"
             class="ok"
             @click="helpModal = 'none'"
           >
             确定
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 检测人员信息对话框（替代 Tauri 下失效的 window.prompt） -->
+    <div
+      v-if="operatorDialogOpen"
+      class="overlay"
+      @click.self="operatorDialogOpen = false"
+      @keydown.escape="operatorDialogOpen = false"
+    >
+      <div
+        class="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="检测人员信息"
+      >
+        <div class="d-head">
+          检测人员信息
+          <button
+            type="button"
+            class="x"
+            aria-label="关闭"
+            @click="operatorDialogOpen = false"
+          >
+            ×
+          </button>
+        </div>
+        <div class="d-body">
+          <label
+            class="op-field"
+            for="operator-name"
+          >检测人员姓名（用于报告签署与审计追溯）</label>
+          <input
+            id="operator-name"
+            ref="operatorInput"
+            v-model="operatorDraft"
+            type="text"
+            @keyup.enter="confirmOperator"
+          >
+        </div>
+        <div class="d-foot">
+          <button
+            type="button"
+            class="ok"
+            @click="operatorDialogOpen = false"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="ok primary"
+            @click="confirmOperator"
+          >
+            保存
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 退出提示：脚本关闭被运行环境拦截时的如实告知 -->
+    <div
+      v-if="exitHintOpen"
+      class="overlay"
+      @click.self="exitHintOpen = false"
+    >
+      <div
+        class="dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-label="退出应用"
+      >
+        <div class="d-head">
+          退出应用
+        </div>
+        <div class="d-body">
+          当前运行环境不允许本页自动关闭窗口。请点击窗口右上角的关闭按钮 ×，或按
+          Alt+F4 退出应用。
+        </div>
+        <div class="d-foot">
+          <button
+            type="button"
+            class="ok"
+            @click="exitHintOpen = false"
+          >
+            知道了
           </button>
         </div>
       </div>
@@ -321,5 +483,25 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 .d-foot .ok:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+.d-foot .ok.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.op-field {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-bottom: 6px;
+}
+.d-body input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  font-size: 13px;
+  font-family: var(--font);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
 }
 </style>

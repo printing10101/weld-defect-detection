@@ -90,3 +90,57 @@ def test_models_api_list_and_activate(tmp_path) -> None:
     finally:
         app.dependency_overrides.pop(get_registry, None)
         reg.model_registry = original
+
+
+def test_models_api_approve_state_machine(tmp_path, monkeypatch) -> None:
+    """E-14 投产审批状态机（此端点此前零测试零调用，审计 A-1 补链）：
+
+    - 门禁开启后未评估直接 approve → 409（无 candidate 记录）；
+    - evaluate 达标 → approve → 真正热切换（active）；
+    - 重复 approve → 409（candidate 记录已消费，防重复切换）。
+    评估以 monkeypatch 替身免真实 Golden 依赖，专注状态机接线。
+    """
+    wd = _two_distinct_onnx(tmp_path)
+    state = str(tmp_path / "state.json")
+
+    reg = get_registry()
+    original = reg.model_registry
+    reg.model_registry = ModelRegistry(wd, state)
+    monkeypatch.setattr(reg.config.modelgate, "enabled", True)
+    monkeypatch.setattr(reg.config.modelgate, "min_map", 0.0)
+    monkeypatch.setattr(reg.config.modelgate, "min_recall", 0.0)
+
+    import backend.evaluation.run_eval as re_mod
+
+    def fake_eval(model_id, *a, **k):
+        return {
+            "model_id": model_id,
+            "metrics": {"mAP50": 0.99, "recall": 0.99},
+            "golden_fingerprint": "fp",
+            "experiment_run_id": "r1",
+        }
+
+    monkeypatch.setattr(re_mod, "run_golden_evaluation", fake_eval)
+    app.dependency_overrides[get_registry] = lambda: reg
+    try:
+        ids = [m.id for m in reg.model_registry.scan()]
+        target = ids[1]
+        with TestClient(app) as client:
+            r0 = client.post(f"/api/v1/models/{target}/approve")
+            assert r0.status_code == 409
+
+            r1 = client.post(f"/api/v1/models/{target}/evaluate")
+            assert r1.status_code == 200
+
+            r2 = client.post(f"/api/v1/models/{target}/approve")
+            assert r2.status_code == 200
+            assert r2.json()["active"] == target
+
+            active = [m for m in client.get("/api/v1/models").json()["models"] if m["active"]]
+            assert len(active) == 1 and active[0]["id"] == target
+
+            r3 = client.post(f"/api/v1/models/{target}/approve")
+            assert r3.status_code == 409
+    finally:
+        app.dependency_overrides.pop(get_registry, None)
+        reg.model_registry = original

@@ -287,6 +287,28 @@ body {
   color: var(--ink-faint);
   margin-top: 3px;
 }
+/* 复选字段（勾选式开关，如"底片质量不达标时仍输出 AI 预筛级别"）：
+   覆盖 .field label 的 block 布局，让复选框与说明文字同排，说明另起一行。 */
+.field label.check {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 0;
+  line-height: 1.6;
+  cursor: pointer;
+}
+.field label.check input {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: none;
+  margin-top: 2px;
+}
+.field label.check em {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+  color: var(--ink-faint);
+}
 .btn {
   appearance: none;
   border: 1px solid var(--line-strong);
@@ -540,6 +562,129 @@ body {
   padding-top: 10px;
 }
 
+/* ── 报告补充信息表单（按《射线检测报告》样张分区） ── */
+.meta-head {
+  margin: 8px 0 10px;
+}
+.meta-head .btn.link {
+  font-size: 13px;
+}
+.fgroups {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.fset {
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  padding: 6px 12px 10px;
+  min-width: 0;
+}
+.fset legend {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  padding: 0 6px;
+}
+.fgrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+}
+.fitem label {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-bottom: 2px;
+}
+.fitem input {
+  width: 100%;
+  background: #fff;
+  border: 1px solid var(--line);
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--ink);
+  padding: 4px 6px;
+}
+.fitem input:focus {
+  outline: 1px solid var(--accent);
+  border-color: var(--accent);
+}
+
+/* ── 报告首页样张预览（《射线检测报告》汇总表同款网格） ── */
+.rt-wrap {
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  padding: 10px 12px 12px;
+  overflow-x: auto;
+}
+.rt-no {
+  font-size: 12px;
+  color: var(--ink);
+  text-align: right;
+  margin: 2px 2px 4px;
+  font-family: var(--mono);
+}
+table.rt {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background: #fff;
+  border: 1px solid var(--ink);
+}
+table.rt td {
+  border: 1px solid var(--ink);
+  padding: 3px 4px;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+  color: var(--ink);
+  word-break: break-all;
+  vertical-align: middle;
+}
+table.rt td.lbl {
+  background: var(--panel-head);
+  color: var(--ink);
+  white-space: normal;
+}
+table.rt td.sec {
+  background: var(--panel-head);
+  font-weight: 600;
+  width: 34px;
+  padding: 3px 2px;
+  line-height: 1.6;
+}
+table.rt td.sec2 {
+  background: var(--panel-head);
+  font-weight: 600;
+  width: 30px;
+  padding: 3px 2px;
+  line-height: 1.7;
+}
+table.rt td.concl {
+  text-align: left;
+  padding: 8px 10px;
+  line-height: 1.8;
+  background: #fff;
+}
+table.rt td.concl .c-head {
+  font-weight: 600;
+}
+table.rt td.seal {
+  padding: 6px;
+}
+table.rt td.seal .seal-t {
+  font-weight: 600;
+  font-size: 13px;
+  margin: 14px 0 26px;
+}
+table.rt td.seal .seal-d {
+  text-align: right;
+  padding-right: 6px;
+  font-size: 12px;
+}
+
 /* ── 档案 ── */
 .search {
   display: flex;
@@ -629,4 +774,14 @@ td .lv {
 }
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* 上传预览：不可本地解码/解码失败的占位（DICOM/TIFF/HEIC 等合法格式） */
+.preview .thumb.noimg {
+  display: grid;
+  place-items: center;
+  color: #9fb0cc;
+  font-size: 13px;
+  letter-spacing: 1px;
+  background: #111;
 }

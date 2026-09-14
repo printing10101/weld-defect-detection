@@ -11,34 +11,42 @@ from typing import Annotated
 
 import cv2
 import numpy as np
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
+from backend.app.dependencies import Registry, get_registry
 from backend.domain.measure.image_quality import measure_duplex_wire, measure_snr
 
 router = APIRouter(tags=["measure"])
 
 
-def _checked_bytes(image: UploadFile) -> bytes:
+def _checked_bytes(image: UploadFile, reg: Registry) -> bytes:
     """读取上传内容并强制大小限额（与 _common.staged_upload 同口径）。
 
-    无限额整读时单请求即可打爆内存，且会绕过统一上传限额。
+    无限额整读时单请求即可打爆内存，且会绕过统一上传限额；分块读取、
+    超限即时 413（不依赖 size 头——Starlette 某些路径下 size 可能为 None，
+    "先整读再判"存在内存放大面）。限额经 DI 的 reg.config 读取。
     """
-    from backend.infra.config import load_config
-
-    max_bytes = load_config().upload.max_bytes
+    max_bytes = reg.config.upload.max_bytes
     size = image.size
     if size is not None and size > max_bytes:
         raise HTTPException(
             413,
             detail={"code": "FILE_TOO_LARGE", "message": f"文件超过大小上限 {max_bytes} 字节"},
         )
-    content = image.file.read()
-    if len(content) > max_bytes:
-        raise HTTPException(
-            413,
-            detail={"code": "FILE_TOO_LARGE", "message": f"文件超过大小上限 {max_bytes} 字节"},
-        )
-    return content
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = image.file.read(1 << 20)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                413,
+                detail={"code": "FILE_TOO_LARGE", "message": f"文件超过大小上限 {max_bytes} 字节"},
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _decode(gray_depth: bool, content: bytes) -> np.ndarray:
@@ -73,13 +81,14 @@ def _parse_roi(roi: str | None, shape: tuple[int, ...]) -> tuple[slice, slice] |
 @router.post("/measure/snr")
 def snr_endpoint(
     image: Annotated[UploadFile, File()],
+    reg: Annotated[Registry, Depends(get_registry)],
     srb_mm: Annotated[float | None, Form()] = None,
     pixel_spacing_mm: Annotated[float | None, Form()] = None,
     min_snrn: Annotated[float, Form()] = 130.0,
     roi: Annotated[str | None, Form()] = None,
 ) -> dict:
     """SNRn 测量。srb_mm 建议用双丝测量结果；缺省用像素尺寸保守估计（偏严）。"""
-    content = _checked_bytes(image)
+    content = _checked_bytes(image, reg)
     img = _decode(gray_depth=True, content=content)
     win = _parse_roi(roi, img.shape)
     if win is not None:
@@ -96,12 +105,13 @@ def snr_endpoint(
 @router.post("/measure/duplex-wire")
 def duplex_wire_endpoint(
     image: Annotated[UploadFile, File()],
+    reg: Annotated[Registry, Depends(get_registry)],
     pixel_spacing_mm: Annotated[float, Form()],
     wire_axis_deg: Annotated[float, Form()] = 0.0,
     roi: Annotated[str | None, Form()] = None,
 ) -> dict:
     """双丝像质计空间分辨率：ROI 对准双丝组，wire_axis_deg 为丝方向角（度）。"""
-    content = _checked_bytes(image)
+    content = _checked_bytes(image, reg)
     img = _decode(gray_depth=True, content=content)
     win = _parse_roi(roi, img.shape)
     if win is not None:
