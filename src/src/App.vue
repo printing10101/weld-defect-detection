@@ -22,43 +22,50 @@ onMounted(() => {
   auth.bindIdleWatch();
   // 刷新后恢复会话身份（token 失效时由 401 事件统一清除并跳登录页）
   void auth.restore();
-  void bindTauriCloseGuard();
+  bindDesktopCloseGuard();
 });
 
-// Tauri 桌面环境的窗口关闭拦截（web 环境无 __TAURI_INTERNALS__，静默跳过）。
-// beforeunload 在 Tauri WebView 不弹窗：点 × 的关闭请求必须经这里拦下，
-// 评定进行中时先问过用户再关（确认交互在 AppShell 的关闭确认对话框完成）。
-async function bindTauriCloseGuard(): Promise<void> {
-  const w = window as unknown as { __TAURI_INTERNALS__?: unknown };
-  if (!w.__TAURI_INTERNALS__) return;
-  try {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    await getCurrentWindow().onCloseRequested((event) => {
-      if (!busyTask.value) return; // 无长任务：放行关闭
-      event.preventDefault();
-      closeGuardOpen.value = true; // 弹自建确认框；确认后经 destroy() 真正关闭
-    });
-  } catch {
-    /* 非 Tauri 或 API 缺失：忽略，回退 beforeunload 兜底 */
+/** preload 注入的桌面桥（Electron 环境）；web/Tauri 环境为 undefined。 */
+const desktopBridge = (
+  window as unknown as {
+    desktop?: {
+      setBusy: (busy: boolean) => void;
+      onCloseRequested: (cb: () => void) => () => void;
+      confirmQuit: () => void;
+    };
   }
+).desktop;
+
+// Electron 桌面环境的窗口关闭拦截（web 环境无 window.desktop，静默跳过）。
+// 点 × 的关闭请求由主进程拦下（close 事件 preventDefault），经 desktop 桥
+// 通知这里弹自建确认框；确认后经 confirmQuit() 真正关闭。
+function bindDesktopCloseGuard(): void {
+  if (!desktopBridge) return;
+  desktopBridge.onCloseRequested(() => {
+    closeGuardOpen.value = true; // 弹自建确认框；确认后经 confirmQuit() 真正关闭
+  });
 }
 
-/** 关闭确认对话框状态：onCloseRequested 拦截到长任务时置位。 */
+/** 关闭确认对话框状态：主进程拦截到长任务时的点 × 关闭后置位。 */
 const closeGuardOpen = ref(false);
 
 function confirmClose(): void {
   closeGuardOpen.value = false;
   busyTask.value = null; // 用户已确认放弃任务
-  void import("@tauri-apps/api/window")
-    .then(({ getCurrentWindow }) => getCurrentWindow().destroy())
-    .catch(() => {
-      /* 兜底：destroy 失败时走 window.close 尽力关闭 */
-      window.close();
-    });
+  desktopBridge?.confirmQuit();
 }
 
-// 长任务（批量/单幅评定）进行中刷新/关闭页面前拦截确认（webview 支持时生效）
+// 长任务（批量/单幅评定）进行中的关闭/刷新保护：
+//   Electron 桌面态 → 主进程 close 拦截（beforeunload 在 Electron 会静默取消
+//   close、弹不出确认框，故改走 desktop 桥，且不设 beforeunload 以免抢先
+//   取消 close 让确认框永远弹不出来）；
+//   web 态（vite dev 浏览器调试）→ beforeunload 兜底。
 watch(busyTask, (busy) => {
+  if (desktopBridge) {
+    desktopBridge.setBusy(Boolean(busy));
+    window.onbeforeunload = null;
+    return;
+  }
   window.onbeforeunload = busy
     ? (e) => {
         e.preventDefault();
@@ -123,7 +130,7 @@ onUnmounted(() => {
     </div>
   </transition>
 
-  <!-- Tauri 点 × 关闭窗口时的任务保护确认（onCloseRequested 拦截后弹此处） -->
+  <!-- Electron 点 × 关闭窗口时的任务保护确认（主进程拦截后经 desktop 桥弹此处） -->
   <ConfirmDialog
     :open="closeGuardOpen"
     title="退出确认"

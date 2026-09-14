@@ -3,7 +3,7 @@
 server:
   host: str   # 本地绑定（默认 127.0.0.1）
   port: int   # 默认 18773
-  cors_origins: list[str]   # CORS 允许源（Tauri webview + 本地开发；禁 *）
+  cors_origins: list[str]   # CORS 允许源（Electron webview + 本地开发；禁 *）
 model:
   default_uri: str
   backend: str   # onnx | torch | tensorrt

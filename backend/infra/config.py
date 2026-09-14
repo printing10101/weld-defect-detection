@@ -26,15 +26,13 @@ _LOG = logging.getLogger("scandetection.config")
 class ServerCfg(BaseModel):
     host: str = "127.0.0.1"
     port: int = 18773
-    # CORS 允许源：Tauri webview + 本地开发源。
+    # CORS 允许源：Electron webview（app:// 标准协议）+ 本地开发源。
     # 部署新增前端源（如公司内网门户）改配置即可，不改代码；禁 "*"，
     # 否则任意外部网站均可跨源读取本机 API（含审计链 / 报告）。
     cors_origins: list[str] = [
         "http://127.0.0.1:5173",
         "http://localhost:5173",
-        "tauri://localhost",
-        "https://tauri.localhost",
-        "http://tauri.localhost",
+        "app://scandetection",
     ]
 
 

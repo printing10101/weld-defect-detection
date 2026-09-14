@@ -10,6 +10,8 @@ export default [
       "node_modules",
       "dist",
       "src-tauri/target",
+      // Electron 壳为纯 CJS（package.json type:module 下用 .cjs），不走 TS lint 链
+      "electron/**",
       "**/*.d.ts",
     ],
   },

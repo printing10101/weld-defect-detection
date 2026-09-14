@@ -3,10 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
+    "app:dev": "node dev.mjs",
     "build": "vue-tsc --noEmit && vite build",
-    "build:pkg": "vue-tsc --noEmit && vite build --config vite.tauri.config.ts",
+    "build:pkg": "vue-tsc --noEmit && vite build --config vite.desktop.config.ts",
+    "dist": "pnpm build:pkg && electron-builder --win nsis --config electron-builder.yml",
     "typecheck": "vue-tsc --noEmit",
     "lint": "eslint",
     "test": "vitest",
@@ -14,16 +17,16 @@
     "format": "prettier --write \"src/**/*.{ts,vue,css}\" \"*.{ts,js,json,html}\""
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.11.1",
     "pinia": "^2.3.1",
     "vue": "^3.4.0",
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^20.19.39",
     "@vitejs/plugin-vue": "^5.0.0",
     "@vue/test-utils": "2.4.9",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
     "eslint": "^9.0.0",
     "eslint-plugin-vue": "^9.0.0",
     "jsdom": "^29.1.0",
