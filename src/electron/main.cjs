@@ -451,12 +451,17 @@ if (!gotSingleInstanceLock) {
 
   // 数据目录（对应 main.rs resolve_data_dir）：打包版 = %APPDATA%/<identifier>
   // （NSIS 卸载清空安装目录，业务数据不能随之删除；且与 Tauri 版同路径，老
-  // 用户升级后 scan.db/影像副本/主密钥/审计链原地延续）；开发版 = 仓库根
-  // （沿用仓库 data/ 的既有开发数据，与 launch_app.vbs 调试流程同源）。
-  userDataDir = app.isPackaged
-    ? path.join(app.getPath("appData"), "com.scandetection.sd")
-    : resolveAppRootDev();
-  app.setPath("userData", userDataDir);
+  // 用户升级后 scan.db/影像副本/主密钥/审计链原地延续），Chromium 配置目录
+  // （userData）随之同路径——它们本就该随应用聚在一处；开发版业务数据沿用
+  // 仓库 data/（与 launch_app.vbs 调试流程同源），但 Chromium 缓存必须留在
+  // Electron 默认 userData（%APPDATA%/Electron）——曾把 userData 指到仓库根，
+  // Cache/GPUCache 等十余个 Chromium 目录瞬间污染仓库根目录。
+  if (app.isPackaged) {
+    userDataDir = path.join(app.getPath("appData"), "com.scandetection.sd");
+    app.setPath("userData", userDataDir);
+  } else {
+    userDataDir = resolveAppRootDev();
+  }
 
   // app:// 须在 ready 前注册为标准协议（页面 origin 才是 app://scandetection）。
   protocol.registerSchemesAsPrivileged([

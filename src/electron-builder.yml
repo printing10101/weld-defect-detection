@@ -1,0 +1,72 @@
+# ScanDetection 桌面安装包配置（electron-builder，Windows NSIS）。
+# 对应原 Tauri bundle 配置：per-user 安装、中英双语、安装目录可改、
+# 卸载保留用户数据（%APPDATA%/com.scandetection.sd 的 scan.db/主密钥/审计链）。
+#
+# 布局约定（main.cjs resolveAppRoot 依赖，改动须同步）：
+#   <安装目录>/ScanDetection.exe
+#   <安装目录>/resources/electron + dist        （files，asar 内）
+#   <安装目录>/resources/python_embed/python.exe（extraResources）
+#   <安装目录>/resources/backend/**              （extraResources）
+#   <安装目录>/resources/models/weights/**       （extraResources）
+appId: com.scandetection.sd
+productName: 射线焊缝缺陷智能检测系统
+# 冒烟脚本（smoke_test_installer.ps1）按 ScanDetection.exe 找主程序，
+# 故可执行文件名固定 ASCII，产品名保持中文。
+executableName: ScanDetection
+copyright: ScanDetection
+# 产物输出到 release/：默认值 dist 会与 vite 产物目录冲突，必须改。
+directories:
+  output: release
+# Electron 主进程/preload 与前端产物进 asar；大体积 Python 运行时走
+# extraResources（asar 外，后端按真实目录访问）。
+files:
+  - dist/**
+  - electron/**
+asar: true
+extraResources:
+  - from: python_embed
+    to: python_embed
+  - from: ../backend/__init__.py
+    to: backend/__init__.py
+  - from: ../backend/alembic.ini
+    to: backend/alembic.ini
+  - from: ../backend/annotator
+    to: backend/annotator
+  - from: ../backend/app
+    to: backend/app
+  - from: ../backend/configs
+    to: backend/configs
+  - from: ../backend/domain
+    to: backend/domain
+  - from: ../backend/evaluation
+    to: backend/evaluation
+  - from: ../backend/infra
+    to: backend/infra
+  - from: ../backend/migrations
+    to: backend/migrations
+  - from: ../backend/models/__init__.py
+    to: backend/models/__init__.py
+  # 权重硬门禁（build_installer.ps1 第 5 步）校验本目录非空；
+  # 缺 best.onnx 时允许打包（降级版），正式交付用 -RequireWeights 阻止。
+  - from: ../backend/models/weights
+    to: backend/models/weights
+  - from: ../models/weights
+    to: models/weights
+win:
+  icon: electron/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  perMachine: false # 当前用户级安装（对应 Tauri installMode=currentUser，免 UAC）
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false # 卸载不删 %APPDATA% 检测数据（合规留痕）
+  displayLanguageSelector: true
+  installerLanguages:
+    - zh_CN
+    - en_US
+  artifactName: ${productName}_${version}_${arch}-setup.${ext}
+# 单机离线分发，不配置自动更新源。
+publish: null
