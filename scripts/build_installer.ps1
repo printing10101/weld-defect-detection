@@ -2,13 +2,14 @@
 # 用法：在仓库根目录执行
 #   powershell -ExecutionPolicy Bypass -File scripts\build_installer.ps1            # 无权重也可构建（警告）
 #   powershell -ExecutionPolicy Bypass -File scripts\build_installer.ps1 -RequireWeights   # 无权重即中止（正式交付用）
-# 产物：src\src-tauri\target\release\bundle\nsis\射线焊缝缺陷智能检测系统_0.1.0_x64-setup.exe
+# 产物：src\release\射线焊缝缺陷智能检测系统_0.1.0_x64-setup.exe（electron-builder NSIS）
 #
 # 交付口径：对外只交付本安装包。scripts\launch_app.vbs / stop_app.vbs 为开发
 # 调试启动器（会打开系统默认浏览器），不随安装包分发，禁止作为交付物外发。
 #
 # 前置（打包机一次性准备）：
-#   1. Rust toolchain（rustup，MSVC target）+ Node.js 20+/pnpm 10+
+#   1. Node.js 20+/pnpm 10+（桌面壳已从 Tauri/Rust 迁移到 Electron，无需 Rust 工具链；
+#      网络受限时先设 $env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"）
 #   2. 后端开发环境 backend\.venv（仅用于执行裁剪脚本，不随包分发）
 #   3. 模型权重：把训练产物 best.onnx 放到 backend\models\weights\best.onnx
 param(
@@ -67,9 +68,9 @@ try {
         pnpm install --frozen-lockfile
         if ($LASTEXITCODE -ne 0) { throw "pnpm install 失败" }
 
-        Write-Host "==> [4/5] Tauri 打包（前端构建 + Rust release 编译 + 资源收集 + NSIS 安装器）" -ForegroundColor Cyan
-        pnpm exec tauri build
-        if ($LASTEXITCODE -ne 0) { throw "tauri build 失败" }
+        Write-Host "==> [4/5] Electron 打包（前端构建 + asar 收集 + 资源收集 + NSIS 安装器）" -ForegroundColor Cyan
+        pnpm run dist
+        if ($LASTEXITCODE -ne 0) { throw "electron-builder 打包失败" }
     } finally {
         Pop-Location
     }
@@ -80,7 +81,7 @@ try {
     }
 }
 
-$installer = Get-ChildItem (Join-Path $root "src\src-tauri\target\release\bundle\nsis\*-setup.exe") |
+$installer = Get-ChildItem (Join-Path $root "src\release\*-setup.exe") |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $installer) { throw "未找到安装包产物" }
 
@@ -89,22 +90,23 @@ Write-Host ("安装包: " + $installer.FullName)
 Write-Host ("大小:   " + [math]::Round($installer.Length / 1MB, 1) + " MB")
 
 # 交付前校验：训练模型权重必须真正进入打包产物。
-# 历史事故：tauri.windows.conf.json 的 bundle.resources 覆盖了主配置且漏配
-# models/weights，安装包的 models\weights 成了空目录——当时靠 resolve_model_uri
-# 的双锚点回落到 backend\models\weights 才没崩，但"配置指向空目录"本身是隐患
-# （任何人不动双锚点就会静默降级到连通域基线）。此处把"权重入包"变成硬门禁。
+# 历史事故：Tauri 时代的 tauri.windows.conf.json 的 bundle.resources 覆盖了主
+# 配置且漏配 models/weights，安装包的 models\weights 成了空目录——当时靠
+# resolve_model_uri 的双锚点回落到 backend\models\weights 才没崩，但"配置指向
+# 空目录"本身是隐患（任何人不动双锚点就会静默降级到连通域基线）。此处把
+# "权重入包"变成硬门禁（electron-builder 走 extraResources，同样必须校验）。
 $bundledWeights = @(
-    (Join-Path $root "src\src-tauri\target\release\models\weights\best.onnx"),
-    (Join-Path $root "src\src-tauri\target\release\backend\models\weights\best.onnx")
+    (Join-Path $root "src\release\win-unpacked\resources\models\weights\best.onnx"),
+    (Join-Path $root "src\release\win-unpacked\resources\backend\models\weights\best.onnx")
 ) | Where-Object { Test-Path $_ }
 if ($bundledWeights.Count -eq 0) {
-    throw "打包产物未包含 best.onnx —— 安装版将无法加载训练模型（回退连通域基线）。请检查 tauri.windows.conf.json 的 bundle.resources。"
+    throw "打包产物未包含 best.onnx —— 安装版将无法加载训练模型（回退连通域基线）。请检查 electron-builder.yml 的 extraResources。"
 }
 Write-Host (">>> 权重已入包: " + $bundledWeights[0]) -ForegroundColor Green
 Write-Host ""
-Write-Host "分发说明：安装包离线自足（内嵌 Python 运行时 + 全部后端依赖 + WebView2"
-Write-Host "离线安装器），目标机无需联网；当前用户级安装，WebView2 缺失时需允许"
-Write-Host "一次 UAC 提权完成其机器级安装。未签名：SmartScreen 提示点'仍要运行'。"
+Write-Host "分发说明：安装包离线自足（内嵌 Chromium + Python 运行时 + 全部后端依赖），"
+Write-Host "目标机无需联网、无需预装 WebView2 或任何浏览器运行时；当前用户级安装，"
+Write-Host "免管理员权限。未签名：SmartScreen 提示点'仍要运行'。"
 if (-not (Test-Path $weights)) {
     Write-Host "!!!!! 再次提醒：本安装包不含 AI 权重（基线降级版），禁止正式交付 !!!!!" -ForegroundColor Yellow
 }

@@ -43,10 +43,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: src/pnpm-lock.yaml
 
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src/src-tauri
+      # 桌面壳为 Electron：GitHub Actions 出海流量下载 Electron 二进制免镜像。
 
       - name: Stage model weights (if present)
         id: weights
@@ -79,7 +76,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: installer-${{ github.ref_name }}
-          path: src/src-tauri/target/release/bundle/nsis/*-setup.exe
+          path: src/release/*-setup.exe
           if-no-files-found: error
 
       - name: Attach to GitHub Release
@@ -88,7 +85,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $exe = Get-ChildItem "src\src-tauri\target\release\bundle\nsis\*-setup.exe" |
+          $exe = Get-ChildItem "src\release\*-setup.exe" |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
           $note = ""
           if ("${{ steps.weights.outputs.present }}" -ne "true") {
