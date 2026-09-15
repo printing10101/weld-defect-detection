@@ -110,6 +110,9 @@ async def report(
     image: Annotated[UploadFile | None, File()] = None,
     image_id: Annotated[str | None, Form()] = None,
     pixel_spacing_mm: Annotated[float | None, Form()] = None,
+    # 设备标定档案关联（G23）：显式未给 pixel_spacing_mm 时自动注入该设备
+    # 最近一次标定值；显式标定优先（调用方口径与 /detect 一致）
+    device_id: Annotated[str | None, Form(max_length=64)] = None,
     base_metal_thickness_mm: Annotated[float | None, Form()] = None,
     standard_id: Annotated[str | None, Form()] = None,
     iqi_roi: Annotated[str | None, Form()] = None,
@@ -148,6 +151,29 @@ async def report(
             detail={"code": "INVALID_THICKNESS", "message": "base_metal_thickness_mm 必须为正数"},
         )
 
+    # 设备标定自动注入（G23）：显式标定优先；关联设备时取最近一次标定值，
+    # 注入原因进 gate_warnings（前端告警面板可见）。设备不存在 404（显式
+    # 失败优于静默忽略）；设备无标定记录则不注入、照常走未标定熔断语义。
+    spacing_note: str | None = None
+    if device_id and pixel_spacing_mm is None:
+        if reg.device_store.get(device_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "DEVICE_NOT_FOUND", "message": f"设备档案不存在: {device_id}"},
+            )
+        calib = reg.device_store.latest_calibration(device_id)
+        if calib is not None:
+            pixel_spacing_mm = float(calib["pixel_spacing_mm"])
+            spacing_note = (
+                f"像素标定自动注入自设备档案 {device_id}"
+                f"（标定人 {calib.get('calibrator') or '未知'}，"
+                f"标定于 {calib.get('calibrated_at') or '未知时间'}）"
+            )
+        else:
+            spacing_note = (
+                f"设备 {device_id} 暂无标定记录，本次评片按未标定处理（不输出物理尺寸/级别）"
+            )
+
     if image_id:
         # 重生成模式：不重跑检测/判定。KeyError 需映射 404，否则落到全局 500。
         try:
@@ -185,6 +211,7 @@ async def report(
                     content_sha256=file_hash,
                     report_meta=meta,
                     allow_preliminary_grade=allow_preliminary_grade,
+                    spacing_note=spacing_note,
                 )
             )
     else:

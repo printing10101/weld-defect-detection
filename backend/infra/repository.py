@@ -790,6 +790,7 @@ class InspectionRepository:
             "modality": rec.modality,
             "workpiece_no": rec.workpiece_no,
             "weld_no": rec.weld_no,
+            "film_no": rec.film_no,
             "pixel_spacing_mm": rec.pixel_spacing_mm,
             "base_metal_thickness_mm": rec.base_metal_thickness_mm,
             "iqi_pass": rec.iqi_pass,

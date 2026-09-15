@@ -40,6 +40,9 @@ class ImageRecord(Base):
     modality: Mapped[str] = mapped_column(String(16))  # CR | DR | DICOM | GENERIC
     workpiece_no: Mapped[str | None] = mapped_column(String(64), default=None)
     weld_no: Mapped[str | None] = mapped_column(String(64), default=None)
+    # 片号（G05）：底片自身编号，印字 OCR 结构化抽取（stamp.extract_film_no）；
+    # NULL=印字未识别到片号（报告回退 image_id 短号口径）
+    film_no: Mapped[str | None] = mapped_column(String(64), default=None)
     pixel_spacing_mm: Mapped[float | None] = mapped_column(Float, default=None)
     base_metal_thickness_mm: Mapped[float | None] = mapped_column(Float, default=None)
     iqi_pass: Mapped[bool | None] = mapped_column(default=None)

@@ -26,6 +26,7 @@ class ReportContent:
     generated_at: str
     workpiece_no: str | None
     weld_no: str | None
+    film_no: str | None  # 片号（G05）：印字抽取；NULL 时评定表回退影像短号
     source_type: str
     modality: str
     pixel_spacing_mm: float | None
@@ -69,6 +70,7 @@ def build_report_content(
         generated_at=str((report or {}).get("generated_at") or image.get("created_at") or ""),
         workpiece_no=image.get("workpiece_no"),
         weld_no=image.get("weld_no"),
+        film_no=image.get("film_no"),
         source_type=str(image.get("source_type") or "image"),
         modality=str(image.get("modality") or "GENERIC"),
         pixel_spacing_mm=image.get("pixel_spacing_mm"),

@@ -28,7 +28,14 @@ import numpy as np
 
 _LOG = logging.getLogger("scandetection.stamp")
 
-__all__ = ["StampCfg", "StampResult", "filter_stamp_zone", "read_stamp", "read_stamp_aligned"]
+__all__ = [
+    "StampCfg",
+    "StampResult",
+    "extract_film_no",
+    "filter_stamp_zone",
+    "read_stamp",
+    "read_stamp_aligned",
+]
 
 
 @dataclasses.dataclass
@@ -114,6 +121,23 @@ def is_id_token(text: str) -> bool:
 
 def _is_stamp_token(text: str) -> bool:
     return is_date_token(text) or is_id_token(text)
+
+
+def extract_film_no(text: str | None) -> str | None:
+    """从印字文本抽取片号（G05 独立片号字段的结构化来源）。
+
+    口径（保守）：取阅读序首个「编号样且非日期」的 token——片号/底片编号
+    与日期在印字中常见并存。编号样即 is_id_token（含 ≥3 位连续数字的字母
+    数字串，如 PG101-1-1 / B3-0421 / No.0421）；纯两位序号（"1-1"）不匹配，
+    宁可漏抽落 NULL 由人工补录，不冒认噪声。OCR 的 O/0、I/1 混淆不做纠正：
+    落库的是"印字读到什么"，不是"它应该是什么"。
+    """
+    if not text:
+        return None
+    for token in text.split():
+        if is_id_token(token):
+            return token[:64]
+    return None
 
 
 # ---------------------------------------------------------------------------

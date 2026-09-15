@@ -24,6 +24,7 @@ from backend.app.batch_queue import BatchItem, BatchManager
 from backend.domain.stamp import (
     StampCfg,
     StampResult,
+    extract_film_no,
     filter_stamp_zone,
     is_date_token,
     is_id_token,
@@ -60,6 +61,17 @@ def test_is_id_token_accepts_number_like(text: str) -> None:
 def test_is_id_token_rejects_non_number_like(text: str) -> None:
     # 纯日期串不算编号（避免同一段文字重复计入）；纯字母/数字过短不算编号
     assert not is_id_token(text)
+
+
+def test_extract_film_no_from_stamp_text() -> None:
+    """G05 片号抽取：取首个编号样 token；日期不算片号；无编号样落 None。"""
+    assert extract_film_no("PG101-1-1 23年1月8日") == "PG101-1-1"
+    assert extract_film_no("2023-08-12 No.0421") == "No.0421"
+    assert extract_film_no("W12-0345 20230812") == "W12-0345"
+    # 只有日期 → 无片号（宁可 NULL 人工补录，不冒认）
+    assert extract_film_no("2023-08-12") is None
+    assert extract_film_no("") is None
+    assert extract_film_no(None) is None
 
 
 def test_stamp_result_summary_contract() -> None:

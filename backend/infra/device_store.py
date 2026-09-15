@@ -144,6 +144,11 @@ class DeviceStore:
             ).all()
         return [self._calib_to_dict(r) for r in rows]
 
+    def latest_calibration(self, device_id: str) -> dict[str, Any] | None:
+        """最近一次标定（无标定记录返回 None）；评片链路标定自动注入（G23）用。"""
+        calibs = self.list_calibrations(device_id)
+        return calibs[0] if calibs else None
+
     # ---- 内部 ----
     def _device_with_latest(self, device_id: str) -> dict[str, Any]:
         dev = self.get(device_id)

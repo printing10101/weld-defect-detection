@@ -353,8 +353,12 @@ def _report_disclaimer(standard_id: str) -> str:
         try:
             tables = load_standard_tables(standard_id)
             return disclaimer_for(tables)
-        except Exception:  # noqa: BLE001, S110 - 表缺失/解析失败 → 回退默认，不阻断出片
-            pass
+        except Exception as exc:  # noqa: BLE001 - 表缺失/解析失败 → 回退默认，不阻断出片
+            # 表损坏恰是最需要强声明（authorized 表不可读）的场景：声明在
+            # 正式交付的合规 PDF 里无声消失不可接受，至少留痕告警。
+            _LOG.warning(
+                "报告免责声明加载失败 standard=%s（PDF 将无声明输出）: %s", standard_id, exc
+            )
     return ""
 
 
@@ -1058,7 +1062,8 @@ def _eval_table(styles: dict[str, ParagraphStyle], vals: list[list[str]]) -> Tab
 def _eval_row_values(c) -> list[list[str]]:
     """评定表数据行（8 列：焊缝/片号/黑度/丝号/缺陷代号/部位/等级/备注）。"""
     weld = c.weld_no or "—"
-    film = c.image_id[-6:].upper()  # 片号取影像短号（完整编号见报告元数据/附图）
+    # 片号（G05）：优先印字抽取的独立片号；未识别到时回退影像短号口径
+    film = (c.film_no or c.image_id[-6:]).upper()
     dens = f"{c.density:.1f}" if c.density is not None else ""
     wire = str((c.iqi_detail or {}).get("achieved") or "")
     remark = f"{c.base_metal_thickness_mm:g}mm" if c.base_metal_thickness_mm else ""

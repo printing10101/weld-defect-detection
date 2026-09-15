@@ -342,3 +342,75 @@ def test_report_single_duplicate_hint_and_warnings(tmp_path) -> None:
     assert len(second["duplicates"]) == n_before + 1
     assert second["duplicates"][-1]["image_id"] == first["image_id"]
     assert any("内容完全相同" in w for w in second["warnings"])
+
+
+def test_report_device_calibration_injection(tmp_path) -> None:
+    """G23 设备标定自动注入：device_id 关联设备档案评片。
+
+    - 设备有标定：最近标定值注入（落库 pixel_spacing_mm 生效），告警留痕；
+    - 设备无标定：不注入，告警明示"按未标定处理"；
+    - 设备不存在：404（显式失败优于静默忽略）。
+    """
+    from backend.app import dependencies as deps
+
+    img = tmp_path / "syn_dev.png"
+    _synthetic(img)
+    with TestClient(app) as client:
+        dev = client.post(
+            "/api/v1/devices",
+            json={"name": "CR-G23", "model": "X-Ray", "serial_no": "SN-G23"},
+        ).json()
+        client.post(
+            f"/api/v1/devices/{dev['device_id']}/calibrations",
+            json={"calibrator": "bob", "pixel_spacing_mm": 0.085},
+        ).raise_for_status()
+        out = _post_report(client, img, device_id=dev["device_id"], base_metal_thickness_mm="20")
+        assert any("自动注入自设备档案" in w for w in out["warnings"])
+        record = deps.get_registry().repository.get_image(out["image_id"])
+        assert record is not None and record["pixel_spacing_mm"] == 0.085
+
+        bare = client.post(
+            "/api/v1/devices",
+            json={"name": "CR-G23-BARE", "model": "X-Ray", "serial_no": "SN-G23B"},
+        ).json()
+        out2 = _post_report(client, img, device_id=bare["device_id"], base_metal_thickness_mm="20")
+        assert any("暂无标定记录" in w for w in out2["warnings"])
+
+    with TestClient(app) as client:
+        img2 = tmp_path / "syn_dev2.png"
+        _synthetic(img2)
+        with open(img2, "rb") as f:
+            resp = client.post(
+                "/api/v1/report",
+                files={"image": (img2.name, f, "image/png")},
+                data={
+                    "device_id": "no-such-device",
+                    "base_metal_thickness_mm": "20",
+                    "force": "true",
+                },
+            )
+        assert resp.status_code == 404
+
+
+def test_report_persists_film_no_from_stamp(tmp_path, monkeypatch) -> None:
+    """G05：印字文本中的片号结构化抽取并落库（images.film_no）。"""
+    import backend.app.pipelines as pipelines_mod
+    from backend.app import dependencies as deps
+    from backend.domain.stamp import StampResult
+
+    def _fake_stamp(gray, cfg, film=None):
+        return StampResult(
+            status="present",
+            text="PG101-1-1 23年1月8日",
+            orientation="normal",
+            confidence=0.9,
+        )
+
+    monkeypatch.setattr(pipelines_mod, "read_stamp_aligned", _fake_stamp)
+    img = tmp_path / "syn_filmno.png"
+    _synthetic(img)
+    with TestClient(app) as client:
+        out = _post_report(client, img, base_metal_thickness_mm="20")
+        record = deps.get_registry().repository.get_image(out["image_id"])
+        assert record is not None
+        assert record["film_no"] == "PG101-1-1"
