@@ -3,10 +3,6 @@ node_modules/
 dist/
 *.local
 
-# Rust / Tauri
-target/
-src/src-tauri/target/
-
 # Python
 __pycache__/
 *.py[cod]
@@ -52,9 +48,7 @@ backend/models/weights/*.pt
 # 打包/构建产物（非源码，不入库）
 _pkg/
 installer_src/
-src/src-tauri/gen/
-src/src-tauri/target/
-# Tauri 打包运行时：嵌入版 Python + 依赖（构建产物，体积大，不入库）
+# 嵌入版 Python + 依赖（Electron 打包运行时，体积大，不入库）
 src/python_embed/
 # 本地模型副本（安装包由 backend/models/weights 注入，不入库）
 models/weights/
@@ -63,12 +57,10 @@ tools/llama/
 models/llm/
 nul
 
-# 本地构建/调试产物（不入库）：tauri-cli 安装/构建日志、下载的二进制包、
+# 本地构建/调试产物（不入库）：构建日志、下载的二进制包、
 # 本地 cargo 镜像配置（rsproxy，个人网络环境，不入库防 CI 失败）
 .cargo/
 build_log*.txt
-tauri_build*.txt
-install_tauri_cli.txt
 cli.tgz
 
 # Env / secrets

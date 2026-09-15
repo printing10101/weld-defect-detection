@@ -1,12 +1,9 @@
 ﻿server:
   host: 127.0.0.1
   port: 18773
-  cors_origins:                       # CORS 鍏佽婧愶紙Tauri webview + 鏈湴寮€鍙戞簮锛涚 *锛?
+  cors_origins:                       # CORS 允许源（Electron webview + 本地开发源；禁 *）
     - http://127.0.0.1:5173
     - http://localhost:5173
-    - tauri://localhost
-    - https://tauri.localhost
-    - http://tauri.localhost
     - app://scandetection
 model:
   default_uri: models/weights/best.onnx
@@ -264,7 +261,7 @@ watchdog:  # S-09 鍐呭瓨鐩戞帶涓庤嚜鎰堬紙鐢熶骇寮€鍚細�
   interval_sec: 30.0      # 閲囨牱鍛ㄦ湡锛堢锛?
   rss_warn_mb: 2048.0     # RSS 鍛婅闃堝€硷紙MB锛夆啋 security alert + 瀹¤
   rss_restart_mb: 4096.0  # RSS 閲嶅惎鏍囪闃堝€硷紙MB锛夛紱graceful_restart=true 鏃跺啓鏍囪鏂囦欢
-  graceful_restart: true  # true=鍐?data/restart_required锛岀敱 Tauri 澹虫娴嬪苟浼橀泤閲嶅惎鍚庣
+  graceful_restart: true  # true=写 data/restart_required，由桌面壳（Electron）检测并优雅重启后端
 disk_space:  # S-20 纾佺洏姘翠綅鍛婅锛堢敓浜у紑鍚細闃茬鐩樺啓婊″鑷?DB/WAL/鎶ュ憡鏁呴殰锛?
   enabled: true           # 鍚庡彴绾跨▼鍛ㄦ湡缁熻 data 鍒嗗尯鍓╀綑绌洪棿锛屼綆姘翠綅鍛婅
   interval_sec: 300.0     # 閲囨牱鍛ㄦ湡锛堢锛夛紝浣庨閬垮厤鏃犺皳 I/O
