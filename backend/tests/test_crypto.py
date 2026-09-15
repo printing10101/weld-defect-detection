@@ -27,6 +27,7 @@ from backend.infra.crypto import (
     AesCrypto,
     CryptoIntegrityError,
     CryptoKeyError,
+    IncrementalSm3,
     SoftSmProvider,
     get_provider,
     sm3_hex,
@@ -398,3 +399,65 @@ def test_read_gray_fallback_plaintext(tmp_path: Path, monkeypatch) -> None:
     p.write_bytes(_png_bytes())
     img = _read_gray(str(p))
     assert img is not None and img.shape == (60, 80)
+
+
+# ---------------------------------------------------------------------------
+# 流式加密（encrypt_stream）：信封与一次性 encrypt 一致，大文件分块控内存
+# ---------------------------------------------------------------------------
+
+
+def test_incremental_sm3_matches_one_shot() -> None:
+    """增量 SM3 与一次性 sm3_hex 等值（覆盖 64 字节块边界与不等长分块）。"""
+    import random
+
+    rng = random.Random(20260915)
+    for n in (0, 1, 55, 63, 64, 65, 127, 128, 129, 1000, 4096):
+        data = rng.randbytes(n)
+        h = IncrementalSm3()
+        step = max(1, n // 7)  # 不等长分块喂入
+        for i in range(0, n, step):
+            h.update(data[i : i + step])
+        assert h.hexdigest() == sm3_hex(data), f"n={n}"
+
+
+def test_encrypt_stream_byte_identical_to_encrypt(monkeypatch, tmp_path) -> None:
+    """同 nonce 下流式信封与一次性 encrypt 逐字节一致（存量密文互解不变）。
+
+    明文跨多个 1MiB 块，验证 CTR 块序号跨块连续与增量 HMAC 截断正确。
+    """
+    import io
+    import random
+
+    from backend.infra import crypto as crypto_mod
+
+    rng = random.Random(7)
+    plain = rng.randbytes((1 << 20) * 2 + 12345)
+    cipher = SoftSmProvider(bytes.fromhex("11" * 32))
+    fixed = bytes([0xAB] * 16)
+    real_urandom = crypto_mod.os.urandom
+    monkeypatch.setattr(crypto_mod.os, "urandom", lambda n: fixed if n == 16 else real_urandom(n))
+    one_shot = cipher.encrypt(plain, aad=b"film")
+    sink = io.BytesIO()
+    cipher.encrypt_stream(io.BytesIO(plain), sink, aad=b"film")
+    assert sink.getvalue() == one_shot
+
+
+def test_encrypt_stream_roundtrip_tamper_and_aad() -> None:
+    """流式密文解密往返；中部篡改与 aad 不匹配均拒绝（encrypt-then-MAC 语义）。"""
+    import io
+    import random
+
+    rng = random.Random(3)
+    plain = rng.randbytes(70000)  # 跨块
+    cipher = SoftSmProvider(bytes.fromhex("22" * 32))
+    sink = io.BytesIO()
+    cipher.encrypt_stream(io.BytesIO(plain), sink, aad=b"ctx")
+    ct = sink.getvalue()
+    assert ct.startswith(b"SDC2")
+    assert cipher.decrypt(ct, aad=b"ctx") == plain
+    tampered = bytearray(ct)
+    tampered[len(ct) // 2] ^= 0x01
+    with pytest.raises(CryptoIntegrityError):
+        cipher.decrypt(bytes(tampered), aad=b"ctx")
+    with pytest.raises(CryptoIntegrityError):
+        cipher.decrypt(ct, aad=b"other")

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import time
 import uuid
@@ -37,7 +38,12 @@ from backend.domain.quantify import MaskRefineCfg, get_quantifier
 from backend.domain.recommend import recommend
 from backend.domain.review import ReviewDecision, ReviewRole, resolve_review
 from backend.domain.spacing import resolve_spacing as _resolve_spacing  # 单一真源（§T8/§6）
-from backend.domain.stamp import StampCfg, filter_stamp_zone, read_stamp_aligned
+from backend.domain.stamp import (
+    StampCfg,
+    extract_film_no,
+    filter_stamp_zone,
+    read_stamp_aligned,
+)
 from backend.domain.standards.tables.loader import disclaimer_for
 from backend.evaluation.gate_rejects import GateRejectStore
 from backend.infra.config import resolve_config_path
@@ -190,6 +196,7 @@ class InspectionPipeline:
         batch_no: str | None = None,
         report_meta: dict[str, str] | None = None,
         allow_preliminary_grade: bool = False,
+        spacing_note: str | None = None,
     ) -> dict:
         """执行全链路并落库+生成报告，返回结果 dict。
 
@@ -314,6 +321,10 @@ class InspectionPipeline:
         # 门禁降级放行的告警（require_dpi=false / allow_8bit=true 路径）：
         # 不阻断评片，但必须在结果与日志中留痕，避免"未验证"被静默当作合格。
         gate_warnings: list[str] = []
+        # 标定注入留痕（G23）：像素标定来自设备档案或设备无标定的结论，
+        # 评片员须能在结果里看到标定来源/缺失（响应 warnings → 告警面板）。
+        if spacing_note:
+            gate_warnings.append(spacing_note)
         if dpi is None and not reg.config.gate.require_dpi:
             gate_warnings.append(
                 "无法确定扫描分辨率（无 PixelSpacing/文件元数据），已按配置放行并留档告警"
@@ -351,9 +362,9 @@ class InspectionPipeline:
                 quality.passed,
             )
 
-        # 3. 原图副本落盘（报告缺陷图谱数据源；勿删）
-        suffix = image_path.suffix or ".png"
-        saved = self._persist_image(image_path, image_id, suffix)
+        # （原图副本落盘移至第 6 步落库前一刻：副本先行落盘时，其后的检测/
+        # 判定/落库任何一步失败都会留下无台账的孤儿密文副本，批量长跑下
+        # 静默占满磁盘——磁盘看门狗只报警不定位。）
 
         # 4. 预处理 + 检测 + 量化（ 基线 /  训练模型，同一接口）
         # 预处理（保边去噪+增强）后送检测；黑度/IQI/伪缺陷/质量门禁已在原始
@@ -504,7 +515,10 @@ class InspectionPipeline:
         disposition_label = rec.disposition_label
         disposition_actions = list(rec.actions)
 
-        # 6. 落库（images + defects + reports，一个事务）
+        # 6. 原图副本落盘（报告缺陷图谱数据源；勿删）+ 落库（一个事务）：
+        # 两者紧邻执行，落库失败即回收副本，不留无台账的孤儿文件。
+        suffix = image_path.suffix or ".png"
+        saved = self._persist_image(image_path, image_id, suffix)
         image_row = {
             "id": image_id,
             "path": str(saved),
@@ -546,6 +560,8 @@ class InspectionPipeline:
             "stamp_orientation": stamp.orientation,
             "stamp_confidence": stamp.confidence,
             "stamp_need_review": stamp_need_review,
+            # 片号（G05）：印字文本结构化抽取；未识别到片号落 NULL
+            "film_no": extract_film_no(stamp.text),
         }
         # per_defect_grade 与 detections 按序对齐；长度不符说明 grader 契约被破坏，
         # 与其把级别错配到别的缺陷上（安全事故），不如整体退化为"无级别+需复核"。
@@ -593,7 +609,13 @@ class InspectionPipeline:
             "signer": signer,
             "basis": basis,
         }
-        reg.repository.create_inspection(image_row, defect_rows, report_row)
+        try:
+            reg.repository.create_inspection(image_row, defect_rows, report_row)
+        except Exception:
+            # 落库失败：回收刚落盘的副本，不留孤儿密文（无台账文件无法经
+            # API 定位清理，只能永久占盘）。
+            saved.unlink(missing_ok=True)
+            raise
 
         # 不可变审计日志：评片创建即记一笔，工业合规追溯。
         # actor = 请求头操作员（X-Operator-Name）；未携带时回退 "system"。
@@ -740,11 +762,13 @@ class InspectionPipeline:
 
     def _persist_reject(self, src: Path, reject_id: str, suffix: str) -> Path:
         """不合格底片副本归档到 gate.rejects_dir（密文，模式同 _persist_image）。"""
-        rejects_dir = Path(resolve_config_path(self._reg.config.gate.rejects_dir))
-        rejects_dir.mkdir(parents=True, exist_ok=True)
-        dest = rejects_dir / f"{reject_id}{suffix}"
-        self._write_encrypted_copy(src, dest, what="不合格底片")
-        return dest
+        return self._persist_copy(
+            src,
+            Path(resolve_config_path(self._reg.config.gate.rejects_dir)),
+            reject_id,
+            suffix,
+            what="不合格底片",
+        )
 
     def regenerate_report(self, image_id: str, template: str = "standard") -> dict:
         """对已入库检查重新生成报告（不重跑检测/判定）。"""
@@ -820,7 +844,9 @@ class InspectionPipeline:
         SCAN_CRYPTO_KEY 或本地持久密钥文件 data/.crypto_key（首启自动生成，
         见 crypto.py）；密钥不可用（env 与本地密钥文件均失败）时拒绝明文
         落盘并留痕——静态加密失效宁可阻断归档，不可静默降级（GB/T 28452
-        用户数据保密性口径）。单次 write_bytes 直接写密文，明文不落盘。
+        用户数据保密性口径）。流式分块读写（crypto.encrypt_stream）：
+        大底片不再整文件进内存（原内存峰值 ≈2×文件大小×并发 worker 数）。
+        写失败回收半截密文，不留无台账的孤儿文件。
         """
         if not self._reg.config.security.encrypt:
             shutil.copyfile(src, dest)
@@ -834,14 +860,42 @@ class InspectionPipeline:
         except CryptoKeyError as exc:
             _LOG.error("静态加密密钥不可用（%s）：拒绝将%s以明文落盘", exc, what)
             raise
-        dest.write_bytes(cipher.encrypt(src.read_bytes()))
+        try:
+            stream = getattr(cipher, "encrypt_stream", None)
+            with open(src, "rb") as fin, open(dest, "wb") as fout:
+                if stream is not None:
+                    stream(fin, fout)  # 软国密：流式（与一次性 encrypt 同信封）
+                else:
+                    fout.write(cipher.encrypt(fin.read()))  # 硬件 provider 无流式接口
+        except BaseException:
+            dest.unlink(missing_ok=True)
+            raise
+
+    def _persist_copy(
+        self, src: Path, directory: Path, stem: str, suffix: str, *, what: str
+    ) -> Path:
+        """影像类副本归档公共路径：suffix 白名单清洗 + 目录包含校验 + 密文落盘。
+
+        suffix 源自上传文件名（外部输入）：白名单限定 ".字母数字(≤8)"，
+        不合规回退 ".png"；stem 为内部生成的 UUID。dest 解析后必须仍在
+        目标目录内（纵深防御，防拼接逃逸）。
+        """
+        directory.mkdir(parents=True, exist_ok=True)
+        safe = suffix if re.fullmatch(r"\.[A-Za-z0-9]{1,8}", suffix or "") else ".png"
+        dest = directory / f"{stem}{safe}"
+        if not dest.resolve().is_relative_to(directory.resolve()):
+            raise ValueError(f"{what}归档路径越界: {dest}")
+        self._write_encrypted_copy(src, dest, what=what)
+        return dest
 
     def _persist_image(self, src: Path, image_id: str, suffix: str) -> Path:
-        images_dir = Path(resolve_config_path(self._reg.config.paths.images_dir))
-        images_dir.mkdir(parents=True, exist_ok=True)
-        dest = images_dir / f"{image_id}{suffix}"
-        self._write_encrypted_copy(src, dest, what="影像副本")
-        return dest
+        return self._persist_copy(
+            src,
+            Path(resolve_config_path(self._reg.config.paths.images_dir)),
+            image_id,
+            suffix,
+            what="影像副本",
+        )
 
     # ---- 人工复核缺陷增删改（DB50/T 1807-2025 ）----
     # 增/改/删后自动重评级并重生成报告（不重跑检测器）；每次变更由仓储层写审计哈希链。

@@ -30,6 +30,7 @@ from backend.domain.quantify import (
     clock_position,
     get_quantifier,
     nearest_neighbor_gaps,
+    refine_and_quantify,
     refine_detections,
     weld_axis,
 )
@@ -68,6 +69,9 @@ class DetectResponse(BaseModel):
     defects: list[DefectOut]
     annotated_image: str  # base64 PNG（画框标注）
     mode: str = "balanced"  # 本次推理使用的检测工作模式（balanced/recall_first/precision_first）
+    # 印字区误检屏蔽留痕（与评片链路同口径：屏蔽不静默，stamp.py 契约）
+    stamp_zone_masked: int = 0
+    warnings: list[str] = []
 
 
 @router.post("/detect", response_model=DetectResponse)
@@ -169,7 +173,9 @@ def _detect_sync(
     detections = reg.detector.infer(enhanced, conf=conf_v, iou=iou_v, class_conf=class_conf_v)
     # 印字区误检过滤（与评片链路同口径）：印字 OCR 命中时屏蔽其外扩区域内的
     # 检出，防止预览界面把编号/日期铅字当缺陷展示给评片员。框经
-    # read_stamp_aligned 映射回整图坐标，与检测框同系。
+    # read_stamp_aligned 映射回整图坐标，与检测框同系。屏蔽不静默——
+    # 数量进响应 warnings，绝不静默丢弃（stamp.py 契约）。
+    stamp_masked = 0
     if dc.mask_stamp_zone:
         stamp = read_stamp_aligned(
             gray,
@@ -182,11 +188,17 @@ def _detect_sync(
         )
         zones = stamp.text_boxes or stamp.boxes
         if zones:
-            detections, _ = filter_stamp_zone(detections, zones)
+            detections, masked_list = filter_stamp_zone(detections, zones)
+            stamp_masked = len(masked_list)
     mrc = DomainMaskRefineCfg(**reg.config.mask_refine.model_dump())
-    refined = refine_detections(enhanced, detections, mrc)
-    # 经量化器注册表装配（去除 app 层 new 实现；种类由 detect.quantifier_kind 配置驱动）。
+    # 掩膜量化器走单遍路径：refine 与量化共用一次掩膜流水线（此前同一条
+    # 流水线每缺陷跑两遍，/detect CPU 直接翻倍）；其余量化器维持拆分路径。
     quantifier = get_quantifier(dc.quantifier_kind)
+    if dc.quantifier_kind == "mask":
+        refined, geometries = refine_and_quantify(enhanced, detections, spacing, mrc)
+    else:
+        refined = refine_detections(enhanced, detections, mrc)
+        geometries = [quantifier.quantify(d, spacing, image=enhanced, cfg=mrc) for d in refined]
 
     out: list[DefectOut] = []
     # 位置语义（G14/G17）：钟点位需请求提供焊缝圆心；轴向位置由胶片区长边
@@ -194,8 +206,7 @@ def _detect_sync(
     # 物理量置 None，nearest_defect_id 无量纲恒可输出。
     gaps = nearest_neighbor_gaps(refined)
     axis = weld_axis((film.x, film.y, film.w, film.h)) if film is not None else "h"
-    for d in refined:
-        g = quantifier.quantify(d, spacing, image=enhanced, cfg=mrc)
+    for d, g in zip(refined, geometries):
         # 未标定（spacing_known=False）：物理字段置 None，不输出伪物理量；
         # aspect_ratio 为无量纲形状量，恒有效。与 /report grader 熔断保持单一语义。
         cx_px = d.bbox.x + d.bbox.w / 2
@@ -225,17 +236,22 @@ def _detect_sync(
                     else None
                 ),
                 axial_position_mm=(
-                    round((cx_px if axis == "h" else cy_px) * spacing, 3)
-                    if spacing_known
-                    else None
+                    round((cx_px if axis == "h" else cy_px) * spacing, 3) if spacing_known else None
                 ),
                 nearest_defect_id=near[0] if near else None,
                 nearest_gap_mm=round(near[1] * spacing, 3) if near and spacing_known else None,
             )
         )
     # 标注图叠加在原始灰阶上（真实观感），使用精修后的框。
+    warnings: list[str] = []
+    if stamp_masked:
+        warnings.append(f"已屏蔽印字区误检 {stamp_masked} 个（印字/铅字文本框外扩匹配）")
     return DetectResponse(
-        defects=out, annotated_image=_to_b64(_annotate(gray, refined)), mode=detect_mode
+        defects=out,
+        annotated_image=_to_b64(_annotate(gray, refined)),
+        mode=detect_mode,
+        stamp_zone_masked=stamp_masked,
+        warnings=warnings,
     )
 
 

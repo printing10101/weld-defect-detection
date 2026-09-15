@@ -320,7 +320,17 @@ class YoloDetector:
         dets: list[Detection] = []
         for x, y, w, h, cls, score in boxes:
             ci = int(cls)
-            cid = DefectClass(ci) if 0 <= ci < len(DefectClass) else DefectClass.POROSITY
+            if not 0 <= ci < len(DefectClass):
+                # 模型输出通道数与类别枚举不符（旧权重/改版模型）时，未知类别
+                # 静默折算成气孔会虚增气孔计数、掩盖权重与代码版本错配——
+                # 丢弃该框并告警，让错配显式暴露。
+                _LOG.warning(
+                    "检测输出类别索引越界，丢弃该框 cls=%s score=%.3f（核对权重与类别表版本）",
+                    ci,
+                    float(score),
+                )
+                continue
+            cid = DefectClass(ci)
             aspect = max(w, h) / max(min(w, h), 1e-6)
             shape = DefectShape.ROUND if aspect <= 3.0 else DefectShape.LINEAR
             eff = self._eff_thr(ci, conf, class_conf)
@@ -527,8 +537,16 @@ class YoloDetector:
         cls = scores_all.argmax(1)
         score = scores_all.max(1)
         score_cal = scores_cal[np.arange(len(cls)), cls]
-        # 逐类置信度阈值（与分数同变换 → 筛选结果与未校准一致）。
-        thr = np.array([self._eff_thr(c, conf, class_conf) for c in cls], dtype=np.float32)
+        # 逐类置信度阈值（与分数同变换 → 筛选结果与未校准一致）。阈值只依赖
+        # 类别：按类别预算一张表后花式索引，避免 ~8400 锚框逐个进 Python
+        # 循环（tiling 时按瓦片数再乘）。
+        if cls.size == 0:
+            return []
+        thr_per_class = np.array(
+            [self._eff_thr(c, conf, class_conf) for c in range(int(cls.max()) + 1)],
+            dtype=np.float32,
+        )
+        thr = thr_per_class[cls]
         mask = score_cal >= thr
         if not np.any(mask):
             return []

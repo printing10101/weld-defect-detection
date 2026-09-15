@@ -190,7 +190,12 @@ def write_crop_bytes(data: bytes, dest, *, encrypt: bool) -> str:
 
 
 def read_crop_bytes(path: str) -> bytes | None:
-    """读图谱局部图（明文与 SDC1/SDC2 密文信封均支持，与 read_gray 同口径）。"""
+    """读图谱局部图（明文与 SDC1/SDC2 密文信封均支持，与 read_gray 同口径）。
+
+    文件不存在返回 None；密钥不可用/信封损坏抛 CryptoKeyError/
+    CryptoIntegrityError 原样上抛——与"样本缺失"混为同一 404 会让密钥
+    丢失演变成整库静默变砖，调用方须区分处置。
+    """
     p = Path(path)
     if not p.is_file():
         return None
@@ -198,9 +203,5 @@ def read_crop_bytes(path: str) -> bytes | None:
     if buf.startswith((b"SDC1", b"SDC2")):
         from backend.infra.crypto import default_crypto_provider
 
-        try:
-            buf = default_crypto_provider().decrypt(buf)
-        except Exception:  # noqa: BLE001 - 密钥缺失/信封损坏按样本缺失处置
-            _LOG.error("图谱样本密文解密失败: %s", path)
-            return None
+        buf = default_crypto_provider().decrypt(buf)
     return buf

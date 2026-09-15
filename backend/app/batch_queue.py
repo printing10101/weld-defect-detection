@@ -72,6 +72,32 @@ class BatchTaskState:
     dup_history: dict[str, Any] | None = None  # 历史影像摘要（kind=history）
 
 
+def _result_projection(result: Any) -> dict[str, Any] | None:
+    """任务结果的轻量投影：只保留 status 接口与收尾钩子消费的字段。
+
+    完整 run_inspection 结果（warnings/basis/iqi_detail/处置建议等）已随评片
+    主链路落库、可经档案与报告接口取回；整包驻留批次状态会让「每任务完成
+    全量重写快照」成为 O(N²) 落盘、轮询接口的深拷贝随批规模线性膨胀
+    （100 张/批 × 每次若干 KB 的重复序列化）。
+    """
+    if not isinstance(result, dict):
+        return None
+    stamp = result.get("stamp") or {}
+    return {
+        "image_id": result.get("image_id"),
+        "report_id": result.get("report_id"),
+        "joint_level": result.get("joint_level"),
+        "need_review": bool(result.get("need_review")),
+        "defect_count": result.get("defect_count"),
+        "stamp": {
+            "status": stamp.get("status"),
+            "text": stamp.get("text"),
+            "orientation": stamp.get("orientation"),
+            "need_review": stamp.get("need_review"),
+        },
+    }
+
+
 class BatchManager:
     """批量任务队列管理器（Registry 装配，单例）。"""
 
@@ -439,7 +465,7 @@ class BatchManager:
             if t["task_id"] == task_id:
                 t["status"] = status
                 t["error"] = error
-                t["result"] = result
+                t["result"] = _result_projection(result)
                 break
         # 重算计数
         batch["done"] = sum(1 for t in batch["tasks"] if t["status"] == "done")

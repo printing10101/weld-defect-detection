@@ -37,8 +37,9 @@ class JsonlQueue(QueuePort):
         """队列现有行数（观测用）；文件不存在视为 0。"""
         if not self._path.exists():
             return 0
-        with self._lock:
-            return sum(1 for _ in self._path.open("r", encoding="utf-8"))
+        with self._lock, self._path.open("r", encoding="utf-8") as fh:
+            # 显式 with：句柄存活窗口不得与 append/轮换竞争（Windows 文件锁）
+            return sum(1 for _ in fh)
 
 
 class UrllibJsonPoster(HttpPushPort):

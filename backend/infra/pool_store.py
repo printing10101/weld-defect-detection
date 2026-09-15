@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -18,11 +19,20 @@ from backend.evaluation.harness import golden_set_fingerprint
 
 def _atomic_write_text(path: Path, content: str) -> None:
     """临时文件 + os.replace 原子写：崩溃中断不得留下半截文件
-    （截断的 YOLO 标注会被训练脚本当有效数据静默消费，污染训练集）。"""
+    （截断的 YOLO 标注会被训练脚本当有效数据静默消费，污染训练集）。
+
+    tmp 名含 pid + 线程 id：固定 ".tmp" 后缀在两路并发写同一 stem 时
+    （如复核自动回流与 /active/export 同时触发）会互相交错写同一文件，
+    最后一次 os.replace 把损坏内容原子转正。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.tmp")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     tmp.write_text(content, encoding="utf-8")
-    os.replace(tmp, path)
+    try:
+        os.replace(tmp, path)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 class FilePoolStore(PoolStore):

@@ -55,7 +55,7 @@ import logging
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Protocol
+from typing import ClassVar, Protocol
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -78,6 +78,8 @@ _KDF_SM4 = b"sd-kdf-sm4"
 _KDF_MAC = b"sd-kdf-mac"
 _KDF_SM2 = b"sd-kdf-sm2"
 _AES_NONCE_BYTES = 12  # SDC1 GCM nonce（历史格式常量，不可改）
+# 流式加密的单块读取量：16 的倍数（保持 CTR 块对齐），1 MiB 兼顾内存与系统调用开销
+_STREAM_CHUNK_BYTES = 1 << 20
 
 
 class CryptoKeyError(ValueError):
@@ -219,17 +221,76 @@ def sm3_hex(data: bytes) -> str:
     return sm3.sm3_hash(func.bytes_to_list(data))
 
 
-def _hmac_sm3(key: bytes, msg: bytes) -> bytes:
-    """HMAC-SM3（RFC 2104 结构，SM3 分组 64 字节）。
+class IncrementalSm3:
+    """增量 SM3 哈希器（update/hexdigest 接口）。
 
-    gmssl 未内置 HMAC，按标准结构组合 SM3：H(K'^opad || H(K'^ipad || m))。
+    gmssl 仅提供一次性 sm3_hash 与压缩函数 sm3_cf，无流式 API；压缩结构为
+    标准 Merkle–Damgård：V_{i+1} = sm3_cf(V_i, B_i)，填充规则与 gmssl.sm3_hash
+    完全一致（0x80 + 零填充至 56 mod 64 + 8 字节大端比特长）。本模块流式
+    HMAC 与大文件分块哈希共用，正确性由与 sm3_hex 的等值测试锚定。
     """
-    block = 64
-    k = key if len(key) <= block else bytes.fromhex(sm3_hex(key))
-    k = k + b"\x00" * (block - len(k))
-    inner = bytes(b ^ 0x36 for b in k)
-    outer = bytes(b ^ 0x5C for b in k)
-    return bytes.fromhex(sm3_hex(outer + bytes.fromhex(sm3_hex(inner + msg))))
+
+    _IV: ClassVar[list[int]] = [
+        1937774191,
+        1226093241,
+        388252375,
+        3666478592,
+        2842636476,
+        372324522,
+        3817729613,
+        2969243214,
+    ]
+
+    def __init__(self) -> None:
+        self._v = list(self._IV)
+        self._buf = bytearray()
+        self._absorbed = 0  # 已压缩进 _v 的字节数（不含 _buf）
+
+    def update(self, data: bytes) -> None:
+        self._buf += data
+        while len(self._buf) >= 64:
+            self._v = sm3.sm3_cf(self._v, func.bytes_to_list(bytes(self._buf[:64])))
+            self._buf = self._buf[64:]
+            self._absorbed += 64
+
+    def hexdigest(self) -> str:
+        total = self._absorbed + len(self._buf)
+        tail = bytes(self._buf) + b"\x80"
+        tail += b"\x00" * ((56 - (total + 1) % 64) % 64)
+        tail += (total * 8).to_bytes(8, "big")
+        v = self._v
+        for i in range(0, len(tail), 64):
+            v = sm3.sm3_cf(v, func.bytes_to_list(tail[i : i + 64]))
+        return "".join(format(x, "08x") for x in v)
+
+
+class _HmacSm3:
+    """增量 HMAC-SM3（RFC 2104 结构），输出与 _hmac_sm3 一次性版本逐字节一致。"""
+
+    def __init__(self, key: bytes) -> None:
+        block = 64
+        k = key if len(key) <= block else bytes.fromhex(sm3_hex(key))
+        k = k + b"\x00" * (block - len(k))
+        inner = bytes(b ^ 0x36 for b in k)
+        outer = bytes(b ^ 0x5C for b in k)
+        self._inner = IncrementalSm3()
+        self._inner.update(inner)
+        self._outer = IncrementalSm3()
+        self._outer.update(outer)
+
+    def update(self, data: bytes) -> None:
+        self._inner.update(data)
+
+    def hexdigest(self) -> str:
+        self._outer.update(bytes.fromhex(self._inner.hexdigest()))
+        return self._outer.hexdigest()
+
+
+def _hmac_sm3(key: bytes, msg: bytes) -> bytes:
+    """HMAC-SM3 一次性便捷封装（RFC 2104 结构，SM3 分组 64 字节）。"""
+    mac = _HmacSm3(key)
+    mac.update(msg)
+    return bytes.fromhex(mac.hexdigest())
 
 
 def _kdf(master: bytes, label: bytes, length: int) -> bytes:
@@ -345,19 +406,25 @@ class SoftSmProvider:
 
     # ---- 静态加密（SM4-CTR + HMAC-SM3）----
 
-    def _ctr_xor(self, nonce: bytes, data: bytes) -> bytes:
-        """SM4-CTR：128bit 计数器大端递增，密钥流 = SM4(counter)。
+    def _ctr_xor_at(self, counter_base: int, block_index: int, data: bytes) -> bytes:
+        """SM4-CTR 异或：从全局第 ``block_index`` 个 16 字节块起。
 
+        计数器 = counter_base + block_index + 块内序号（大端 128bit 递增）。
         XOR 对合，加解密同函数。gmssl 纯 Python 单块约 1.6μs/字节量级，
         大数据量耗时见模块 docstring 性能说明。
         """
-        base = int.from_bytes(nonce, "big")
         out = bytearray()
+        idx = block_index
         for off in range(0, len(data), 16):
-            ctr_block = ((base + off // 16) & ((1 << 128) - 1)).to_bytes(16, "big")
+            ctr_block = ((counter_base + idx) & ((1 << 128) - 1)).to_bytes(16, "big")
             ks = bytes(self._sm4.one_round(self._sm4.sk, ctr_block))
             out += bytes(a ^ b for a, b in zip(data[off : off + 16], ks))
+            idx += 1
         return bytes(out)
+
+    def _ctr_xor(self, nonce: bytes, data: bytes) -> bytes:
+        """SM4-CTR：128bit 计数器大端递增，密钥流 = SM4(counter)。"""
+        return self._ctr_xor_at(int.from_bytes(nonce, "big"), 0, data)
 
     def encrypt(self, plaintext: bytes, *, aad: bytes | None = None) -> bytes:
         """SM4-CTR 加密 + HMAC-SM3（encrypt-then-MAC），信封 SDC2。
@@ -368,6 +435,36 @@ class SoftSmProvider:
         ciphertext = self._ctr_xor(nonce, plaintext)
         mac = _hmac_sm3(self._mac_key, _MAGIC_SM + nonce + ciphertext + (aad or b""))
         return _MAGIC_SM + nonce + ciphertext + mac
+
+    def encrypt_stream(self, source, sink, *, aad: bytes | None = None) -> int:
+        """流式加密：从二进制 ``source`` 读、向二进制 ``sink`` 写 SDC2 信封。
+
+        信封与 encrypt() 完全一致：SM4-CTR 是可寻址流（按全局块序号递增
+        计数器）、HMAC-SM3 可增量计算，分块产出与一次性 encrypt 对同
+        nonce 逐字节一致，存量密文互解不变。大底片不再整文件进内存
+        （峰值从 ≈2×文件大小×并发数 降为单块缓存）。路径打开由调用方
+        负责——本模块只做字节流。返回写入 sink 的密文体字节数。
+        """
+        nonce = os.urandom(_NONCE_BYTES)
+        counter_base = int.from_bytes(nonce, "big")
+        mac = _HmacSm3(self._mac_key)
+        mac.update(_MAGIC_SM + nonce)
+        block_index = 0
+        written = 0
+        sink.write(_MAGIC_SM + nonce)
+        while True:
+            chunk = source.read(_STREAM_CHUNK_BYTES)
+            if not chunk:
+                break
+            ct = self._ctr_xor_at(counter_base, block_index, chunk)
+            mac.update(ct)
+            sink.write(ct)
+            block_index += len(ct) // 16  # 块大小为 16 的倍数，末块不影响下轮起点
+            written += len(chunk)
+        if aad:
+            mac.update(aad)
+        sink.write(bytes.fromhex(mac.hexdigest()))
+        return written
 
     def decrypt(self, ciphertext: bytes, *, aad: bytes | None = None) -> bytes:
         """按信封魔数分流：SDC2 走国密，SDC1 走历史 AES-GCM（只读兼容）。

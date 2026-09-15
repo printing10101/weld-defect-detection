@@ -174,82 +174,38 @@ class MaskQuantifier:
         return image[y0:y1, x0:x1], (x0, y0)
 
     # ---- 精修：更新检测框为最小外接矩形 + shape -------------------------
-    def refine(
-        self, image: np.ndarray, detection: Detection, cfg: MaskRefineCfg | None = None
-    ) -> Detection:
-        """返回精修后的 Detection：bbox 更新为掩膜最小外接矩形的轴对齐框，shape 按有向长宽比。
+    def _analyze_mask(self, image: np.ndarray, bb: BBox, cfg: MaskRefineCfg) -> tuple | None:
+        """ROI 裁剪 → 掩膜 → 主轮廓 → 面积门槛 → 最小外接矩形（refine/量化共用）。
 
-        退化（无掩膜/面积过小/越界）时原样返回，保证调用方安全。
-        mask_ref 默认不落盘（掩膜持久化需存储设计），保持 None；SAM 类插件可在此写入 URI。
+        返回 ``(rect, area_px, cnt, mask, (ox, oy))``；ROI 空、无轮廓、面积
+        不足任一退化即返回 None，调用方按各自语义回退（refine 原样返回、
+        量化回退包围盒）——判据与拆分前的两份实现逐行一致。
         """
-        cfg = cfg or MaskRefineCfg()
-        if not cfg.enabled:
-            return detection
-        bb = detection.bbox
         roi, (ox, oy) = self._crop_roi(image, bb)
         if roi.size == 0:
-            return detection
+            return None
         mask = self._defect_mask(roi, cfg)
         cnt = self._largest_contour(mask)
         if cnt is None:
-            return detection
+            return None
         area_px = cv2.contourArea(cnt)
         bbox_area_px = max(bb.w * bb.h, 1.0)
         if area_px < cfg.min_mask_abs_area_px or area_px < cfg.min_mask_rel_area * bbox_area_px:
-            return detection
-        rect = cv2.minAreaRect(cnt)
-        (_cx, _cy), (rw, rh), _ang = rect
-        L = max(rw, rh)
-        W = min(rw, rh)
-        aspect = L / max(W, 1e-6)
-        box = cv2.boxPoints(rect)
-        xs = box[:, 0]
-        ys = box[:, 1]
-        nx = max(0.0, float(xs.min()) + ox)
-        ny = max(0.0, float(ys.min()) + oy)
-        nw = float(xs.max() - xs.min())
-        nh = float(ys.max() - ys.min())
-        img_h, img_w = image.shape[:2]
-        nw = min(img_w, nx + nw) - nx
-        nh = min(img_h, ny + nh) - ny
-        if nw <= 0 or nh <= 0:
-            return detection
-        shape = DefectShape.ROUND if aspect <= cfg.round_aspect_max else DefectShape.LINEAR
-        return Detection(
-            id=detection.id,
-            bbox=BBox(x=nx, y=ny, w=nw, h=nh),
-            class_id=detection.class_id,
-            score=detection.score,
-            uncertainty=detection.uncertainty,
-            shape=shape,
-            mask_ref=detection.mask_ref,
-        )
+            return None
+        return cv2.minAreaRect(cnt), area_px, cnt, mask, (ox, oy)
 
-    # ---- 量化：掩膜级几何 ------------------------------------------------
-    def quantify_from_image(
-        self,
-        image: np.ndarray,
-        detection: Detection,
+    @staticmethod
+    def _geometry_from_analysis(
+        rect,
+        area_px: float,
+        cnt,
+        mask: np.ndarray,
+        ox: int,
+        oy: int,
         pixel_spacing_mm: float,
-        cfg: MaskRefineCfg | None = None,
+        cfg: MaskRefineCfg,
     ) -> Geometry:
-        """从图像计算掩膜级几何；退化时回退包围盒近似（measure）。"""
-        cfg = cfg or MaskRefineCfg()
-        if not cfg.enabled:
-            return self.measure(detection, pixel_spacing_mm)
-        bb = detection.bbox
-        roi, (ox, oy) = self._crop_roi(image, bb)
-        if roi.size == 0:
-            return self.measure(detection, pixel_spacing_mm)
-        mask = self._defect_mask(roi, cfg)
-        cnt = self._largest_contour(mask)
-        if cnt is None:
-            return self.measure(detection, pixel_spacing_mm)
-        area_px = cv2.contourArea(cnt)
-        bbox_area_px = max(bb.w * bb.h, 1.0)
-        if area_px < cfg.min_mask_abs_area_px or area_px < cfg.min_mask_rel_area * bbox_area_px:
-            return self.measure(detection, pixel_spacing_mm)
-        rect = cv2.minAreaRect(cnt)
+        """从掩膜分析结果计算几何（与拆分前 quantify_from_image 的算式一致）。"""
         (cx, cy), (rw, rh), _ang = rect
         L_px = max(rw, rh)
         W_px = min(rw, rh)
@@ -277,6 +233,79 @@ class MaskQuantifier:
             centerline_mm=centerline_mm,
         )
 
+    @staticmethod
+    def _refined_detection(
+        detection: Detection,
+        rect,
+        ox: int,
+        oy: int,
+        image_shape: tuple[int, ...],
+        cfg: MaskRefineCfg,
+    ) -> Detection | None:
+        """从掩膜最小外接矩形构造精修 Detection；越界退化返回 None。"""
+        (_cx, _cy), (rw, rh), _ang = rect
+        L = max(rw, rh)
+        W = min(rw, rh)
+        aspect = L / max(W, 1e-6)
+        box = cv2.boxPoints(rect)
+        xs = box[:, 0]
+        ys = box[:, 1]
+        nx = max(0.0, float(xs.min()) + ox)
+        ny = max(0.0, float(ys.min()) + oy)
+        nw = float(xs.max() - xs.min())
+        nh = float(ys.max() - ys.min())
+        img_h, img_w = image_shape[:2]
+        nw = min(img_w, nx + nw) - nx
+        nh = min(img_h, ny + nh) - ny
+        if nw <= 0 or nh <= 0:
+            return None
+        shape = DefectShape.ROUND if aspect <= cfg.round_aspect_max else DefectShape.LINEAR
+        return Detection(
+            id=detection.id,
+            bbox=BBox(x=nx, y=ny, w=nw, h=nh),
+            class_id=detection.class_id,
+            score=detection.score,
+            uncertainty=detection.uncertainty,
+            shape=shape,
+            mask_ref=detection.mask_ref,
+        )
+
+    def refine(
+        self, image: np.ndarray, detection: Detection, cfg: MaskRefineCfg | None = None
+    ) -> Detection:
+        """返回精修后的 Detection：bbox 更新为掩膜最小外接矩形的轴对齐框，shape 按有向长宽比。
+
+        退化（无掩膜/面积过小/越界）时原样返回，保证调用方安全。
+        mask_ref 默认不落盘（掩膜持久化需存储设计），保持 None；SAM 类插件可在此写入 URI。
+        """
+        cfg = cfg or MaskRefineCfg()
+        if not cfg.enabled:
+            return detection
+        analyzed = self._analyze_mask(image, detection.bbox, cfg)
+        if analyzed is None:
+            return detection
+        rect, _area_px, _cnt, _mask, (ox, oy) = analyzed
+        refined = self._refined_detection(detection, rect, ox, oy, image.shape, cfg)
+        return refined if refined is not None else detection
+
+    # ---- 量化：掩膜级几何 ------------------------------------------------
+    def quantify_from_image(
+        self,
+        image: np.ndarray,
+        detection: Detection,
+        pixel_spacing_mm: float,
+        cfg: MaskRefineCfg | None = None,
+    ) -> Geometry:
+        """从图像计算掩膜级几何；退化时回退包围盒近似（measure）。"""
+        cfg = cfg or MaskRefineCfg()
+        if not cfg.enabled:
+            return self.measure(detection, pixel_spacing_mm)
+        analyzed = self._analyze_mask(image, detection.bbox, cfg)
+        if analyzed is None:
+            return self.measure(detection, pixel_spacing_mm)
+        rect, area_px, cnt, mask, (ox, oy) = analyzed
+        return self._geometry_from_analysis(rect, area_px, cnt, mask, ox, oy, pixel_spacing_mm, cfg)
+
 
 def refine_detections(
     image: np.ndarray, detections: list[Detection], cfg: MaskRefineCfg | None = None
@@ -284,6 +313,40 @@ def refine_detections(
     """批量精修检测框（ 入口，供 detect 路由与全链路复用）。"""
     mq = MaskQuantifier()
     return [mq.refine(image, d, cfg) for d in detections]
+
+
+def refine_and_quantify(
+    image: np.ndarray,
+    detections: list[Detection],
+    pixel_spacing_mm: float,
+    cfg: MaskRefineCfg | None = None,
+) -> tuple[list[Detection], list[Geometry]]:
+    """单遍精修+量化（/detect 路径）：每缺陷掩膜流水线只算一次。
+
+    此前 /detect 先 refine_detections 再逐个 quantify——同一缺陷的掩膜
+    流水线（高斯+双重自适应阈值+形态学+轮廓）跑两遍，CPU 直接翻倍；且
+    两遍 ROI 不同（原始框 vs 精修框），框与几何可能来自不同轮廓。本路径
+    两者同源同一轮廓；refine 结果与 refine_detections 完全一致（同一 ROI、
+    同一判据），几何则与「refine 后 quantify」存在 ROI 边界效应级的细微
+    差异（自适应阈值随 ROI 窗口略变），属预期。
+    """
+    mq = MaskQuantifier()
+    cfg = cfg or MaskRefineCfg()
+    refined: list[Detection] = []
+    geometries: list[Geometry] = []
+    for d in detections:
+        analyzed = mq._analyze_mask(image, d.bbox, cfg) if cfg.enabled else None
+        if analyzed is None:
+            # 退化：与拆分路径一致——原样返回 + 包围盒近似
+            refined.append(d)
+            geometries.append(mq.measure(d, pixel_spacing_mm))
+            continue
+        rect, area_px, cnt, mask, (ox, oy) = analyzed
+        refined.append(mq._refined_detection(d, rect, ox, oy, image.shape, cfg) or d)
+        geometries.append(
+            mq._geometry_from_analysis(rect, area_px, cnt, mask, ox, oy, pixel_spacing_mm, cfg)
+        )
+    return refined, geometries
 
 
 # ---------------------------------------------------------------------------

@@ -190,7 +190,11 @@ def get_record_pdf(
             404, "RECORD_NOT_FOUND", f"评价记录不存在: {record_name}（先 POST /std-eval/record）"
         )
     ensure_export_allowed(f"std_eval:record_pdf:{record_name}", request, principal, reg)
-    record = json.loads(record_path.read_text(encoding="utf-8"))
+    # 记录 JSON 损坏（手工编辑/半截写入）转 422 错误信封，与 _load_eval_result 同口径
+    try:
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise _err(422, "RECORD_PARSE_FAILED", f"评价记录 JSON 解析失败: {record_name}") from None
     pdf_path = build_record_pdf(record, out_dir / f"{record_name}.pdf")
     return FileResponse(pdf_path, filename=f"{record_name}.pdf", media_type="application/pdf")
 

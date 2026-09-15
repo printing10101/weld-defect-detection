@@ -16,6 +16,8 @@ from backend.domain.quantify import (
     MaskQuantifier,
     get_quantifier,
     quantifier_capabilities,
+    refine_and_quantify,
+    refine_detections,
     supported_quantifier_kinds,
 )
 
@@ -67,6 +69,58 @@ def test_quantifier_registry_lists_and_resolves() -> None:
         quantifier_capabilities("nope")
     assert quantifier_capabilities("mask")["needs_image"] is True
     assert quantifier_capabilities("bbox")["needs_image"] is False
+
+
+def test_refine_and_quantify_single_pass() -> None:
+    """单遍精修+量化：refine 结果与拆分路径完全一致，几何有界且与框同源。
+
+    /detect 掩膜路径此前 refine 后再 quantify，同一掩膜流水线跑两遍；
+    单遍路径的 refine 与 refine_detections 同 ROI 同判据，框须逐值一致。
+    """
+    img = _synthetic_defect_image()
+    dets = [
+        Detection(
+            id="b1",
+            bbox=BBox(68, 68, 24, 24),  # 紧贴 (80,80) r=12 暗斑
+            class_id=DefectClass.POROSITY,
+            score=0.6,
+            uncertainty=0.2,
+        ),
+        Detection(
+            id="b2",
+            bbox=BBox(168, 148, 24, 24),  # 紧贴 (180,160) r=8 暗斑
+            class_id=DefectClass.POROSITY,
+            score=0.55,
+            uncertainty=0.25,
+        ),
+    ]
+    refined_split = refine_detections(img, dets, None)
+    refined_single, geoms = refine_and_quantify(img, dets, 0.1, None)
+    assert [d.bbox.x for d in refined_single] == [d.bbox.x for d in refined_split]
+    assert [d.bbox.w for d in refined_single] == [d.bbox.w for d in refined_split]
+    assert [d.shape for d in refined_single] == [d.shape for d in refined_split]
+    # 几何有效且与精修框同量级（长度不超过框对角线 × spacing）
+    for d, g in zip(refined_single, geoms):
+        assert g.length_mm > 0
+        assert g.area_mm2 > 0
+        diag = (d.bbox.w**2 + d.bbox.h**2) ** 0.5
+        assert g.length_mm <= diag * 0.1 * 1.5
+
+
+def test_refine_and_quantify_degrades_like_split() -> None:
+    """无缺陷均匀图上单遍路径退化为包围盒近似（与拆分路径一致）。"""
+    img_uniform = np.full((256, 256), 128, dtype=np.uint8)
+    det = Detection(
+        id="d1",
+        bbox=BBox(10, 20, 100, 50),
+        class_id=DefectClass.POROSITY,
+        score=0.5,
+        uncertainty=0.5,
+    )
+    refined, geoms = refine_and_quantify(img_uniform, [det], 0.1, None)
+    assert refined[0].bbox == det.bbox  # 原样返回
+    assert geoms[0].length_mm == 10.0  # measure 回退
+    assert geoms[0].width_mm == 5.0
 
 
 def test_quantifier_unified_quantify_call() -> None:
@@ -124,6 +178,9 @@ def test_detect_api() -> None:
     for key in ("L_mm", "W_mm", "area_mm2", "perimeter_mm", "aspect_ratio", "confidence"):
         assert key in first
     assert body["annotated_image"]  # 标注图 base64 非空
+    # 印字区屏蔽留痕（契约：屏蔽不静默，字段恒在）
+    assert body["stamp_zone_masked"] == 0
+    assert body["warnings"] == []
 
 
 def test_detect_api_uncalibrated_no_pseudo_mm() -> None:

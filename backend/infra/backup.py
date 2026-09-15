@@ -76,6 +76,32 @@ def _sha256(path: Path, chunk: int = 1 << 20) -> str:
     return h.hexdigest()
 
 
+def _stage_and_hash(src: Path, dest: Path, algo: str, chunk: int = 1 << 20) -> tuple[int, str]:
+    """流式暂存 + 哈希：分块读源文件，同步写 stage 与计算摘要。
+
+    此前 src.read_bytes() 整文件进内存（SQLite 库文件可达数百 MB），备份
+    内存峰值随库体积线性增长。返回 (size, hash_hex)。
+    """
+    if algo == "sm3":
+        from backend.infra.crypto import IncrementalSm3
+
+        h = IncrementalSm3()
+    elif algo == "sha256":
+        h = hashlib.sha256()
+    else:
+        raise ValueError(f"不支持的备份哈希算法: {algo}（支持 sha256 | sm3）")
+    size = 0
+    with src.open("rb") as fin, dest.open("wb") as fout:
+        while True:
+            block = fin.read(chunk)
+            if not block:
+                break
+            h.update(block)
+            fout.write(block)
+            size += len(block)
+    return size, h.hexdigest()
+
+
 def create_backup(
     sources: dict[str, Path],
     archive_path: Path,
@@ -104,9 +130,8 @@ def create_backup(
             if not src.is_file():
                 skipped.append(key)
                 continue
-            data = src.read_bytes()
-            entries[key] = {"size": len(data), "sha256": _hash_bytes(data, hash_algo)}
-            (stage / _safe_zipname(key)).write_bytes(data)
+            size, digest = _stage_and_hash(src, stage / _safe_zipname(key), hash_algo)
+            entries[key] = {"size": size, "sha256": digest}
         for key, d in sorted((dirs or {}).items()):
             if not d.is_dir():
                 skipped.append(key)
@@ -114,9 +139,8 @@ def create_backup(
             for f in sorted(p for p in d.rglob("*") if p.is_file()):
                 rel = f.relative_to(d).as_posix()
                 ekey = f"{key}/{rel}"
-                data = f.read_bytes()
-                entries[ekey] = {"size": len(data), "sha256": _hash_bytes(data, hash_algo)}
-                (stage / _safe_zipname(ekey)).write_bytes(data)
+                size, digest = _stage_and_hash(f, stage / _safe_zipname(ekey), hash_algo)
+                entries[ekey] = {"size": size, "sha256": digest}
         manifest: Manifest = {
             "app_version": app_version,
             "created_at": fmt_naive_utc(),
@@ -133,10 +157,16 @@ def create_backup(
             suffix=".zip", prefix="scan_backup_", dir=str(archive_path.parent)
         )
         os.close(fd)
-        with zipfile.ZipFile(tmp_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-            for f in stage.iterdir():
-                zf.write(f, arcname=f.name)
-        os.replace(tmp_zip, archive_path)
+        try:
+            with zipfile.ZipFile(tmp_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+                for f in stage.iterdir():
+                    zf.write(f, arcname=f.name)
+            os.replace(tmp_zip, archive_path)
+        except BaseException:
+            # 打包/落盘失败回收临时 zip（mkstemp 无 try/finally 时永久残留
+            # 在归档目标目录）；restore 路径已有 finally 清理，此处对齐。
+            Path(tmp_zip).unlink(missing_ok=True)
+            raise
 
     return {
         "manifest": manifest,

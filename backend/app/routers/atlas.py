@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from backend.app.dependencies import Registry, get_operator_name, get_registry
 from backend.app.routers._common import api_error
 from backend.infra.atlas_store import crop_defect_png, read_crop_bytes, write_crop_bytes
+from backend.infra.crypto import CryptoIntegrityError, CryptoKeyError
 
 router = APIRouter(tags=["atlas"])
 
@@ -86,7 +87,9 @@ def publish_sample(
     try:
         reg.atlas_store().publish(row)
     except ValueError as exc:
-        # 唯一约束冲突（重复发布）→ 409；其余入库错误 → 422
+        # 入库失败回收刚落盘的局部图：重复发布（409）或其余校验失败都不得
+        # 在 data/atlas/ 留无台账的孤儿密文（重复尝试会持续累积）。
+        dest.unlink(missing_ok=True)
         if "already published" in str(exc):
             raise api_error(409, "ALREADY_PUBLISHED", str(exc)) from None
         raise api_error(422, "ATLAS_INVALID", str(exc)) from None
@@ -142,7 +145,17 @@ def get_crop(
     crop_path = reg.atlas_store().get_crop_path(atlas_id)
     if crop_path is None:
         raise api_error(404, "NOT_FOUND", f"图谱样本不存在: {atlas_id}")
-    data = read_crop_bytes(crop_path)
+    try:
+        data = read_crop_bytes(crop_path)
+    except (CryptoKeyError, CryptoIntegrityError) as exc:
+        # 密钥丢失/信封损坏与样本缺失是两回事：前者意味着整个图谱库密文
+        # 都不可解，必须显性暴露并给出处置指引，而非混同 404 静默变砖。
+        _LOG.error("图谱局部图解密失败 atlas_id=%s: %s", atlas_id, exc)
+        raise api_error(
+            422,
+            "CROP_DECRYPT_FAILED",
+            "图谱局部图解密失败（主密钥丢失或密文损坏），请核对 data/.crypto_key 或 SCAN_CRYPTO_KEY",
+        ) from None
     if data is None:
         raise api_error(404, "CROP_MISSING", "图谱局部图缺失或不可读")
     return Response(content=data, media_type="image/png")
@@ -160,15 +173,21 @@ def remove_sample(
         raise api_error(404, "NOT_FOUND", f"图谱样本不存在: {atlas_id}")
     # 路径经 get_crop_path 单独取（样本 dict 不含服务器路径，防信息泄漏）
     crop_path = reg.atlas_store().get_crop_path(atlas_id) or ""
-    reg.atlas_store().remove(atlas_id)
-    # 局部图随行删除：否则 data/atlas/ 会累积只有文件系统可见的孤儿样本。
-    # 删除失败不阻断撤销（DB 行已删），降级告警留痕，由目录清理兜底。
-    try:
-        crop_file = Path(crop_path)
-        if crop_file.is_file():
+    # 局部图先于台账删除：DB 行删掉后 crop_path 即不可查，届时文件删除
+    # 失败会留下永久无法经 API 定位的孤儿密文。删除失败则中止撤销（台账
+    # 保留，可排除占用后重试）。
+    crop_file = Path(crop_path)
+    if crop_file.is_file():
+        try:
             crop_file.unlink()
-    except OSError as exc:
-        _LOG.warning("图谱局部图删除失败 atlas_id=%s path=%s: %s", atlas_id, crop_path, exc)
+        except OSError as exc:
+            _LOG.error("图谱局部图删除失败 atlas_id=%s path=%s: %s", atlas_id, crop_path, exc)
+            raise api_error(
+                500,
+                "CROP_DELETE_FAILED",
+                "局部图文件删除失败，撤销已中止（记录保留，可重试）",
+            ) from None
+    reg.atlas_store().remove(atlas_id)
     reg.repository.append_audit(
         actor=operator,
         action="atlas_remove",

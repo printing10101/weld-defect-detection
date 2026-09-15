@@ -710,5 +710,6 @@ class LlamaServerManager:
             if log_path.is_file() and log_path.stat().st_size > _LOG_MAX_BYTES:
                 rotated = log_path.with_suffix(".log.1")
                 log_path.replace(rotated)
-        except OSError:
-            pass
+        except OSError as exc:
+            # 尽力而为操作，但失败留痕：否则日志无限增长且无人知晓
+            _LOG.warning("llama-server 日志轮转失败 %s: %s", log_path, exc)
