@@ -7,6 +7,51 @@
 
 ### 修复
 
+- **代码审查修复第一批（审查发现的可靠性/资源/可观测缺陷）**：
+  - **/detect 印字区屏蔽留痕**：预检链路此前 `detections, _ =
+    filter_stamp_zone(...)` 静默丢弃被屏蔽列表，违反 stamp.py「屏蔽不
+    静默」契约；`DetectResponse` 新增 `stamp_zone_masked`/`warnings`
+    （文案与评片主链路同口径）。
+  - **Registry 懒建单例加锁**：`gate_reject_store()`/`atlas_store()` 无锁
+    check-then-act，批量 worker 并发首访可各建一个 store（多出的
+    SQLAlchemy engine 永不释放）——同一问题此前已在 pipelines 显式修复，
+    这是同形状残留；现持 `_lazy_store_lock` 双检。
+  - **评片孤儿副本治理**：原图副本落盘从第 3 步移至第 6 步落库前一刻，
+    落库失败即回收副本；`_write_encrypted_copy` 写失败回收半截密文——
+    消除「检测/判定/落库任一失败留下无台账孤儿密文，批量长跑静默占满
+    磁盘」的累积路径。
+  - **影像加密落盘/备份改流式**：`crypto.encrypt_stream`（SDC2 信封与
+    一次性 encrypt 同 nonce 逐字节一致，增量 HMAC-SM3 基于 gmssl 压缩
+    函数 `sm3_cf` 搭建并经等值测试锚定）；大底片不再整文件进内存（原
+    峰值 ≈2×文件大小×并发 worker 数）。备份暂存改流式哈希+写盘，
+    mkstemp 临时 zip 加 try/except 清理兜底。
+  - **训练标注原子写**：pool_store tmp 名含 pid+线程 id——复核自动回流
+    与 `/active/export` 并发写同一 stem 时，固定 `.tmp` 名会互相交错写，
+    最后一次 replace 把损坏标注原子转正被训练静默消费。
+  - **静默失败补告警**：报告免责声明表加载失败（恰是最需强声明的场景）
+    从静默空串改为 warning 留痕；yolo 越界类别索引从静默折算成气孔改为
+    丢弃+告警（防权重/类别表版本错配被掩盖，同时按类别预算阈值表替代
+    ~8400 锚框逐个 Python 循环）；llama-server 日志轮转失败、
+    `sync_io.count()` 句柄显式关闭；std_eval 记录 JSON 损坏从 500 改
+    422 错误信封。
+  - **前端消费补齐**：评片结果页新增告警面板 `ReportNotices`（门禁降级/
+    印字区屏蔽/单张查重命中——后端已返回但 UI 此前零展示）；复核面板
+    展示 `training_pool_synced=false` 回流失败告警（此前只进后端日志，
+    专家改判滞留训练池无人察觉）；`ExportRequestOut.status` 建模为
+    `pending|approved|rejected|consumed` 联合类型（此前裸 string+魔法
+    字符串比较，安全审批链零编译期保护）。
+
+- **代码审查修复第二批（性能/数据完整性/前端消费）**：
+  - **/detect 掩膜单遍化**：`quantify.refine_and_quantify`——refine 与量化共用一次掩膜流水线（此前同一缺陷的高斯+双重自适应阈值+形态学+轮廓每缺陷跑两遍，/detect CPU 直接翻倍），且框与几何同源同一轮廓；共享判据由拆分路径逐行提取，bbox 输出与 `refine_detections` 逐值一致。
+  - **批次快照轻量投影**：`_result_projection` 只保留 status 接口与收尾钩子消费的字段（完整结果已落业务库）——消除「每任务完成全量重写快照」的 O(N²) 落盘与轮询深拷贝随批规模线性膨胀；存量快照整包结果为超集，向后兼容。
+  - **缺陷图谱数据完整性**：409 重复发布回收刚落盘的局部图（不再累积孤儿密文）；DELETE 先删文件再删台账，文件删失败中止撤销（行删后 crop_path 不可查，孤儿文件永久无法定位）；解密失败与样本缺失区分（密钥丢失/信封损坏 → 422 CROP_DECRYPT_FAILED，不再混同 404 整库静默变砖）。
+  - **前端**：批量状态建模为 `awaiting_review|running|paused|finished` 联合类型；LlmView 状态轮询加在途守卫（后端卡顿时请求不再逐层堆叠）。
+
+### 新增
+
+- **设备标定自动注入（G23）**：`POST /report` 新增 `device_id` 表单字段——显式未给 `pixel_spacing_mm` 时自动取该设备档案最近一次标定值注入，注入原因/无标定结论进 gate_warnings（前端告警面板可见）；设备不存在 404 显式失败；显式标定优先（调用方口径与 /detect 一致）；无标定照常走未标定熔断语义。
+- **独立片号字段（G05）**：迁移 0014 新增 `images.film_no`；`stamp.extract_film_no` 从印字文本保守抽取首个编号样 token（日期不算、两位序号不冒认，宁可 NULL 人工补录）；评片管线落库、《底片评定表》片号列优先消费（未识别到回退原影像短号口径）。
+
 - **真实定检底片端到端暴露的一批问题（8bit JPEG 扫描件批量实测）**：
   - **印字区误检过滤（detect.mask_stamp_zone，默认开）**：真实底片的编号/
     日期铅字与中心标是首要误检源（实测某真实底片 27/27 检出全落印字带，
