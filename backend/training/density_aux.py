@@ -34,14 +34,14 @@ from pathlib import Path
 import numpy as np
 
 __all__ = [
-    "sigma_for_box",
-    "gaussian_density_map",
+    "boxes_from_yolo_lines",
+    "count_peaks",
     "density_integral",
     "density_tiles",
-    "to_sinkhorn_scale",
-    "count_peaks",
+    "gaussian_density_map",
     "load_yolo_boxes",
-    "boxes_from_yolo_lines",
+    "sigma_for_box",
+    "to_sinkhorn_scale",
 ]
 
 # 高斯核的截断半径（以 sigma 计）。±3σ 覆盖 99.7% 质量，再远可忽略。
@@ -135,7 +135,7 @@ def gaussian_density_map(
 
     box_list = [list(map(float, b)) for b in boxes]
     if classes is not None and class_ids is not None:
-        keep = set(int(c) for c in classes)
+        keep = {int(c) for c in classes}
         cids = [int(c) for c in class_ids]
         if len(cids) != len(box_list):
             raise ValueError(f"class_ids 长度 {len(cids)} 与 boxes 长度 {len(box_list)} 不一致")

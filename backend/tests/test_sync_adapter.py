@@ -137,8 +137,9 @@ def test_http_timeout_and_cors_origins_centralized() -> None:
 
     cfg = load_config()
     assert cfg.sync.http_timeout == 10.0
-    assert "tauri://localhost" in cfg.server.cors_origins
-    assert "https://tauri.localhost" in cfg.server.cors_origins
+    # 桌面壳已迁移到 Electron（commit ad0f113）：自定义协议源为 app://scandetection
+    assert "app://scandetection" in cfg.server.cors_origins
+    assert "http://localhost:5173" in cfg.server.cors_origins
     # 超时经构造注入传输实现（不再是硬编码 10）
     poster = UrllibJsonPoster(timeout=cfg.sync.http_timeout)
     assert poster.timeout == 10.0

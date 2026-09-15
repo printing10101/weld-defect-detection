@@ -182,9 +182,7 @@ def recommend(
                 standard_id,
                 zero_tolerance=False,
                 disclaimer=dl,
-                extra_basis=(
-                    f"验收判定：级别 {level} 高于验收合格级别 {norm}（设计/合同要求）"
-                ),
+                extra_basis=(f"验收判定：级别 {level} 高于验收合格级别 {norm}（设计/合同要求）"),
             )
         # 无法识别的验收级别：忽略，走下方默认口径（不阻塞出片）
 

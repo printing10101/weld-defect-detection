@@ -61,6 +61,7 @@ __all__ = [
     "torch_sinkhorn_cost",
 ]
 
+
 def _logsumexp(a: np.ndarray, axis: int) -> np.ndarray:
     """数值稳定的 log-sum-exp（numpy，沿指定轴归约，结果降维）。"""
     m = np.max(a, axis=axis, keepdims=True)

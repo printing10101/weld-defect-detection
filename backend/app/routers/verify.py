@@ -324,7 +324,10 @@ def trace_report(code: str, reg: Annotated[Registry, Depends(get_registry)]) -> 
         # 档案不存在也返回 200（archive_found=False）：扫码核验是查询语义，
         # 404 会让扫码端无法区分"码坏"与"档案已删"。
         return TraceOut(
-            code=code, archive_found=False, hash_match=False, verify_url=f"/api/v1/report/{report_id}/verify"
+            code=code,
+            archive_found=False,
+            hash_match=False,
+            verify_url=f"/api/v1/report/{report_id}/verify",
         )
     stored = rep.get("report_hash") or ""
     return TraceOut(

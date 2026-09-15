@@ -50,9 +50,7 @@ def test_permutation_invariance_core_property() -> None:
     pred_perm = pred.reshape(-1)[perm].reshape(5, 5)
 
     base = sinkhorn_transport_cost(pred.reshape(-1), gt.reshape(-1), eps=0.02, n_iter=50)
-    shuffled = sinkhorn_transport_cost(
-        pred_perm.reshape(-1), gt.reshape(-1), eps=0.02, n_iter=50
-    )
+    shuffled = sinkhorn_transport_cost(pred_perm.reshape(-1), gt.reshape(-1), eps=0.02, n_iter=50)
     assert shuffled == approx(base, abs=1e-6)
 
 
@@ -78,9 +76,7 @@ def test_self_matching_is_minimal_and_small() -> None:
     rng = _rng()
     gt = rng.random(36)
     self_cost = sinkhorn_transport_cost(gt, gt, eps=0.01, n_iter=50)
-    shifted_cost = sinkhorn_transport_cost(
-        np.clip(gt + 0.3, 0.0, 1.0), gt, eps=0.01, n_iter=50
-    )
+    shifted_cost = sinkhorn_transport_cost(np.clip(gt + 0.3, 0.0, 1.0), gt, eps=0.01, n_iter=50)
     assert self_cost < shifted_cost
     assert self_cost < 0.5 * shifted_cost
 
