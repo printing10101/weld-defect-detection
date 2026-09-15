@@ -18,7 +18,8 @@ from backend.infra.migrate import ensure_migrations
 # + 0010（images.content_hash 影像内容摘要：批量上传查重）
 # + 0011（images.stamp_* 底片印字识别快照：扫描日期/编号，正/镜像）
 # + 0013（defect_atlas 缺陷图谱样本库）
-_HEAD = "0013_defect_atlas"
+# + 0014（images.film_no 独立片号：印字 OCR 结构化抽取，G05）
+_HEAD = "0014_film_no"
 
 
 def test_migrate_fresh_db_creates_tables(tmp_path) -> None:
