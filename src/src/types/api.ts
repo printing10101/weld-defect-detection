@@ -452,7 +452,7 @@ export interface ReviewOut {
   stage: string;
   need_review: boolean;
   review_count: number;
-  /** 人工确认缺陷是否成功自动回流训练池（false 时详见后端日志） */
+  /** 人工确认缺陷是否成功自动回流训练池（false 时复核面板展示告警） */
   training_pool_synced: boolean;
 }
 
@@ -580,10 +580,13 @@ export interface BatchStampSummary {
   flagged: number;
 }
 
+/** 批次级状态机（backend/app/batch_queue.py）：awaiting_review=查重命中待人工复核 */
+export type BatchStatus = "awaiting_review" | "running" | "paused" | "finished";
+
 /** GET /api/v1/batch/{id} → BatchStatusOut */
 export interface BatchStatusOut {
   batch_id: string;
-  status: string;
+  status: BatchStatus;
   total: number;
   done: number;
   failed: number;
@@ -604,7 +607,7 @@ export interface BatchDedupDecision {
 /** GET /api/v1/batches → 列表项（历史/断点续跑入口） */
 export interface BatchSummaryOut {
   batch_id: string;
-  status: string;
+  status: BatchStatus;
   total: number;
   done: number;
   failed: number;
@@ -904,13 +907,16 @@ export interface BootstrapOut extends AccountOut {
 
 /* ── C-14 受控导出（POST /api/v1/export/…）── */
 
+/** 导出申请状态机：pending（待审批）→ approved/rejected（保密员决策）→ consumed（令牌已使用） */
+export type ExportRequestStatus = "pending" | "approved" | "rejected" | "consumed";
+
 /** 导出申请（POST /export/requests 响应 / GET /export/requests/{id}） */
 export interface ExportRequestOut {
   request_id: string;
   subject: string;
   reason: string | null;
   requested_by: string;
-  status: string; // pending | approved | rejected | ...
+  status: ExportRequestStatus;
   decided_by: string | null;
   decided_at: string | null;
   token_expires_at: string | null;

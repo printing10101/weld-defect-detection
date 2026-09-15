@@ -432,6 +432,13 @@ async function onSubmit(): Promise<void> {
         <div class="v">
           {{ outcome.review_count }}
         </div>
+        <div
+          v-if="!outcome.training_pool_synced"
+          class="err show"
+          style="margin-top: 10px"
+        >
+          ⚠ 训练池自动回流失败：本次人工确认的缺陷未能进入训练样本库（详见服务端日志），需管理员手动补录
+        </div>
       </div>
     </div>
   </div>

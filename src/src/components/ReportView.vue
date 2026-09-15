@@ -14,6 +14,7 @@ import { toErrorMessage } from "../utils/errorMessage";
 import { activeExport, getReportDetections, getReportNarrative, verifyReport } from "../services/api";
 import { useControlledPdf } from "../composables/useControlledPdf";
 import ResultBanner from "./ResultBanner.vue";
+import ReportNotices from "./ReportNotices.vue";
 import ReviewPanel from "./ReviewPanel.vue";
 import DispositionPanel from "./DispositionPanel.vue";
 import PdfGateModal from "./PdfGateModal.vue";
@@ -263,6 +264,7 @@ async function onVerify(): Promise<void> {
     </div>
 
     <ResultBanner :result="result" />
+    <ReportNotices :result="result" />
     <DispositionPanel :result="result" />
 
     <div class="section-h">

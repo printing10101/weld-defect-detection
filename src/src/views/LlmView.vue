@@ -180,14 +180,20 @@ function onRemoveDir(p: string): void {
 onMounted(() => {
   void load();
   // 扫描/引擎加载都是异步的：轮询状态而不是让用户手动刷新。
+  // polling 在途守卫：上一轮状态请求未返回（如后端卡顿）时跳过本轮，
+  // 避免请求逐层堆叠；轮询失败静默：主请求路径的错误已单独呈现。
+  let polling = false;
   poll = setInterval(async () => {
-    if (busy.value) return;
+    if (busy.value || polling) return;
+    polling = true;
     try {
       status.value = await getLlmStatus();
       if (scanning.value || engine.value?.state === "starting") return;
       if (scan.value?.state === "done") void load();
     } catch {
       /* 轮询失败静默：主请求路径的错误已单独呈现 */
+    } finally {
+      polling = false;
     }
   }, 3000);
 });
