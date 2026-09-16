@@ -2,11 +2,15 @@
 
 - 全新 DB → upgrade head 建表；
 - 历史 create_all DB（无 alembic_version）→ stamp head，不执行 DDL（避免建表冲突）；
-- 幂等：重复运行版本不变。
+- 幂等：重复运行版本不变；
+- 列自愈：stamp head / upgrade 中途失败只推进版本号不执行 DDL，ORM 元数据
+  对"表在、列缺"做幂等 ADD COLUMN 补齐（安装版 images.film_no 事故回归）。
 """
 
 from __future__ import annotations
 
+import pytest
+import sqlalchemy.exc as sa_exc
 from sqlalchemy import inspect
 
 from backend.infra.db import Base, create_db_engine
@@ -85,3 +89,81 @@ def test_new_columns_present_in_orm(tmp_path) -> None:
     assert "batch_no" in cols_img
     assert "content_hash" in cols_img
     assert "disposition" in cols_def
+
+
+def test_migrate_legacy_db_missing_column_healed(tmp_path) -> None:
+    """回归（安装版 film_no 事故）：遗留库（无 alembic_version、images 只有
+    旧时代列）→ stamp head 不执行 DDL，版本到头而物理列缺失；列自愈必须把
+    ORM 新增列补齐，否则评定归档 INSERT 新列即 OperationalError。"""
+    p = str(tmp_path / "legacy_missing_col.db")
+    eng = create_db_engine(p)
+    with eng.connect() as c:
+        # 只建 images 一张 0001 时代最小表：无 film_no/batch_no/content_hash
+        c.exec_driver_sql(
+            "CREATE TABLE images (id VARCHAR(64) PRIMARY KEY, path VARCHAR(512))"
+        )
+    eng.dispose()
+
+    version = ensure_migrations(p)
+    assert version == _HEAD
+
+    eng = create_db_engine(p)
+    with eng.connect() as c:
+        cols = {r[1] for r in c.exec_driver_sql("PRAGMA table_info(images)").fetchall()}
+    eng.dispose()
+    assert {"film_no", "batch_no", "content_hash"} <= cols
+    # 幂等：重复运行版本不变、不抛异常
+    assert ensure_migrations(p) == _HEAD
+
+
+def test_migrate_versioned_db_missing_column_healed(tmp_path) -> None:
+    """回归（安装版事故的精确状态）：alembic_version 已到 head、物理列缺失
+    （历史版本曾被 stamp head 跳过 DDL）→ upgrade 是 no-op，列自愈必须仍把
+    缺失列补齐。此状态若不修复，业务 INSERT 新列即 OperationalError。"""
+    p = str(tmp_path / "versioned_missing_col.db")
+    eng = create_db_engine(p)
+    with eng.connect() as c:
+        c.exec_driver_sql(
+            "CREATE TABLE images (id VARCHAR(64) PRIMARY KEY, path VARCHAR(512))"
+        )
+        c.exec_driver_sql(
+            "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"
+        )
+        c.exec_driver_sql(f"INSERT INTO alembic_version VALUES ('{_HEAD}')")
+        c.commit()  # SQLAlchemy 2.0 commit-as-you-go：不显式提交则 INSERT 被回滚
+    eng.dispose()
+
+    version = ensure_migrations(p)
+    assert version == _HEAD
+
+    eng = create_db_engine(p)
+    with eng.connect() as c:
+        cols = {r[1] for r in c.exec_driver_sql("PRAGMA table_info(images)").fetchall()}
+    eng.dispose()
+    assert {"film_no", "batch_no", "content_hash"} <= cols
+
+
+def test_migrate_upgrade_failure_still_heals_columns(tmp_path) -> None:
+    """upgrade 中途撞表失败（dev 库 0013 defect_atlas 已存在场景）：异常照常
+    上抛（调用方 create_all 兜底），但 finally 的列自愈仍补齐缺失列——
+    版本卡住不能阻止列漂移被修复。"""
+    p = str(tmp_path / "upgrade_fails.db")
+    eng = create_db_engine(p)
+    with eng.connect() as c:
+        # 版本停在 0012，但 0013 要建的 defect_atlas 已被 create_all 抢建
+        c.exec_driver_sql("CREATE TABLE images (id VARCHAR(64) PRIMARY KEY)")
+        c.exec_driver_sql("CREATE TABLE defect_atlas (id VARCHAR(64) PRIMARY KEY)")
+        c.exec_driver_sql(
+            "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"
+        )
+        c.exec_driver_sql("INSERT INTO alembic_version VALUES ('0012_report_meta')")
+    eng.dispose()
+
+    with pytest.raises(sa_exc.OperationalError):
+        ensure_migrations(p)
+
+    eng = create_db_engine(p)
+    with eng.connect() as c:
+        cols = {r[1] for r in c.exec_driver_sql("PRAGMA table_info(images)").fetchall()}
+    eng.dispose()
+    assert "film_no" in cols
