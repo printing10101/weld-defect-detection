@@ -112,7 +112,7 @@ def _synthetic_photo_film(path: Path) -> Path:
 
 
 def test_run_inspection_photo_film_advisory(tmp_path: Path) -> None:
-    """翻拍照片（灯箱亮背景）：门禁不阻断，降级告警+人工复核，链路照常出片。"""
+    """翻拍照片（灯箱亮背景）：门禁不阻断，降级告警+预筛级别+人工复核，链路照常出片。"""
     reg = get_registry()
     pipe = InspectionPipeline(reg)
     img = _synthetic_photo_film(tmp_path / "photo_film.png")
@@ -125,10 +125,17 @@ def test_run_inspection_photo_film_advisory(tmp_path: Path) -> None:
     assert out["photo_mode"] is True
     assert out["warnings"], "翻拍影像必须给出告警（黑度不可测/门禁降级）"
     assert out["need_review"] is True, "翻拍影像必须强制人工复核"
+    # 翻拍口径（与 /verify 同源）：evaluable 不被黑度/位深等降级门禁判死，
+    # 否则照片永远"不可评片"、评级熔断——正是 2026-09 定检照片事故的根因。
+    assert out["evaluable"] is True, "翻拍影像不应被降级门禁判为不可评片"
+    assert out["grade_preliminary"] is True, "翻拍级别必须走预筛通道强标记"
+    assert out["joint_level"], "翻拍影像应输出 AI 预筛级别"
+    assert str(out["basis"][0]).startswith("⚠"), "basis 首条必须是预筛强声明"
     assert out["defect_count"] >= 1, "胶片区内的缺陷应被检出"
     assert Path(out["pdf_path"]).exists(), "翻拍影像也应产出报告"
     stored = reg.repository.get_image(out["image_id"])
     assert stored is not None, "翻拍影像结果应落库"
+    assert stored["evaluable"] is True, "落库口径应与响应一致（可评+需复核）"
 
 
 def test_run_inspection_photo_policy_block_restores_hard_gate(

@@ -32,17 +32,27 @@ const conclusion = computed<string>(() => {
     return "底片质量未达标准要求（像质计灵敏度/黑度 D 校验未通过），系统按保守原则未输出级别结论。";
   }
   const head =
-    props.result.need_review && props.result.joint_level
-      ? `综合评定 ${props.result.joint_level} 级，本报告须经人工复核确认。`
-      : props.result.joint_level
-        ? `综合评定 ${props.result.joint_level} 级。`
-        : "本报告待人工复核，暂无自动评级结论。";
+    props.result.photo_mode && props.result.joint_level
+      ? `翻拍影像 AI 预筛评定 ${props.result.joint_level} 级，须经人工复核确认。`
+      : props.result.need_review && props.result.joint_level
+        ? `综合评定 ${props.result.joint_level} 级，本报告须经人工复核确认。`
+        : props.result.joint_level
+          ? `综合评定 ${props.result.joint_level} 级。`
+          : "本报告待人工复核，暂无自动评级结论。";
   const defects = count > 0 ? `共检出 ${count} 处缺陷，明细见 PDF/A 报告。` : "未检出缺陷。";
   return head + defects;
 });
 
 const reason = computed<string>(() => {
-  if (tone.value === "fail") return "可能原因：像质计（IQI）丝号未达要求，或黑度 D 超出 AB 级规定范围。可调整曝光参数或补加像质计后重新透照；必要时转人工评片。";
+  if (tone.value === "fail") {
+    if (props.result.photo_mode) {
+      return "可能原因：翻拍影像检出严重伪缺陷（划痕/污渍/水迹等），系统按保守原则未输出级别。建议重新翻拍或转人工评片。";
+    }
+    return "可能原因：像质计（IQI）丝号未达要求，或黑度 D 超出 AB 级规定范围。可调整曝光参数或补加像质计后重新透照；必要时转人工评片。";
+  }
+  if (props.result.photo_mode) {
+    return "翻拍影像：绝对黑度不可测、像质计识别不可靠，质量门禁已按翻拍策略降级——级别为 AI 预筛结果，须经持证人工复核确认后方可作为评定结论。";
+  }
   if (tone.value === "review") return "可能原因：本报告依据的评级标准限值需要授权后使用，或初评与对评结论存在分歧。系统已按 §12.2 转入人工仲裁流程——此为「宁保守、不误放行」的保守判定策略，并非系统误报。";
   return "像质计灵敏度与黑度 D 校验均通过；如需归档，请导出 PDF/A 检测报告。";
 });

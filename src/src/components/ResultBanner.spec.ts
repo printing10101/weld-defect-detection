@@ -56,6 +56,32 @@ describe("ResultBanner", () => {
     expect(w.text()).toContain("未达标准");
   });
 
+  it("翻拍影像：预筛级别 + 人工复核文案（不显示不可评片）", () => {
+    const w = mount(ResultBanner, {
+      props: {
+        result: makeResult({ photo_mode: true, need_review: true, joint_level: "III" }),
+      },
+    });
+    expect(w.text()).toContain("翻拍");
+    expect(w.text()).toContain("III");
+    expect(w.text()).toContain("复核");
+    expect(w.text()).not.toContain("不可评片");
+  });
+
+  it("翻拍影像且伪缺陷严重：仍判不可评片（保留保守门禁）", () => {
+    const w = mount(ResultBanner, {
+      props: {
+        result: makeResult({
+          photo_mode: true,
+          evaluable: false,
+          need_review: true,
+          joint_level: null,
+        }),
+      },
+    });
+    expect(w.text()).toContain("不可评片");
+  });
+
   it("零缺陷通过：ok 态 + 未检出缺陷文案", () => {
     const w = mount(ResultBanner, {
       props: { result: makeResult({ defect_count: 0 }) },

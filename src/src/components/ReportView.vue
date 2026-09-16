@@ -117,6 +117,14 @@ const gradeRow = computed(() => {
 /** 结论第 1 条（与 PDF _conclusion_flowables 同逻辑，屏上预览保持一致） */
 const conclusionLines = computed<string[]>(() => {
   const r = props.result;
+  if (r.photo_mode && r.joint_level) {
+    // 翻拍降级：级别确实算出来了，但黑度/IQI 未经验证——结论必须自带
+    // 翻拍语境的强提示，不能复用"合格/不合格"话术，也不能说成"不可评片"。
+    return [
+      `1、本片为翻拍影像（绝对黑度不可测，质量门禁按翻拍策略降级），不构成正式评定依据；` +
+        `AI 预筛级别为${roman(r.joint_level)}级，仅供参考，须由持证人工复核确认后方可作为评定结论。`,
+    ];
+  }
   if (r.grade_preliminary && r.joint_level) {
     // 预筛级别：底片质量未达标，级别不具合规效力——结论必须自带强提示，
     // 不能复用"合格/不合格"话术，也不能说成"不可评片"（级别确实算出来了）。
@@ -979,7 +987,11 @@ async function onVerify(): Promise<void> {
       <div class="k">
         评片质量判定
       </div><div class="v">
-        {{ result.evaluable ? "底片质量合格，可评定" : "不可评片（底片质量不满足评定要求）" }}
+        {{ result.photo_mode
+          ? "翻拍影像（质量门禁降级，须人工复核）"
+          : result.evaluable
+            ? "底片质量合格，可评定"
+            : "不可评片（底片质量不满足评定要求）" }}
       </div>
       <div class="k">
         质量级别（综合评定）

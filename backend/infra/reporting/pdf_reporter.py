@@ -954,6 +954,10 @@ def _conclusion_flowables(c, styles: dict[str, ParagraphStyle]) -> list:
             )
     else:
         first = "1、本片暂无法自动评级（置信度不足或未标定），需人工评定。"
+    if c.need_review and c.joint_level and c.evaluable:
+        # 有级别但标记复核（翻拍降级/初评对评分歧等）：结论不得以正式口吻
+        # 收尾，否则与判定依据里的降级声明互相矛盾。
+        first += "（本片尚须经人工复核确认，暂不作为正式评定结论）"
     return [
         Paragraph("检测结论及说明：", styles["cell_left"]),
         Spacer(1, 8),

@@ -109,6 +109,18 @@ describe("ReportView 预筛级别", () => {
     expect(text).toContain("本片不可评片");
     expect(text).not.toContain("AI 预筛·非正式级别");
   });
+
+  it("翻拍影像有级别：结论为翻拍降级强提示，质量判定不再写不可评片", () => {
+    const w = mountView(
+      makeResult({ photo_mode: true, evaluable: true, joint_level: "III", grade_preliminary: true }),
+    );
+    const text = w.text();
+    expect(text).toContain("本片为翻拍影像");
+    expect(text).toContain("AI 预筛级别为Ⅲ级");
+    expect(text).toContain("翻拍影像（质量门禁降级，须人工复核）");
+    expect(text).not.toContain("本片不可评片");
+    expect(text).not.toContain("结果合格");
+  });
 });
 
 describe("ReportView 本地大模型评片结论", () => {

@@ -206,9 +206,11 @@ class InspectionPipeline:
         不合格底片不构成评定依据。
 
         翻拍影像例外（film_region 判定 is_photo 且 density.photo_policy=warn）：
-        相机拍灯箱的 8bit 照片绝对黑度不可测、IQI 识别不可靠，黑度/IQI/质量
-        门禁不阻断，降级为告警（warnings）+ 强制人工复核（need_review=True），
-        缺陷检测/量化/报告链路照常执行；级别输出语义与 force 路径一致。
+        相机拍灯箱的 8bit 照片绝对黑度不可测、IQI 识别不可靠，黑度/IQI/质量/
+        位深/扫描参数门禁不阻断，evaluable 按翻拍口径重算（仅严重伪缺陷否决，
+        与 /verify 同源）；级别经 AI 预筛通道输出（grade_preliminary=True，
+        basis 首条 ⚠ 声明）并强制人工复核（need_review=True），检测/量化/
+        报告链路照常执行。
         """
         reg = self._reg
         image_id = uuid.uuid4().hex
@@ -279,7 +281,7 @@ class InspectionPipeline:
         dpi = _estimate_dpi(meta)
         dpi_ok, dpi_reason = _check_dpi(dpi, reg.config.gate)
         bit_depth_ok, bit_depth_reason = _check_bit_depth(meta.bit_depth, reg.config.gate)
-        evaluable = bool(
+        gate_evaluable = bool(
             density_ok
             and iqi.passed
             and pd.passed
@@ -291,7 +293,7 @@ class InspectionPipeline:
         # 转为告警 + 强制人工复核（绝对黑度不可测，未验证 ≠ 不合格）。
         photo_advisory = bool(photo_mode and reg.config.density.photo_policy == "warn")
         reasons: list[str] = []
-        if not evaluable:
+        if not gate_evaluable:
             if not density_ok:
                 reasons.append(
                     f"黑度 {density:.2f} 超出 [{reg.config.density.low}, {reg.config.density.high}]"
@@ -318,6 +320,13 @@ class InspectionPipeline:
                     operator=actor,
                 )
                 raise IQIFailError("底片质量不合格，阻断评片并提示重拍：" + "；".join(reasons))
+        # 翻拍口径下"能否评片"与门禁结论分离（与 /verify 同源）：黑度/IQI/质量/
+        # 位深/扫描参数对翻拍照片不可验证或必然不成立（照片必为 8bit、无扫描
+        # 元数据），不构成"不可评片"，只剩严重伪缺陷一票。此前直接用
+        # gate_evaluable 落库/出响应，照片必被位深门禁判死，界面永远"不可评片"、
+        # 评级被熔断。降级痕迹不丢：预筛声明 + photo_warnings 并入 basis，
+        # need_review 强制兜底，未验证 ≠ 合格。
+        evaluable = bool(pd.passed) if photo_advisory else gate_evaluable
         # 门禁降级放行的告警（require_dpi=false / allow_8bit=true 路径）：
         # 不阻断评片，但必须在结果与日志中留痕，避免"未验证"被静默当作合格。
         gate_warnings: list[str] = []
@@ -351,7 +360,7 @@ class InspectionPipeline:
                 f"翻拍影像：绝对黑度不可测（8bit 照片黑度上限 2.41），"
                 f"胶片区估算 D={density:.2f} 仅供参考"
             )
-            if not evaluable:
+            if not gate_evaluable:
                 photo_warnings.append(
                     "翻拍影像质量门禁未通过（" + "；".join(reasons) + "），已降级为人工复核"
                 )
@@ -455,6 +464,10 @@ class InspectionPipeline:
                 # **必须**强标记 + 强声明——级别照常输出，可它不构成验收依据。
                 # 这是"可见的降级"而非"静默错判"：basis 首条与 need_review 都会
                 # 告诉评片员"这不是正式级别"。
+                grade_preliminary = True
+            elif photo_advisory:
+                # 翻拍影像同走预筛通道：黑度/IQI 未经验证，级别不构成正式
+                # 评定——必须强标记，否则报告会把未验证底片的级别当正式结论。
                 grade_preliminary = True
             grade = reg.grader.grade(detections, context)
             joint_level: str | None = grade.joint_level.value
