@@ -3,7 +3,73 @@
 本项目的所有重要变更记录于此。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本遵循语义化版本。当前处于 0.x 阶段，接口仍可能有破坏性调整。
 
-## [Unreleased]
+## [1.0.0] - 2026-09-17
+
+### 修复
+
+- **翻拍照片永远显示「不可评片」（定检照片事故）**：`run_inspection` 的
+  `evaluable` 直接取全部门禁的与结果，而照片必为 8bit（位深硬门禁
+  `allow_8bit=false` 必杀）且黑度/IQI 不可测必挂——翻拍降级只豁免了
+  "阻断"，没重算 `evaluable`，于是任何翻拍照片都 `evaluable=false`：
+  前端横幅显示「不可评片」、评级被熔断，翻拍可评特性形同虚设。
+  修复：翻拍口径（`photo_policy=warn`）下 `evaluable` 重算为仅严重伪缺陷
+  否决（与 `/verify` 端点既有口径对齐）；级别经 AI 预筛通道输出
+  （`grade_preliminary=true`，basis 首条 ⚠ 强声明）并强制人工复核；
+  前端横幅/报告页对 `photo_mode` 显示翻拍降级文案，PDF 结论对
+  "有级别+需复核"追加人工复核限定语，不以正式口吻裸判合格。
+  测试长期未暴露的帮凶：conftest 注入 `SCAN_GATE__ALLOW_8BIT=true`，
+  位深门禁在测试环境恒放行。回归锚定 `test_run_inspection_photo_film_advisory`
+  新增断言（evaluable/预筛级别/⚠ 声明/落库口径一致）。
+- **CORS 移到中间件最外层（同类误报的收口）**：CORS 只装饰"流经它"的响应——
+  原先它在内层，外层中间件直接返回的响应（IPC 令牌 401、限流 429）同样没有
+  `Access-Control-Allow-*`，跨源页面一律拦成 TypeError。典型场景：后端重启
+  令牌刷新的窗口期里，页面旧令牌的每个 401 都被前端误报成"无法连接本地推理
+  服务"，用户以为断连实际该重新登录。现在中间件顺序为 UnhandledException →
+  SecurityHeaders → RateLimit → IpcToken → Metrics → CORS（最外），一切错误
+  响应（500/401/429）对跨源页面可见、可被前端按状态码正确处置；代价仅为
+  CORS 短路的 OPTIONS 预检不再带安全头/进指标（无业务内容，可接受）。
+  回归测试锚定 IPC 401 的 CORS 可见性（`test_ipc_401_response_carries_cors_headers`）。
+- **迁移自愈补"版本已到 head 但物理列缺失"场景**：安装版事故的精确状态
+  （历史版本被 stamp head 跳过 DDL、版本号与物理 schema 脱节）此前只有
+  "无版本表"路径被测试覆盖；补 `test_migrate_versioned_db_missing_column_healed`
+  锚定该状态下列自愈仍然生效。
+- **全库 schema 漂移体检（无残留）**：以 ORM 元数据为真源对开发库与安装版
+  scan.db 做全表全列对照，均无缺表/缺列/多余列；各 Store（Security/Carrier/
+  Export/Device/GateReject/Atlas）共用同一 `paths.db_path`，单库调和即全覆盖。
+
+### 修复（第一批）
+
+- **安装版评定归档必炸（images.film_no 列缺失）**：遗留 create_all 库
+  （无 alembic_version）启动时被 `stamp head` 直接到 0014——版本号推进
+  而不执行任何 DDL，`create_all` 只建缺失表、永不补列；单幅评定在归档步
+  INSERT `film_no` 即 `OperationalError`（用户可见症状：评定任务失败，
+  六步全「已中断」）。修复分两层：`migrate.py` 新增**列级自愈**
+  `_reconcile_missing_columns`（每次迁移收尾以 ORM 元数据为真源，对
+  "表在、列缺"幂等 ADD COLUMN；upgrade 中途撞表失败也在 finally 补齐），
+  并补三条回归测试（遗留库缺列 / 升级失败仍自愈 / 幂等）。
+- **服务端 500 被前端误报「无法连接本地推理服务」**：未处理异常由
+  Starlette `ServerErrorMiddleware`（固定最外层）回裸 500，不经过 CORS
+  中间件、无 `Access-Control-Allow-Origin`，跨源页面把响应拦成 TypeError。
+  新增 `UnhandledExceptionMiddleware`（CORS 内层）把异常转统一错误包
+  `INTERNAL_ERROR` 500 后照常流经 CORS 出栈，真实故障不再伪装成断连。
+- **前端耗时提示与实测脱节**：评定进行页「预计耗时 15–30 秒」改为
+  「5–15 秒（超大底片略久）」，与优化后实测对齐。
+
+### 性能
+
+- **单幅评定端到端压入 15 秒内**（实测：2048×2600 ≈4.4s、3000×8000
+  ≈10.4s、1200 万像素照片 ≈6.8s；此前同口径分别为 63.8s/258s/78.8s）：
+  - **静态加密换原生后端**：SDC2 信封的 SM4-CTR 与 HMAC-SM3 从 gmssl
+    纯 Python（~100-200 KB/s，大底片单张归档加密数十秒，是端到端最大
+    瓶颈）迁到 `cryptography` 的 OpenSSL 后端；SM2 签名仍用 gmssl。
+    信封格式与密钥流逐字节不变（存量密文互解），新增 gmssl 参考实现
+    逐字节对照的兼容锚点测试。落盘加密 157s → 0.35s（3000×8000）。
+  - **BRISQUE 特征评估降本**：MSCN 高斯卷积从 scipy `convolve2d`
+    （单线程 float64）改 `cv2.filter2D`（SIMD+多线程）；特征评估长边
+    上限 2048 等比降采样（特征为信息性输出，门禁判定走 RQI 不受影响）。
+    质量门禁 16.8s → ~3s（3000×8000）。
+  - 新增 `scripts/profile_single_eval.py` 分段耗时画像（生产口径：YOLO
+    ONNX 分块 + 印字 OCR，按 run_inspection 真实阶段计时）。
 
 ### 修复
 

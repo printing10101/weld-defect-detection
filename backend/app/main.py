@@ -332,7 +332,7 @@ def create_app() -> FastAPI:
     抽为工厂函数：测试可经 create_app 获得全新实例以验证真实鉴权链路
     （不继承 conftest 注入的 admin 覆盖）；模块级 `app` 供现有测试/生产使用。
     """
-    app = FastAPI(title="ScanDetection", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="ScanDetection", version="1.0.0", lifespan=lifespan)
 
     # 中间件顺序（add_middleware 后添加者在外层），内 → 外：
     #   UnhandledException → SecurityHeaders → RateLimit → IpcToken → Metrics → CORS

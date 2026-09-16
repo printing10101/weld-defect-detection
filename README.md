@@ -102,7 +102,7 @@ backend/.venv/Scripts/python scripts/e2e_api_smoke.py --soak 120
 # 一键打包（推荐）：供给/裁剪嵌入运行时 → 前端构建 → Electron 打包 → 输出安装包路径
 # src/python_embed 缺失时自动从 python.org 嵌入包 + 锁定依赖构建（CI 可复现）
 powershell -ExecutionPolicy Bypass -File scripts\build_installer.ps1
-# 产物：src\release\射线焊缝缺陷智能检测系统_0.1.0_x64-setup.exe
+# 产物：src\release\射线焊缝缺陷智能检测系统_1.0.0_x64-setup.exe
 ```
 
 - **运行入口（交付口径）**：安装包是本软件唯一的对外使用入口——安装后从

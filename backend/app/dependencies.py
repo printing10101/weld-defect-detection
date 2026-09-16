@@ -820,7 +820,7 @@ class Registry:
             return {
                 "status": "ok",
                 "degraded": self.detector_degraded,
-                "app_version": "0.1.0",
+                "app_version": "1.0.0",
                 # 访客模式开关（登录页据此显示/隐藏访客入口；无鉴权端点仅暴露布尔位）
                 "guest_mode": bool(self.config.auth.guest_mode),
                 "detector": self.detector_kind,

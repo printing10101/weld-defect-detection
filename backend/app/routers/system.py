@@ -82,7 +82,7 @@ def run_backup(reg: Registry, actor: str = "system", note: str = "system backup 
     result = create_backup(
         _resolve_sources(reg),
         archive_path,
-        app_version="0.1.0",
+        app_version="1.0.0",
         dirs=_image_dirs(reg),
     )
     manifest = result["manifest"]

@@ -34,7 +34,7 @@ def health_check(reg: Annotated[Registry | None, Depends(try_get_registry)]) -> 
         return {
             "status": "starting",
             "degraded": False,
-            "app_version": "0.1.0",
+            "app_version": "1.0.0",
             "guest_mode": guest_mode,
             "detector": "loading",
             "detector_degraded": False,

@@ -105,7 +105,7 @@ def _stage_and_hash(src: Path, dest: Path, algo: str, chunk: int = 1 << 20) -> t
 def create_backup(
     sources: dict[str, Path],
     archive_path: Path,
-    app_version: str = "0.1.0",
+    app_version: str = "1.0.0",
     *,
     hash_algo: str = "sm3",
     dirs: dict[str, Path] | None = None,
