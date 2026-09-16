@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 import threading
 import time
 from collections import defaultdict
@@ -21,6 +22,41 @@ from typing import ClassVar
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
+
+_LOG = logging.getLogger("scandetection.security")
+
+
+class UnhandledExceptionMiddleware(BaseHTTPMiddleware):
+    """未处理异常兜底：转统一错误包 500（必须挂在 CORS 内层，见下）。
+
+    Starlette 的 ServerErrorMiddleware 固定挂在整条中间件链最外层——未处理
+    异常由它直接回 500 纯文本，**不经过 CORS 中间件**，响应没有
+    Access-Control-Allow-Origin；跨源页面（app:// 壳）会把响应拦成 TypeError，
+    前端于是把一次真实的服务端 500（如 images.film_no 迁移事故的归档失败）
+    误报成「无法连接本地推理服务」，排查方向被带偏。本中间件在 create_app 中
+    先于 CORSMiddleware 注册（更内层），异常在此转成统一错误包后照常流经
+    CORS 出栈，浏览器拿到的是带 CORS 头的 500 JSON。
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        try:
+            return await call_next(request)
+        except Exception:  # noqa: BLE001 - 兜底中间件的职责就是接住一切未处理异常
+            _LOG.exception(
+                "unhandled exception on %s %s", request.method, request.url.path
+            )
+            from fastapi.responses import JSONResponse
+
+            return JSONResponse(
+                {
+                    "error": {
+                        "code": "INTERNAL_ERROR",
+                        "message": "服务内部错误",
+                        "detail": None,
+                    }
+                },
+                status_code=500,
+            )
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -121,6 +157,11 @@ class IpcTokenMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         # 豁免：非 API（根/SPA 静态资源）+ 存活/指标/认证端点
         if not path.startswith("/api/"):
+            return await call_next(request)
+        # 豁免：CORS 预检。预检请求按规范不携带自定义头/凭据，令牌校验对它
+        # 恒为假阳性（401 会把 webview 的全部业务请求拦死在预检层）；带令牌
+        # 的实请求在预检通过后照常校验。
+        if request.method == "OPTIONS" and "access-control-request-method" in request.headers:
             return await call_next(request)
         if path in ("/api/v1/health", "/api/v1/metrics") or path.startswith("/api/v1/auth"):
             return await call_next(request)

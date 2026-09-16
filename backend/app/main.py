@@ -334,28 +334,26 @@ def create_app() -> FastAPI:
     """
     app = FastAPI(title="ScanDetection", version="0.1.0", lifespan=lifespan)
 
-    # CORS 允许源由配置驱动：默认覆盖 Tauri webview
-    # （tauri://localhost）+ 本地开发源（127.0.0.1 / :5173）。桌面应用仅监听
-    # 本机，风险可控。不再使用 "*"，否则任意外部网站均可跨源读取本机 API
-    # （含审计链 / 报告）；部署新增前端源改 configs/default.yaml 即可，不改代码。
+    # 中间件顺序（add_middleware 后添加者在外层），内 → 外：
+    #   UnhandledException → SecurityHeaders → RateLimit → IpcToken → Metrics → CORS
+    # CORS 必须最外层：它只装饰"流经它"的响应——若在内层，外层中间件
+    # （IPC 令牌 401、限流 429、指标层异常）直接返回的响应就没有
+    # Access-Control-Allow-*，跨源页面（app:// 壳）一律拦成 TypeError，
+    # 前端把"令牌过期/被限流"统统误报成"无法连接本地推理服务"。
+    # 代价：CORS 短路的 OPTIONS 预检不再经过安全头/指标层（预检响应无
+    # 业务内容，可接受）。
     cfg = load_config()
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=list(cfg.server.cors_origins),
-        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-        allow_headers=["Content-Type", "X-Operator-Name", "Authorization", "X-Export-Token"],
-    )
-
-    # /：安全响应头 + 基础限流（P2-9）。中间件按添加顺序执行，
-    # CORS 在最内层（先于安全头/限流处理），保证 OPTIONS 预检同样获得安全头。
     from backend.app.security import (
         IpcTokenMiddleware,
         RateLimitMiddleware,
         SecurityHeadersMiddleware,
+        UnhandledExceptionMiddleware,
     )
 
-    app.add_middleware(RateLimitMiddleware)  # 外层：限流
-    app.add_middleware(SecurityHeadersMiddleware)  # 内层：安全头
+    # 未处理异常兜底（最内层）：异常转统一错误包 500 后照常流经 CORS 出栈。
+    app.add_middleware(UnhandledExceptionMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)  # 安全响应头
+    app.add_middleware(RateLimitMiddleware)  # 基础限流（P2-9）
 
     # IPC 一次性令牌校验（C-17）：业务请求须带 X-IPC-Token 或会话凭据。
     # enforce 由配置驱动（测试经 conftest 置 false，最小侵入）。
@@ -368,11 +366,31 @@ def create_app() -> FastAPI:
             data_dir=str(resolve_config_path(cfg.paths.data_dir)),
         )
 
-    # 可观测性：进程内指标中间件（最外层，采集所有 HTTP 请求计数/耗时）。
+    # 可观测性：进程内指标中间件（采集业务请求计数/耗时；预检由 CORS 在
+    # 外层短路，不进指标）。
     from backend.infra.metrics import MetricsMiddleware, get_metrics
 
     get_metrics().enabled = cfg.observability.enable_metrics
     app.add_middleware(MetricsMiddleware)
+
+    # CORS 允许源由配置驱动：默认覆盖桌面壳（app://scandetection）
+    # （历史 Tauri 源 tauri://localhost）+ 本地开发源（127.0.0.1 / :5173）。
+    # 桌面应用仅监听本机，风险可控。不再使用 "*"，否则任意外部网站均可跨源
+    # 读取本机 API（含审计链 / 报告）；部署新增前端源改 configs/default.yaml
+    # 即可，不改代码。X-IPC-Token 必须在列：桌面壳就绪后前端每个请求都携带
+    # 该头，漏了会被 CORS 预检整体拦下，症状恰是"后端活着、UI 永远显示未连接"。
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(cfg.server.cors_origins),
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=[
+            "Content-Type",
+            "X-Operator-Name",
+            "Authorization",
+            "X-Export-Token",
+            "X-IPC-Token",
+        ],
+    )
 
     # 三员鉴权（C-06）：除存活/指标/认证端点外，全部业务路由要求已登录
     # （Bearer 会话）。测试经 conftest 的 dependency_overrides 统一注入测试

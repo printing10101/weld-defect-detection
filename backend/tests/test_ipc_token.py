@@ -114,3 +114,43 @@ def test_enforce_off_allows_all(monkeypatch, tmp_path: Path):
         assert client.get("/api/v1/records").status_code == 200
         # 未签发令牌（enforce 关不落盘）
         assert not token_file_path(tmp_path / "data").exists()
+
+
+def test_cors_preflight_allows_ipc_token_header(enforced_app):
+    """回归（Electron 迁移）：桌面壳就绪后向页面注入 __IPC_TOKEN__，此后前端
+    全量请求携带 X-IPC-Token；CORS 预检若不放行该头，渲染进程所有请求都被
+    拦成网络错误，症状恰是「后端活着、UI 永远显示未连接」。"""
+    app, _data_dir = enforced_app
+    with TestClient(app) as client:
+        resp = client.options(
+            "/api/v1/records",
+            headers={
+                "Origin": "app://scandetection",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "x-ipc-token,authorization",
+            },
+        )
+        assert resp.status_code == 200
+        allowed = resp.headers.get("access-control-allow-headers", "").lower()
+        assert "x-ipc-token" in allowed
+        assert resp.headers.get("access-control-allow-origin") == "app://scandetection"
+
+
+def test_ipc_401_response_carries_cors_headers(enforced_app):
+    """回归（CORS 最外层）：IPC 中间件直接返回的 401 必须带 CORS 头。
+
+    IPC 中间件在 CORS 外层——若 CORS 更靠内，401 响应不经过 CORS、没有
+    Access-Control-Allow-Origin，跨源页面把它拦成 TypeError：后端重启令牌
+    刷新的窗口期里，页面旧令牌的每个 401 都会被前端误报成「无法连接本地
+    推理服务」（与 film_no 事故同族的观测污染）。"""
+    app, _data_dir = enforced_app
+    with TestClient(app) as client:
+        resp = client.get(
+            "/api/v1/records",
+            headers={"Origin": "app://scandetection", "X-IPC-Token": "stale-token"},
+        )
+        assert resp.status_code == 401
+        assert resp.json()["error"]["code"] == "IPC_TOKEN_REQUIRED"
+        # 关键断言：错误响应对跨源页面可见（有 ACAO 才能被前端按 401 处理，
+        # 走「重新登录」路径而不是误报网络断连）
+        assert resp.headers.get("access-control-allow-origin") == "app://scandetection"

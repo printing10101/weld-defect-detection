@@ -20,9 +20,11 @@ describe("backend store", () => {
     s.bind();
     window.dispatchEvent(new CustomEvent(BACKEND_DOWN_EVENT));
     expect(s.backendDown).toBe(true);
+    expect(s.backendUp).toBe(false);
 
     window.dispatchEvent(new CustomEvent(BACKEND_UP_EVENT));
     expect(s.backendDown).toBe(false);
+    expect(s.backendUp).toBe(true);
     expect(s.modelLoading).toBe(false);
     s.unbind();
   });
@@ -51,6 +53,9 @@ describe("backend store", () => {
       health.mockResolvedValueOnce({ status: "ok" } as never);
       await vi.advanceTimersByTimeAsync(1000);
       expect(s.modelLoading).toBe(false);
+      // 回归：轮询成功即置在线态——UP 事件是一次性的，晚挂载的状态栏
+      // （登录页停留后进工作台）必须能从 store 状态读到「就绪」。
+      expect(s.backendUp).toBe(true);
     } finally {
       vi.useRealTimers();
     }

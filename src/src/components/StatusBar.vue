@@ -1,34 +1,28 @@
 <script setup lang="ts">
 /** 状态栏（AutoCAD 范式）：底部常驻状态格。
  *  就绪 | 后端连接状态 | 模型状态 | 记录总数 | 操作员 | 系统时间。
- *  后端状态复用 App.vue 的 BACKEND_UP/DOWN 窗口事件；时间每秒刷新。 */
-import { onBeforeUnmount, onMounted, ref } from "vue";
-import { BACKEND_DOWN_EVENT, BACKEND_UP_EVENT, apiHostLabel } from "../services/api";
+ *  后端状态从 backend store 的响应式状态派生——UP/DOWN 是一次性窗口事件，
+ *  本组件常在登录页之后才挂载，读状态才不会永远停在「正在连接」；时间每秒刷新。 */
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { apiHostLabel } from "../services/api";
+import { useBackendStore } from "../stores/backend";
 
-const backend = ref<"connecting" | "up" | "down">("connecting");
-const modelStatus = ref("加载中");
+const store = useBackendStore();
+const backend = computed<"connecting" | "up" | "down">(() =>
+  store.backendUp ? "up" : store.backendDown ? "down" : "connecting",
+);
+const modelStatus = computed(() =>
+  backend.value === "up" ? "就绪" : backend.value === "down" ? "不可用" : "加载中",
+);
 const now = ref(new Date());
 /** 服务地址随配置解析（此前硬编码 127.0.0.1:18773，改 VITE_API_BASE 即误导）。 */
 const host = apiHostLabel();
 let timer: number | undefined;
 
-function onUp(): void {
-  backend.value = "up";
-  modelStatus.value = "就绪";
-}
-function onDown(): void {
-  backend.value = "down";
-  modelStatus.value = "不可用";
-}
-
 onMounted(() => {
-  window.addEventListener(BACKEND_UP_EVENT, onUp);
-  window.addEventListener(BACKEND_DOWN_EVENT, onDown);
   timer = window.setInterval(() => (now.value = new Date()), 1000);
 });
 onBeforeUnmount(() => {
-  window.removeEventListener(BACKEND_UP_EVENT, onUp);
-  window.removeEventListener(BACKEND_DOWN_EVENT, onDown);
   if (timer !== undefined) window.clearInterval(timer);
 });
 

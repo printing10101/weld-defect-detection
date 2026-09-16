@@ -5,6 +5,8 @@
  *
  * 语义：
  * - backendDown：/health 不可达或请求超时（红色横幅，自动指数重试）；
+ * - backendUp：最近一次探测/请求确认后端在线。UP 是一次性窗口事件，
+ *   晚挂载的订阅者（登录页停留后进工作台）会错过——必须读状态而非等事件；
  * - modelLoading：端口已绑定、registry 装配中（琥珀提示，模型加载可能需 1~2 分钟）。
  */
 import { defineStore } from "pinia";
@@ -13,6 +15,7 @@ import { BACKEND_DOWN_EVENT, BACKEND_UP_EVENT, getHealth } from "../services/api
 
 export const useBackendStore = defineStore("backend", () => {
   const backendDown = ref(false);
+  const backendUp = ref(false);
   const modelLoading = ref(false);
 
   /** 离线自动恢复轮询句柄：冷启动期间持续探测 /health 而非直接报错。 */
@@ -36,6 +39,7 @@ export const useBackendStore = defineStore("backend", () => {
           pollBackend();
         } else {
           modelLoading.value = false;
+          backendUp.value = true;
         }
       } catch {
         pollBackend(); // 仍不可达 → 继续等待（窗口不关闭就持续重试）。
@@ -45,10 +49,12 @@ export const useBackendStore = defineStore("backend", () => {
 
   function onBackendDown(): void {
     backendDown.value = true;
+    backendUp.value = false;
     pollBackend();
   }
   function onBackendUp(): void {
     backendDown.value = false;
+    backendUp.value = true;
     modelLoading.value = false;
     stopPolling();
   }
@@ -68,5 +74,5 @@ export const useBackendStore = defineStore("backend", () => {
     pollBackend();
   }
 
-  return { backendDown, modelLoading, bind, unbind, start, stopPolling };
+  return { backendDown, backendUp, modelLoading, bind, unbind, start, stopPolling };
 });
