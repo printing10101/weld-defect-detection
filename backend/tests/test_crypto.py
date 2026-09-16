@@ -60,6 +60,71 @@ def test_sm3_known_vector() -> None:
     assert sm3_hex(b"abc") == "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0"
 
 
+def test_sdc2_ciphertext_byte_compatible_with_gmssl_reference(monkeypatch) -> None:
+    """SDC2 密文与 gmssl 参考实现逐字节一致（原生 SM4-CTR/HMAC-SM3 迁移锚点）。
+
+    加密原语已从 gmssl 纯 Python 迁到 cryptography 原生后端（性能：大底片
+    归档单张加密数十秒 → 毫秒级）。信封格式、SM4-CTR 密钥流与 HMAC-SM3
+    必须逐字节不变——否则存量密文（影像副本/备份）全部不可解。本测试用
+    gmssl 原语独立重算密文体与 MAC 作对照（含非块对齐长度，覆盖 CTR 末块）。
+    """
+    import base64
+
+    from gmssl import func
+    from gmssl import sm3 as gm_sm3
+    from gmssl.sm4 import SM4_ENCRYPT, CryptSM4
+
+    from backend.infra.crypto import (
+        _KDF_MAC,
+        _KDF_SM4,
+        _MAGIC_SM,
+        _hmac_sm3,
+        _kdf,
+        default_crypto_provider,
+    )
+
+    def _ref_sm3_hex(data: bytes) -> str:
+        return gm_sm3.sm3_hash(func.bytes_to_list(data))
+
+    def _ref_hmac_sm3(key: bytes, msg: bytes) -> bytes:
+        """RFC 2104 结构 HMAC-SM3（gmssl 参考实现，独立于被测模块）。"""
+        block = 64
+        k = key if len(key) <= block else bytes.fromhex(_ref_sm3_hex(key))
+        k = k + b"\x00" * (block - len(k))
+        inner = _ref_sm3_hex(bytes(b ^ 0x36 for b in k) + msg)
+        outer = _ref_sm3_hex(bytes(b ^ 0x5C for b in k) + bytes.fromhex(inner))
+        return bytes.fromhex(outer)
+
+    master = bytes(range(32))
+    monkeypatch.setenv("SCAN_CRYPTO_KEY", base64.b64encode(master).decode())
+    # 固定 nonce：encrypt() 内部 os.urandom 只用于生成 16B 计数器
+    monkeypatch.setattr(
+        "backend.infra.crypto.os.urandom", lambda n: bytes(range(n))[::-1]
+    )
+    provider = default_crypto_provider()
+
+    nonce = bytes(range(16))[::-1]
+    plaintext = b"compat-payload" * 37  # 非块对齐（481B），覆盖 CTR 末块部分计数
+    ciphertext = provider.encrypt(plaintext)
+
+    sm4_key = _kdf(master, _KDF_SM4, 16)
+    sm4 = CryptSM4()
+    sm4.set_key(sm4_key, SM4_ENCRYPT)
+    counter_base = int.from_bytes(nonce, "big")
+    body = bytearray()
+    for off in range(0, len(plaintext), 16):
+        ctr = ((counter_base + off // 16) & ((1 << 128) - 1)).to_bytes(16, "big")
+        ks = bytes(sm4.one_round(sm4.sk, ctr))
+        body += bytes(a ^ b for a, b in zip(plaintext[off : off + 16], ks))
+
+    mac_key = _kdf(master, _KDF_MAC, 32)
+    expected_mac = _ref_hmac_sm3(mac_key, _MAGIC_SM + nonce + bytes(body))
+    assert bytes(body) == ciphertext[len(_MAGIC_SM) + 16 : -32]
+    assert ciphertext[-32:] == expected_mac
+    # 模块自算 MAC 与参考实现一致（_hmac_sm3 迁移后仍逐字节等值）
+    assert _hmac_sm3(mac_key, _MAGIC_SM + nonce + bytes(body)) == expected_mac
+
+
 def test_encrypt_decrypt_roundtrip() -> None:
     cipher = AesCrypto(bytes.fromhex("00" * 32))
     plaintext = b"film image bytes"

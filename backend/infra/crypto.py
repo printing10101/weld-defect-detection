@@ -33,9 +33,11 @@ GF(2^128) 乘法表，gmssl 未实现；故以 SM4-CTR + HMAC-SM3（encrypt-then
 - 对接商密硬件（Pkcs11Provider）后，SM4/SM2 密钥改由硬件模块托管生成并
   保存在硬件内（禁止导出），软件侧仅持句柄，主密钥不再参与数据密钥派生。
 
-性能说明：gmssl 为纯 Python 实现，SM4-CTR 吞吐约 100~200 KB/s（本机实测
-4KB 约 26ms），SM2 签名约 10ms/次。适合影像副本、报告等落盘数据的一次性
-静态加密；大文件或高并发场景请对接商密密码卡/加速卡（Pkcs11Provider）。
+性能说明：SM4-CTR 与 HMAC-SM3 走 ``cryptography`` 的 OpenSSL 后端（原生速度，
+数百 MB/s 量级；曾用 gmssl 纯 Python 实现，SM4-CTR 仅 ~100-200 KB/s，大底片
+归档单张加密耗时数十秒）。gmssl 仍承担 SM2 签名与 SM3 一次性摘要（小数据，
+低频）。SM4-CTR 密钥流与 gmssl 逐字节一致（同标准实现），存量密文互解不变。
+大文件或高并发场景如需更高吞吐请对接商密密码卡/加速卡（Pkcs11Provider）。
 
 **仍不提供"随机临时密钥"**：进程内随机、重启即丢的密钥会让密文永久不可解，
 属于静默的数据丢失。默认模式的本地密钥文件是**持久**的（首启生成一次、
@@ -55,12 +57,14 @@ import logging
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import ClassVar, Protocol
+from typing import Protocol
 
 from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from gmssl import func, sm2, sm3
-from gmssl.sm4 import SM4_ENCRYPT, CryptSM4
+from cryptography.hazmat.primitives.hmac import HMAC as _NativeHmac
+from gmssl import sm2  # SM2 签名（SM4/SM3 已迁 cryptography 原生后端）
 
 _LOG = logging.getLogger(__name__)
 
@@ -218,72 +222,40 @@ def _load_or_create_local_key() -> bytes:
 
 def sm3_hex(data: bytes) -> str:
     """SM3 摘要（64 hex）。国密哈希统一入口（审计链、KDF）。"""
-    return sm3.sm3_hash(func.bytes_to_list(data))
+    h = hashes.Hash(hashes.SM3())
+    h.update(data)
+    return h.finalize().hex()
 
 
 class IncrementalSm3:
     """增量 SM3 哈希器（update/hexdigest 接口）。
 
-    gmssl 仅提供一次性 sm3_hash 与压缩函数 sm3_cf，无流式 API；压缩结构为
-    标准 Merkle–Damgård：V_{i+1} = sm3_cf(V_i, B_i)，填充规则与 gmssl.sm3_hash
-    完全一致（0x80 + 零填充至 56 mod 64 + 8 字节大端比特长）。本模块流式
-    HMAC 与大文件分块哈希共用，正确性由与 sm3_hex 的等值测试锚定。
+    走 ``cryptography`` 的 OpenSSL 后端（原生速度）——备份归档等大数据量
+    分块哈希曾用 gmssl 纯 Python 压缩函数逐块推进，吞吐仅 MB/s 量级。
+    摘要值即标准 SM3，与 sm3_hex 等值（由测试锚定）。
     """
 
-    _IV: ClassVar[list[int]] = [
-        1937774191,
-        1226093241,
-        388252375,
-        3666478592,
-        2842636476,
-        372324522,
-        3817729613,
-        2969243214,
-    ]
-
     def __init__(self) -> None:
-        self._v = list(self._IV)
-        self._buf = bytearray()
-        self._absorbed = 0  # 已压缩进 _v 的字节数（不含 _buf）
+        self._hasher = hashes.Hash(hashes.SM3())
 
     def update(self, data: bytes) -> None:
-        self._buf += data
-        while len(self._buf) >= 64:
-            self._v = sm3.sm3_cf(self._v, func.bytes_to_list(bytes(self._buf[:64])))
-            self._buf = self._buf[64:]
-            self._absorbed += 64
+        self._hasher.update(data)
 
     def hexdigest(self) -> str:
-        total = self._absorbed + len(self._buf)
-        tail = bytes(self._buf) + b"\x80"
-        tail += b"\x00" * ((56 - (total + 1) % 64) % 64)
-        tail += (total * 8).to_bytes(8, "big")
-        v = self._v
-        for i in range(0, len(tail), 64):
-            v = sm3.sm3_cf(v, func.bytes_to_list(tail[i : i + 64]))
-        return "".join(format(x, "08x") for x in v)
+        return self._hasher.finalize().hex()
 
 
 class _HmacSm3:
     """增量 HMAC-SM3（RFC 2104 结构），输出与 _hmac_sm3 一次性版本逐字节一致。"""
 
     def __init__(self, key: bytes) -> None:
-        block = 64
-        k = key if len(key) <= block else bytes.fromhex(sm3_hex(key))
-        k = k + b"\x00" * (block - len(k))
-        inner = bytes(b ^ 0x36 for b in k)
-        outer = bytes(b ^ 0x5C for b in k)
-        self._inner = IncrementalSm3()
-        self._inner.update(inner)
-        self._outer = IncrementalSm3()
-        self._outer.update(outer)
+        self._mac = _NativeHmac(key, hashes.SM3())
 
     def update(self, data: bytes) -> None:
-        self._inner.update(data)
+        self._mac.update(data)
 
     def hexdigest(self) -> str:
-        self._outer.update(bytes.fromhex(self._inner.hexdigest()))
-        return self._outer.hexdigest()
+        return self._mac.finalize().hex()
 
 
 def _hmac_sm3(key: bytes, msg: bytes) -> bytes:
@@ -364,12 +336,9 @@ class SoftSmProvider:
             raise CryptoKeyError(f"密钥长度必须为 {_KEY_BYTES} 字节，实得 {len(master_key)}")
         self._master = bytes(master_key)
         # 数据密钥：SM4-128 与 HMAC 密钥（域分离派生，互不相关）
-        sm4_key = _kdf(self._master, _KDF_SM4, 16)
+        # SM4-CTR 走 cryptography 原生后端（Cipher/modes.CTR）；SM2 仍用 gmssl
+        self._sm4_key = _kdf(self._master, _KDF_SM4, 16)
         self._mac_key = _kdf(self._master, _KDF_MAC, _MAC_BYTES)
-        # SM4 单块加密器：CTR 只用其单块原语 one_round（gmssl 的 crypt_ecb
-        # 自带 PKCS7 填充，不适合流式 CTR）
-        self._sm4 = CryptSM4()
-        self._sm4.set_key(sm4_key, SM4_ENCRYPT)
         # 历史 SDC1（AES-256-GCM）解密路径：主密钥即历史 AES 密钥
         self._aes = AESGCM(self._master)
         # SM2 签名密钥对：显式私钥（合规备份/轮换）优先，否则主密钥派生
@@ -406,21 +375,22 @@ class SoftSmProvider:
 
     # ---- 静态加密（SM4-CTR + HMAC-SM3）----
 
+    def _ctr_cipher(self, initial_counter: bytes) -> Cipher:
+        """SM4-CTR 加密器：128bit 大端计数器从 initial_counter 起递增。
+
+        与历史 gmssl 纯 Python 版逐字节同密钥流（同标准 SM4，等值由回归测试
+        锚定）；原生后端把大底片归档的单张加密耗时从数十秒降到毫秒级。
+        """
+        return Cipher(algorithms.SM4(self._sm4_key), modes.CTR(initial_counter))
+
     def _ctr_xor_at(self, counter_base: int, block_index: int, data: bytes) -> bytes:
         """SM4-CTR 异或：从全局第 ``block_index`` 个 16 字节块起。
 
         计数器 = counter_base + block_index + 块内序号（大端 128bit 递增）。
-        XOR 对合，加解密同函数。gmssl 纯 Python 单块约 1.6μs/字节量级，
-        大数据量耗时见模块 docstring 性能说明。
+        XOR 对合，加解密同函数。
         """
-        out = bytearray()
-        idx = block_index
-        for off in range(0, len(data), 16):
-            ctr_block = ((counter_base + idx) & ((1 << 128) - 1)).to_bytes(16, "big")
-            ks = bytes(self._sm4.one_round(self._sm4.sk, ctr_block))
-            out += bytes(a ^ b for a, b in zip(data[off : off + 16], ks))
-            idx += 1
-        return bytes(out)
+        initial = ((counter_base + block_index) & ((1 << 128) - 1)).to_bytes(16, "big")
+        return self._ctr_cipher(initial).encryptor().update(data)
 
     def _ctr_xor(self, nonce: bytes, data: bytes) -> bytes:
         """SM4-CTR：128bit 计数器大端递增，密钥流 = SM4(counter)。"""
@@ -446,20 +416,20 @@ class SoftSmProvider:
         负责——本模块只做字节流。返回写入 sink 的密文体字节数。
         """
         nonce = os.urandom(_NONCE_BYTES)
-        counter_base = int.from_bytes(nonce, "big")
+        # 单一 CTR 加命器贯穿全流（计数器状态内部递增），分块产出与一次性
+        # encrypt 对同 nonce 逐字节一致。
+        encryptor = self._ctr_cipher(nonce).encryptor()
         mac = _HmacSm3(self._mac_key)
         mac.update(_MAGIC_SM + nonce)
-        block_index = 0
         written = 0
         sink.write(_MAGIC_SM + nonce)
         while True:
             chunk = source.read(_STREAM_CHUNK_BYTES)
             if not chunk:
                 break
-            ct = self._ctr_xor_at(counter_base, block_index, chunk)
+            ct = encryptor.update(chunk)
             mac.update(ct)
             sink.write(ct)
-            block_index += len(ct) // 16  # 块大小为 16 的倍数，末块不影响下轮起点
             written += len(chunk)
         if aad:
             mac.update(aad)

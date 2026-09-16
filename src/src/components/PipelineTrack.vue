@@ -33,7 +33,7 @@ const slow = () => props.elapsedMs > 60_000;
         <span class="clock">{{ fmt(elapsedMs) }}</span>
       </div>
       <div class="expect">
-        预计耗时 15–30 秒 · 评定进行中，请勿关闭窗口
+        预计耗时 5–15 秒（超大底片略久）· 评定进行中，请勿关闭窗口
       </div>
     </div>
 
