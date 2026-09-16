@@ -1,0 +1,347 @@
+{
+  "generated_at": "2026-09-15T10:13:26",
+  "n_defect_images": 125,
+  "n_no_defect_images": 0,
+  "false_report_films": [],
+  "result": {
+    "standard": {
+      "iou_threshold": 0.1,
+      "per_class": {
+        "1": {
+          "name": "圆形缺陷",
+          "td": 347,
+          "fd": 1,
+          "md": 127,
+          "tdr": 0.7305,
+          "fdr": 0.0021,
+          "mdr": 0.2674
+        },
+        "2": {
+          "name": "条形缺陷",
+          "td": 0,
+          "fd": 2,
+          "md": 0,
+          "tdr": 0.0,
+          "fdr": 1.0,
+          "mdr": 0.0
+        },
+        "3": {
+          "name": "裂纹",
+          "td": 46,
+          "fd": 0,
+          "md": 0,
+          "tdr": 1.0,
+          "fdr": 0.0,
+          "mdr": 0.0
+        },
+        "4": {
+          "name": "未熔合",
+          "td": 40,
+          "fd": 5,
+          "md": 0,
+          "tdr": 0.8889,
+          "fdr": 0.1111,
+          "mdr": 0.0
+        },
+        "5": {
+          "name": "未焊透",
+          "td": 45,
+          "fd": 2,
+          "md": 2,
+          "tdr": 0.9184,
+          "fdr": 0.0408,
+          "mdr": 0.0408
+        },
+        "6": {
+          "name": "内凹",
+          "td": 38,
+          "fd": 0,
+          "md": 5,
+          "tdr": 0.8837,
+          "fdr": 0.0,
+          "mdr": 0.1163
+        },
+        "7": {
+          "name": "咬边",
+          "td": 34,
+          "fd": 3,
+          "md": 16,
+          "tdr": 0.6415,
+          "fdr": 0.0566,
+          "mdr": 0.3019
+        }
+      },
+      "fr_by_class": {
+        "1": 0,
+        "2": 0,
+        "3": 0,
+        "4": 0,
+        "5": 0,
+        "6": 0,
+        "7": 0
+      },
+      "frr": 0.0,
+      "no_defect": {
+        "reported_a": 0,
+        "clean_b": 0
+      },
+      "fp_extra": 77,
+      "confusion": [
+        {
+          "class": 1,
+          "name": "圆形缺陷",
+          "td": 347,
+          "fd": 1,
+          "md": 127,
+          "focus": false,
+          "fr": 0
+        },
+        {
+          "class": 2,
+          "name": "条形缺陷",
+          "td": 0,
+          "fd": 2,
+          "md": 0,
+          "focus": false,
+          "fr": 0
+        },
+        {
+          "class": 3,
+          "name": "裂纹",
+          "td": 46,
+          "fd": 0,
+          "md": 0,
+          "focus": true,
+          "fr": 0
+        },
+        {
+          "class": 4,
+          "name": "未熔合",
+          "td": 40,
+          "fd": 5,
+          "md": 0,
+          "focus": true,
+          "fr": 0
+        },
+        {
+          "class": 5,
+          "name": "未焊透",
+          "td": 45,
+          "fd": 2,
+          "md": 2,
+          "focus": true,
+          "fr": 0
+        },
+        {
+          "class": 6,
+          "name": "内凹",
+          "td": 38,
+          "fd": 0,
+          "md": 5,
+          "focus": true,
+          "fr": 0
+        },
+        {
+          "class": 7,
+          "name": "咬边",
+          "td": 34,
+          "fd": 3,
+          "md": 16,
+          "focus": true,
+          "fr": 0
+        }
+      ],
+      "kdr": 0.9025,
+      "wdr": 0.7896,
+      "tdr": 0.7714,
+      "level": null,
+      "risks": {
+        "miss": "Ⅰ类",
+        "false_detect": "Ⅰ类",
+        "false_report": "Ⅱ类"
+      },
+      "miss_measured": true,
+      "fd_pairs": {
+        "咬边->圆形缺陷": 3,
+        "未熔合->未焊透": 4,
+        "圆形缺陷->咬边": 1,
+        "条形缺陷->圆形缺陷": 2,
+        "未熔合->裂纹": 1,
+        "未焊透->未熔合": 2
+      },
+      "md_focus": 23,
+      "frr_measured": false
+    },
+    "strict": {
+      "iou_threshold": 0.3,
+      "per_class": {
+        "1": {
+          "name": "圆形缺陷",
+          "td": 334,
+          "fd": 1,
+          "md": 140,
+          "tdr": 0.7032,
+          "fdr": 0.0021,
+          "mdr": 0.2947
+        },
+        "2": {
+          "name": "条形缺陷",
+          "td": 0,
+          "fd": 2,
+          "md": 0,
+          "tdr": 0.0,
+          "fdr": 1.0,
+          "mdr": 0.0
+        },
+        "3": {
+          "name": "裂纹",
+          "td": 45,
+          "fd": 0,
+          "md": 1,
+          "tdr": 0.9783,
+          "fdr": 0.0,
+          "mdr": 0.0217
+        },
+        "4": {
+          "name": "未熔合",
+          "td": 40,
+          "fd": 5,
+          "md": 0,
+          "tdr": 0.8889,
+          "fdr": 0.1111,
+          "mdr": 0.0
+        },
+        "5": {
+          "name": "未焊透",
+          "td": 44,
+          "fd": 2,
+          "md": 3,
+          "tdr": 0.898,
+          "fdr": 0.0408,
+          "mdr": 0.0612
+        },
+        "6": {
+          "name": "内凹",
+          "td": 38,
+          "fd": 0,
+          "md": 5,
+          "tdr": 0.8837,
+          "fdr": 0.0,
+          "mdr": 0.1163
+        },
+        "7": {
+          "name": "咬边",
+          "td": 34,
+          "fd": 3,
+          "md": 16,
+          "tdr": 0.6415,
+          "fdr": 0.0566,
+          "mdr": 0.3019
+        }
+      },
+      "fr_by_class": {
+        "1": 0,
+        "2": 0,
+        "3": 0,
+        "4": 0,
+        "5": 0,
+        "6": 0,
+        "7": 0
+      },
+      "frr": 0.0,
+      "no_defect": {
+        "reported_a": 0,
+        "clean_b": 0
+      },
+      "fp_extra": 92,
+      "confusion": [
+        {
+          "class": 1,
+          "name": "圆形缺陷",
+          "td": 334,
+          "fd": 1,
+          "md": 140,
+          "focus": false,
+          "fr": 0
+        },
+        {
+          "class": 2,
+          "name": "条形缺陷",
+          "td": 0,
+          "fd": 2,
+          "md": 0,
+          "focus": false,
+          "fr": 0
+        },
+        {
+          "class": 3,
+          "name": "裂纹",
+          "td": 45,
+          "fd": 0,
+          "md": 1,
+          "focus": true,
+          "fr": 0
+        },
+        {
+          "class": 4,
+          "name": "未熔合",
+          "td": 40,
+          "fd": 5,
+          "md": 0,
+          "focus": true,
+          "fr": 0
+        },
+        {
+          "class": 5,
+          "name": "未焊透",
+          "td": 44,
+          "fd": 2,
+          "md": 3,
+          "focus": true,
+          "fr": 0
+        },
+        {
+          "class": 6,
+          "name": "内凹",
+          "td": 38,
+          "fd": 0,
+          "md": 5,
+          "focus": true,
+          "fr": 0
+        },
+        {
+          "class": 7,
+          "name": "咬边",
+          "td": 34,
+          "fd": 3,
+          "md": 16,
+          "focus": true,
+          "fr": 0
+        }
+      ],
+      "kdr": 0.8941,
+      "wdr": 0.7686,
+      "tdr": 0.7504,
+      "level": null,
+      "risks": {
+        "miss": "Ⅰ类",
+        "false_detect": "Ⅰ类",
+        "false_report": "Ⅱ类"
+      },
+      "miss_measured": true,
+      "fd_pairs": {
+        "咬边->圆形缺陷": 3,
+        "未熔合->未焊透": 4,
+        "圆形缺陷->咬边": 1,
+        "条形缺陷->圆形缺陷": 2,
+        "未熔合->裂纹": 1,
+        "未焊透->未熔合": 2
+      },
+      "md_focus": 25,
+      "frr_measured": false
+    },
+    "level_recorded": null,
+    "weld_form": "single",
+    "weld_method": "manual"
+  }
+}
