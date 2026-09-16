@@ -87,6 +87,10 @@ data/ipc_token
 data/bootstrap_keys/
 data/.revoked_tokens.json
 
+# 软著材料与运行时产物（本地生成，不入库）
+output/
+.build_installer.log
+
 # 私有资料（绝不入库）：用户自有底片/照片、竞赛文档、标准原文（受版权保护，
 # 不得转载分发）、本地运行时产物
 图片/
