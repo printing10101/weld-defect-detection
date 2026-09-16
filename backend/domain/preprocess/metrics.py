@@ -87,15 +87,17 @@ def _mscn_coefficients(gray: np.ndarray) -> np.ndarray:
 
     MSCN = (I − μ) / (σ + C)，μ/σ 由 7×7 高斯（σ=7/6）局部估计，输出近似零均值、
     单位方差，集中刻画局部对比度结构（自然影像服从特定广义高斯分布）。
+
+    实现注记：高斯对称核下 cv2.filter2D（SIMD+多线程）与 scipy convolve2d
+    （单线程，24MP 底片上 ~10s）结果一致（BORDER_REFLECT 即 symm），精度
+    float32 足够——特征只进 RQI 之外的信息性输出，无精确值断言。
     """
-    img = gray.astype(np.float64)
+    img = gray.astype(np.float32)
     if img.size and img.max() > 1.0:
         img = img / 255.0
-    from scipy.signal import convolve2d
-
-    ker = _gaussian_kernel(7, 7.0 / 6.0)
-    mu = convolve2d(img, ker, mode="same", boundary="symm")
-    mu_sq = convolve2d(img * img, ker, mode="same", boundary="symm")
+    ker = _gaussian_kernel(7, 7.0 / 6.0).astype(np.float32)
+    mu = cv2.filter2D(img, cv2.CV_32F, ker, borderType=cv2.BORDER_REFLECT)
+    mu_sq = cv2.filter2D(img * img, cv2.CV_32F, ker, borderType=cv2.BORDER_REFLECT)
     sigma = np.sqrt(np.maximum(mu_sq - mu * mu, 1e-12))
     return (img - mu) / (sigma + _BRISQUE_C)
 
@@ -179,6 +181,12 @@ def _aggd_params(x: np.ndarray) -> tuple[float, float, float, float]:
     return float(alpha), float(mu), float(max(beta_l, 1e-6)), float(max(beta_r, 1e-6))
 
 
+# BRISQUE 特征评估分辨率上限（长边）。特征刻画局部对比度结构，等比降采样后
+# 统计性质不变；全幅 24MP 评估是该函数的耗时大头（且 4 个 MSCN 乘积极坐标
+# 各自复制整幅数组）。门禁判定走 RQI（不消费 brisque），降采样不影响任何门控。
+_BRISQUE_MAX_SIDE = 2048
+
+
 def brisque_features(gray: np.ndarray) -> np.ndarray:
     """BRISQUE 风格无参考特征向量（36 维，）。
 
@@ -192,6 +200,11 @@ def brisque_features(gray: np.ndarray) -> np.ndarray:
     gray = gray.astype(np.float64)
     if gray.size == 0:
         return np.zeros(36, dtype=np.float64)
+    h, w = gray.shape[:2]
+    long_side = max(h, w)
+    if long_side > _BRISQUE_MAX_SIDE:
+        scale = _BRISQUE_MAX_SIDE / long_side
+        gray = cv2.resize(gray, (max(1, int(w * scale)), max(1, int(h * scale))))
 
     feats: list[float] = []
     scales = [gray]
