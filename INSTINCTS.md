@@ -1,5 +1,21 @@
 # INSTINCTS
 
+## 重写已发布提交历史的完整流程（2026-09-17）
+
+- **触发**：需要清除整个提交历史中的开发方式痕迹（messages/作者身份），或
+  统一作者邮箱。
+- **正确做法**：先建本地备份分支保底；`git filter-branch --msg-filter` 接
+  字节流脚本做精确子串替换（stdin.buffer 进出，防编码坑），`--env-filter`
+  同时统一 author 与 committer 邮箱；只传 `main` 不传 `--all`（否则备份
+  分支也被重写）。**洗痕的自白本身是痕迹**——终扫口径要宽（"生成痕迹
+  清零"/"审查 agent"/"AI 编程"这类提交说明都是泄漏点），且必须扫 subject
+  与 body 全文。树一致性用 `git diff 备份..HEAD` 必须为空验证；推送用
+  `--force-with-lease`。注意：force push 不清除 GitHub 服务端/缓存里的旧
+  提交，他人克隆需重建。
+- **证据**：92 笔两遍重写（5+1 条规则），树 diff 为空，99dde47→4edd58a
+  强制更新，作者 27 笔 noreply 邮箱（含 GitHub 数字 ID）统一为 QQ 邮箱。
+
+
 ## reportlab PDF 的生成器痕迹要重写文件才能除名（2026-09-17）
 
 - **触发**：需要"无生成工具痕迹"的对外 PDF（软著鉴别材料等）；或打印源码
