@@ -131,9 +131,9 @@ class MaskQuantifier:
         焊缝缺陷（气孔/夹渣/未熔合/未焊透/裂纹）在透射数字化影像上多为暗区；
         少数（如夹钨）偏亮，故两者取并集、取最大连通域，兼容两类。
 
-        OpenCV 的 adaptiveThreshold 对 BINARY/INV 都取 T = mean − C：暗通道传
-        +C 得"显著暗于局部均值"（正确）；亮通道必须传 −C 才是"显著亮于局部
-        均值"——传 +C 会把整个 ROI（全部 ≥ mean−C 的像素）标成"亮"，掩膜恒
+        OpenCV 的 adaptiveThreshold 对 BINARY/INV 都取 T = mean - C：暗通道传
+        +C 得"显著暗于局部均值"（正确）；亮通道必须传 -C 才是"显著亮于局部
+        均值"——传 +C 会把整个 ROI（全部 ≥ mean-C 的像素）标成"亮"，掩膜恒
         为全 ROI、量化恒膨胀 ~40%（2026-09 由量化一致性 harness 发现并修复）。
         """
         roi8 = _to_uint8(roi)

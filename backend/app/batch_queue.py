@@ -77,7 +77,7 @@ def _result_projection(result: Any) -> dict[str, Any] | None:
 
     完整 run_inspection 结果（warnings/basis/iqi_detail/处置建议等）已随评片
     主链路落库、可经档案与报告接口取回；整包驻留批次状态会让「每任务完成
-    全量重写快照」成为 O(N²) 落盘、轮询接口的深拷贝随批规模线性膨胀
+    全量重写快照」成为 O(N^2) 落盘、轮询接口的深拷贝随批规模线性膨胀
     （100 张/批 × 每次若干 KB 的重复序列化）。
     """
     if not isinstance(result, dict):
@@ -478,7 +478,7 @@ class BatchManager:
         收尾钩子（印字裁决落库）与暂存清理。
 
         刻意与状态翻转同锁原子：status() 一旦可见 finished，钩子已跑完、
-        stamp_summary 已入快照、暂存已清理——对外一致性"finished ⇒ 收尾完成"。
+        stamp_summary 已入快照、暂存已清理——对外一致性"finished => 收尾完成"。
         （曾有"钩子/清理移锁外"的版本，会让轮询在窗口期看到 finished 而无
         stamp_summary，已回退；收尾每批次仅一次，持锁窗口有界，可接受。）
         """
