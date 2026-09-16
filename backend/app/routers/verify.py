@@ -136,7 +136,8 @@ def _verify_sync(
             if not density_ok:
                 reasons.append(f"黑度 {density:.2f} 超出配置范围")
             if not iqi.passed:
-                reasons.append(f"IQI 未达要求（要求 {iqi.required}，实测 {iqi.achieved}）")
+                achieved_txt = "未测得" if iqi.achieved is None else str(iqi.achieved)
+                reasons.append(f"IQI 未达要求（要求 {iqi.required}，实测 {achieved_txt}）")
             warnings.append(
                 "翻拍影像质量门禁未通过（" + "；".join(reasons) + "），已降级为人工复核"
             )

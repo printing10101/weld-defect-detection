@@ -299,7 +299,8 @@ class InspectionPipeline:
                     f"黑度 {density:.2f} 超出 [{reg.config.density.low}, {reg.config.density.high}]"
                 )
             if not iqi.passed:
-                reasons.append(f"IQI 未达要求（要求 {iqi.required}，实测 {iqi.achieved}）")
+                achieved_txt = "未测得" if iqi.achieved is None else str(iqi.achieved)
+                reasons.append(f"IQI 未达要求（要求 {iqi.required}，实测 {achieved_txt}）")
             if not pd.passed:
                 reasons.append("存在严重伪缺陷（" + "；".join(pd.notes) + "）")
             if quality_fail_block:
@@ -708,7 +709,11 @@ class InspectionPipeline:
             "workpiece_no": workpiece_no,
             "weld_no": weld_no,
             "signer": signer,
-            "standard_ref": f"{std_id} {std_version}".strip(),
+            "standard_ref": (
+                std_id
+                if std_version and std_id.endswith(std_version)
+                else f"{std_id} {std_version}".strip()
+            ),
             "stamp": stamp.summary(need_review=stamp_need_review),
         }
 
