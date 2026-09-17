@@ -1,10 +1,14 @@
-# 构建脚本白名单（供应链最小化）：仅允许这两个依赖包运行 postinstall 脚本，
+# 构建脚本白名单（供应链最小化）：仅允许这三个依赖包运行 postinstall 脚本，
 # 其余依赖的构建脚本一律拦截。
 # 双格式兼容：pnpm v10 认 onlyBuiltDependencies 数组；v11 改用 allowBuilds
 # 映射（v11 的部分平台/场景不再读旧键，曾致 CI 冷装报 ERR_PNPM_IGNORED_BUILDS）。
+# electron 必须放行：其 postinstall 下载平台二进制（node_modules/electron/dist），
+# 缺它则冷装后 dev.mjs / electron-builder 均无法拉起壳。
 onlyBuiltDependencies:
   - esbuild
   - vue-demi
+  - electron
 allowBuilds:
   esbuild: true
   vue-demi: true
+  electron: true
