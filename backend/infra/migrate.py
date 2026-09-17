@@ -107,7 +107,7 @@ def ensure_migrations(db_path: str) -> str:
     S-03：``db_path`` 可为 sqlite 文件路径或 paths.db_url 提供的完整 URL。
     - sqlite（默认）：路径语义不变，alembic URL 为 ``sqlite:///<path>``；
     - 非 sqlite URL（达梦/人大金仓等）：**未真机验证**，迁移链仅在 SQLite 上
-      联调过——此处诚实跳过 alembic（返回 "skipped-non-sqlite"），由仓储层
+      联调过——此处显式跳过 alembic（返回 "skipped-non-sqlite"），由仓储层
       create_all 兜底建表，避免未验证方言上盲跑 DDL。
     - 环境变量覆盖：``SCAN_DB_URL`` 优先于入参（容器/部署注入用），
       alembic.ini 中 sqlalchemy.url 仅是占位。

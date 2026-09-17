@@ -1,7 +1,7 @@
 # 更新日志
 
 本项目的所有重要变更记录于此。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
-版本遵循语义化版本。当前处于 0.x 阶段，接口仍可能有破坏性调整。
+版本遵循语义化版本。当前已发布 1.0.0。
 
 ## [1.0.0] - 2026-09-17
 
@@ -9,17 +9,17 @@
 
 - **翻拍照片永远显示「不可评片」（定检照片事故）**：`run_inspection` 的
   `evaluable` 直接取全部门禁的与结果，而照片必为 8bit（位深硬门禁
-  `allow_8bit=false` 必杀）且黑度/IQI 不可测必挂——翻拍降级只豁免了
+  `allow_8bit=false` 必拒）且黑度/IQI 不可测必挂——翻拍降级只豁免了
   "阻断"，没重算 `evaluable`，于是任何翻拍照片都 `evaluable=false`：
   前端横幅显示「不可评片」、评级被熔断，翻拍可评特性形同虚设。
   修复：翻拍口径（`photo_policy=warn`）下 `evaluable` 重算为仅严重伪缺陷
   否决（与 `/verify` 端点既有口径对齐）；级别经 AI 预筛通道输出
-  （`grade_preliminary=true`，basis 首条 ⚠ 强声明）并强制人工复核；
+  （`grade_preliminary=true`，basis 首条警示强声明）并强制人工复核；
   前端横幅/报告页对 `photo_mode` 显示翻拍降级文案，PDF 结论对
   "有级别+需复核"追加人工复核限定语，不以正式口吻裸判合格。
   测试长期未暴露的帮凶：conftest 注入 `SCAN_GATE__ALLOW_8BIT=true`，
   位深门禁在测试环境恒放行。回归锚定 `test_run_inspection_photo_film_advisory`
-  新增断言（evaluable/预筛级别/⚠ 声明/落库口径一致）。
+  新增断言（evaluable/预筛级别/警示声明/落库口径一致）。
 - **CORS 移到中间件最外层（同类误报的收口）**：CORS 只装饰"流经它"的响应——
   原先它在内层，外层中间件直接返回的响应（IPC 令牌 401、限流 429）同样没有
   `Access-Control-Allow-*`，跨源页面一律拦成 TypeError。典型场景：后端重启
@@ -132,7 +132,7 @@
     实测 PG102 系（倒置扫描）从全部 missing 恢复为 present/rotated。
   - **/detect 预检接口补齐胶片区屏蔽**：/report 链路会把胶片区外背景填充
     为胶片中位灰阶，/detect 此前直接整图推理，预览误检多于报告链路（亮
-    背景/翻拍边框被误检）。两链路收敛到共享助手
+    背景/翻拍边框被误检）。两链路收敛到共享实现
     `detect_film_region_trusted` + `film_background_fill`（domain/film_region），
     消除分叉；/detect 同样应用印字区过滤。
   - **/report 响应透出门禁降级原因**：ReportOut 新增 `warnings/basis/
@@ -151,7 +151,7 @@
   - **鲁棒性扰动验证（G07，evaluation/robustness.py）**：亮度增益/偏移、Gamma、
     对比度四族灰度扰动模拟扫描/曝光差异，输出逐条件检出保持率、长边量化偏差、
     新增误检三项稳定性指标与阈值判定（技术路线任务1"质量与鲁棒性验证"）；
-    空 GT 判不通过（诚实口径）。
+    空 GT 判不通过（保守口径）。
   - **条形缺陷中心线长度（G13）**：PCA 主轴分 bin 质心折线测弧长，`length_mm`
     对条形缺陷（长宽比>3）改用中心线口径——矩形长边量"弦"系统性低估弯曲裂纹，
     条形限值评级偏松；圆形/退化回退矩形口径，`Geometry.centerline_mm` 同步输出。
@@ -208,7 +208,7 @@
   纳入主应用生命周期——lifespan 装配期后台拉起（独立线程，不阻塞端口
   绑定与 registry 装配，实测 ~9s 就绪），就绪判定 `GET /health` 200；
   应用退出时 terminate→kill 回收。Windows 以 **Job Object
-  （KILL_ON_JOB_CLOSE）** 兜底：壳（Tauri）对后端是硬杀、Python 退出钩子
+  （KILL_ON_JOB_CLOSE）** 兜底：桌面壳对后端是硬杀、Python 退出钩子
   不执行，由 OS 保证"后端死 → llama-server 同死"（已端到端验证：硬杀
   后端，18780 端口随之释放），Linux 用 PR_SET_PDEATHSIG 同语义；看门狗
   线程按 `max_restart` 上限复活意外退出的进程，`/health` 新增 `llm`
@@ -327,7 +327,7 @@
 - **逐类温度校准闭环**（§15.4 ECE 修复）：`training/fit_calibration` 在训练留出
   划分（val+test 合并）上以部署同参推理收集校准对，**图像级 2 折交叉验证**
   估计泛化、全量留出数据拟合最终表；分层策略为逐类拟合 → 稀有类池化共享
-  温度 → 池化仍不足则诚实恒等。校准表随权重落盘并绑定 model_id 指纹，
+  温度 → 池化仍不足则回退恒等映射。校准表随权重落盘并绑定 model_id 指纹，
   换权重自动失效防污染。**工作点保持设计**：温度只改变输出置信度，类别指派、
   阈值筛选（同变换）与 NMS 排序（原始分）全部保持基线行为——检出集合逐位
   一致，杜绝"校准悄悄改变查全率"（实测发现跨类 NMS 重排序会致 mAP -7.8 点、
@@ -360,7 +360,7 @@
   pip 安装、导入冒烟），打包机与 CI 共用同一条可重复命令；`build_installer.ps1`
   接入为第 0 步，缺失自动构建。
 - **Release 流水线**（`.github/workflows/release.yml`）：打 tag 自动构建安装包 →
-  端到端冒烟 → 附加到 GitHub Release；无权重时诚实构建"基线降级版"并在产物中
+  端到端冒烟 → 附加到 GitHub Release；无权重时构建"基线降级版"并在产物中
   标注（不签名，SmartScreen 提示见 SECURITY.md）。
 - 新增测试：增广集成不确定性（纯函数 + TTA 端到端桩）、Grad-CAM（回退 + ml 真实
   权重定位）、部署评估闭环纯函数，共 30+ 用例。

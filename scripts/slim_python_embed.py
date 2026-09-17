@@ -1,6 +1,6 @@
 """python_embed 裁剪：剔除运行时不需要的内容，压缩安装包体积。
 
-用途：``tauri build`` 打包前对 ``src/python_embed``（tauri.conf resources 直接
+用途：桌面打包前对 ``src/python_embed``（打包配置直接
 分发该目录）执行一次。目录不入 git，本脚本是可复现的裁剪产物——每台打包机
 在构建前各自执行。
 

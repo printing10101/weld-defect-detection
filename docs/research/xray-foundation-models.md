@@ -39,13 +39,13 @@ WRT-SAM 用一个反例证明了**朴素用 SAM 是失败的（IoU 1.13）**，�
 
 | 基座 | 出处 | 预训练数据/规模 | 模态相近度 | 与本项目匹配度 | 权重可得性 |
 |---|---|---|---|---|---|
-| **RAD-DINO** | Microsoft Health Futures，arXiv 2024（Pérez-García 等） | DINOv2（ViT-B/14）在 Multi-CXR 上继续预训练；DINOv2 的 MIM + 实例判别 + KoLeo | **中**：同为灰度透射 X 光，但**人体胸片 vs 工业焊缝**，解剖结构 vs 材料缺陷 | ⭐⭐⭐ 最值得探针 | HF `microsoft/rad-dino`（**许可证冲突，见 §4.3**） |
-| **SAM / SAM2 + Adapter** | Meta SAM；WRT-SAM 为焊缝 RT 适配版 | SAM：11M 图 / 1B mask（自然图像） | **低**：自然 RGB，灰度 RT 上零样本很差 | ⭐⭐ 只作为**适配配方的载体** | SAM 权重公开；**WRT-SAM 未发现开源** |
-| **MedSAM** | bowang-lab，1.57M 图像-掩膜对 / 10 模态 | 医学多模态（CT/MR/US/X 光…） | **低-中**：模态多样，含 X 光但以解剖为主 | ⭐⭐ 适配配方参考 | 公开，ViT-B：`medsam_20230423_vit_b_0.0.1.pth` |
-| **Med-SA（Medical SAM Adapter）** | 参数高效微调，**仅更新约 2% 参数** | 基于 SAM | 低 | ⭐⭐⭐ **方法学参考**（薄适配器范式） | 公开 |
-| **S-SAM（SVD 调优）** | 只调权重 SVD 奇异值，**0.4% 参数**，支持 X 光与文本提示 | 基于 SAM | 低 | ⭐⭐ 极低参数预算下的备选 | 公开 |
-| **Wdsf-ssl（焊缝 RT 自监督分割）** | NDT&E 2025，Cheng 等 | 自建焊缝 RT 无标注数据 + 对象级掩码策略 + 多头解码分割器 | **高**（同为焊缝 RT） | ⭐⭐⭐⭐ **最同构** | 代码公开：`github.com/longteng-coder/Wdsf-ssl`（数据需自行获取） |
-| **WRT-SAM** | arXiv 2502.11338，**中国特种设备检测研究院**（Zhou / Shi / Hao），2025-02，2025-06 更新 | 基于 SAM，Adapter + 频域 Prompt + 多尺度 Prompt | **高**（焊缝 RT 缺陷分割） | ⭐⭐⭐⭐ 方法学最对口 | 论文公开，**未发现 checkpoint** |
+| **RAD-DINO** | Microsoft Health Futures，arXiv 2024（Pérez-García 等） | DINOv2（ViT-B/14）在 Multi-CXR 上继续预训练；DINOv2 的 MIM + 实例判别 + KoLeo | **中**：同为灰度透射 X 光，但**人体胸片 vs 工业焊缝**，解剖结构 vs 材料缺陷 | 最值得探针（优先） | HF `microsoft/rad-dino`（**许可证冲突，见 §4.3**） |
+| **SAM / SAM2 + Adapter** | Meta SAM；WRT-SAM 为焊缝 RT 适配版 | SAM：11M 图 / 1B mask（自然图像） | **低**：自然 RGB，灰度 RT 上零样本很差 | 只作为**适配配方的载体** | SAM 权重公开；**WRT-SAM 未发现开源** |
+| **MedSAM** | bowang-lab，1.57M 图像-掩膜对 / 10 模态 | 医学多模态（CT/MR/US/X 光…） | **低-中**：模态多样，含 X 光但以解剖为主 | 适配配方参考 | 公开，ViT-B：`medsam_20230423_vit_b_0.0.1.pth` |
+| **Med-SA（Medical SAM Adapter）** | 参数高效微调，**仅更新约 2% 参数** | 基于 SAM | 低 | **方法学参考**（薄适配器范式） | 公开 |
+| **S-SAM（SVD 调优）** | 只调权重 SVD 奇异值，**0.4% 参数**，支持 X 光与文本提示 | 基于 SAM | 低 | 极低参数预算下的备选 | 公开 |
+| **Wdsf-ssl（焊缝 RT 自监督分割）** | NDT&E 2025，Cheng 等 | 自建焊缝 RT 无标注数据 + 对象级掩码策略 + 多头解码分割器 | **高**（同为焊缝 RT） | 最高优先： **最同构** | 代码公开：`github.com/longteng-coder/Wdsf-ssl`（数据需自行获取） |
+| **WRT-SAM** | arXiv 2502.11338，**中国特种设备检测研究院**（Zhou / Shi / Hao），2025-02，2025-06 更新 | 基于 SAM，Adapter + 频域 Prompt + 多尺度 Prompt | **高**（焊缝 RT 缺陷分割） | 最高优先： 方法学最对口 | 论文公开，**未发现 checkpoint** |
 
 ---
 

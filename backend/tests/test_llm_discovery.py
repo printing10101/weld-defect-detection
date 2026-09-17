@@ -75,7 +75,7 @@ def test_scan_does_not_follow_symlink(tmp_path: Path):
     link = tmp_path / "link"
     if not link.is_symlink() and not link.exists():
         # 本机实测过：杀软/minifilter 会把 symlink「静默吞掉」——创建调用成功、
-        # 不抛异常，但条目从目录里消失。这是环境限制而非被测行为，诚实跳过。
+        # 不抛异常，但条目从目录里消失。这是环境限制而非被测行为，故跳过。
         pytest.skip("当前环境符号链接被系统层静默丢弃（无法构造测试前提）")
 
     metas, stats = scan_gguf_files([tmp_path])

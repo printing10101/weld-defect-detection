@@ -332,7 +332,7 @@ def test_disabled_account_sessions_revoked():
 
 
 def test_ukey_mode_reserved():
-    """UKey 硬件模式接口预留：登录返回 501（未真机验证，诚实声明）。"""
+    """UKey 硬件模式接口预留：登录返回 501（未真机验证，接口预留）。"""
     reg = get_registry()
     username = f"uk_{uuid.uuid4().hex[:8]}"
     account = reg.security_store.create_account(

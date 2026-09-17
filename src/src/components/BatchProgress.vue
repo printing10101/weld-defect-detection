@@ -144,7 +144,7 @@ function stampSummaryLine(status: BatchStatusOut): string {
           v-if="t.error"
           class="bp-err"
           :title="errorText(t.error)"
-        >⚠ {{ errorText(t.error) }}</span>
+        >注意：{{ errorText(t.error) }}</span>
         <button
           v-if="t.status === 'done' && t.report_id"
           type="button"

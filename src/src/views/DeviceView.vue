@@ -177,7 +177,7 @@ onMounted(() => {
       v-if="error"
       class="err show"
     >
-      ⚠ {{ error }}
+      注意：{{ error }}
     </div>
     <div
       v-if="info"

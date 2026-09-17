@@ -111,7 +111,7 @@ def local_key_file() -> Path:
     """本地持久主密钥文件路径：SCAN_CRYPTO_KEY_FILE 优先，否则 data/.crypto_key。
 
     相对路径锚定安装根（与 paths/resolve_config_path 同语义，与 CWD 解耦）；
-    Tauri 打包版随 SCANDETECTION_USER_DATA_DIR 改锚到用户数据目录。此前按
+    桌面打包版随 SCANDETECTION_USER_DATA_DIR 改锚到用户数据目录。此前按
     CWD 解析：CWD≠安装根启动会在新位置再生成一枚主密钥，既有密文在该进程内
     全部不可解——已随数据目录统一锚定修复。
     """
@@ -499,7 +499,7 @@ class Pkcs11Provider:
     主密钥/明文密钥不落软件侧，SCAN_CRYPTO_KEY 对本 provider 不参与
     数据密钥派生。
 
-    实现状态（诚实声明）：本骨架给出完整的接口与调用链（加载库 → 定位
+    实现状态（如实说明）：本骨架给出完整的接口与调用链（加载库 → 定位
     槽位令牌 → 登录会话 → 按标签定位密钥对象 → 调用 CK_ 原语），未配置
     即抛带指引的 CryptoKeyError；但具体机制号（如 CKM_SM4_GCM）随厂商
     固件能力而异，部署时需按厂商文档核对，未经过真机验证。

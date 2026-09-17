@@ -1,11 +1,11 @@
 """IPC 一次性启动令牌（C-17 前后端通信加固）。
 
 后端每次启动生成一次性令牌（secrets.token_urlsafe，32 字节熵），写入数据
-目录 ``data/ipc_token`` 文件；有效期 = 进程生命周期（重启即换）。Tauri 外壳
+目录 ``data/ipc_token`` 文件；有效期 = 进程生命周期（重启即换）。桌面外壳
 在端口就绪后读取该文件并注入 WebView（window.__IPC_TOKEN__），前端统一携带
 ``X-IPC-Token`` 头。
 
-威胁模型（诚实声明，不夸大）：
+威胁模型（不夸大）：
 - 本机前后端为回环明文 HTTP，令牌**不解决传输加密**——它防的是"其他本机
   进程误调 / 浏览器网页 CSRF 式调用本机 API"（无令牌的跨源/异进程请求被
   401 拒绝）；需要传输加密时应挂本机证书启用 TLS，不在本次范围；
@@ -37,7 +37,7 @@ def token_file_path(data_dir: str | Path) -> Path:
 def _write_token_file(path: Path, token: str) -> None:
     """令牌落盘（仅本机用户可读为尽力而为，见模块 docstring）。
 
-    原子写（临时文件 + os.replace）：Tauri 壳在端口就绪后读本文件注入
+    原子写（临时文件 + os.replace）：桌面壳在端口就绪后读本文件注入
     WebView，直接 truncate 旧文件存在"壳侧读到空/半截 token → 前端持续
     401"的窗口（重签发恰逢读取时）。
     """

@@ -85,7 +85,7 @@ def _register_fonts() -> None:
 
 
 def _sanitize_glyphs(line: str) -> str:
-    """SimHei 字形表没有的字符（上标²、⇒、数学减号等）打印成豆腐块，替换为 ?。"""
+    """SimHei 字形表没有的字符（上标 2、双线箭头、数学减号等）打印成豆腐块，替换为 ?。"""
     _register_fonts()
     cmap = pdfmetrics.getFont(FONT_NAME).face.charToGlyph
     return "".join(ch if ord(ch) < 127 or ord(ch) in cmap else "?" for ch in line)

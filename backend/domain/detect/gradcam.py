@@ -1,6 +1,6 @@
 """真 Grad-CAM 类激活热力图（torch/Ultralytics 路径）。
 
-domain/explain.py「诚实替代声明」的兑现：当检测器以 torch 后端加载
+兑现 domain/explain.py 的降级替代设计：当检测器以 torch 后端加载
 （训练/验证工作站，ml 可选依赖已装）时，对目标缺陷生成真 Grad-CAM——
 对目标类在目标框内的最高锚框得分回传梯度，GAP 池化得通道权重，ReLU 加权
 检测头之前的最后一层卷积特征图（YOLOv8/v11 惯例取 SPPF/Neck 深层特征）。

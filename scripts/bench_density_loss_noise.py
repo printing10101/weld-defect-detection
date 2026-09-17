@@ -21,7 +21,7 @@ V2 的 SinkLoss 只约束"块内值的集合"（置换不变），理论上应�
 3. ``combo``    ：``mse + w * sinkhorn``。w 在初始化时自动标定，使两项量级相当
    （否则 sinkhorn 会因量纲差异压倒 mse，组合实验就失去意义）。
 
-⚠️ 已知陷阱（本脚本已被迫处理）：SinkLoss 的代价矩阵是平方项，若输入压到 [0,1]，
+警告：已知陷阱（本脚本已被迫处理）：SinkLoss 的代价矩阵是平方项，若输入压到 [0,1]，
 对比度会塌缩到个位数倍（见 losses 模块"输入量纲契约"）。故送入前统一乘
 ``--magnitude``（默认 10）。
 
@@ -525,7 +525,7 @@ def main() -> int:
                 m["seed"] = seed
                 m["seconds"] = round(time.time() - ts, 1)
                 results[tag] = m
-                flag = "  ⚠️塌陷" if m["collapsed"] else ""
+                flag = "  [塌陷]" if m["collapsed"] else ""
                 print(
                     f"  {tag:<22} mse={m['mse_clean']:.5f} "
                     f"hit={m['defect_hit_rate']:.3f} cnt_mae={m['peak_count_mae']:.2f} "
@@ -536,7 +536,7 @@ def main() -> int:
     n_collapsed = sum(1 for r in results.values() if r["collapsed"])
     if n_collapsed:
         print(
-            f"\n  ⚠️ {n_collapsed}/{len(results)} 次运行**网络塌陷**（梯度恒 0）——"
+            f"\n  警告：{n_collapsed}/{len(results)} 次运行**网络塌陷**（梯度恒 0）——"
             f"这些读数不可解读，需先修可学性再比较损失。",
             flush=True,
         )
@@ -632,7 +632,7 @@ def _print_table(summary: dict) -> None:
     print("干净MSE = 对**干净**测试标签的均方误差（越低越好）")
     print("vs基线 = 相对同噪声档 mse_fg 基线的改善；塌陷列为'网络塌陷运行数/总运行数'")
     if any(v["collapsed_runs"] for v in summary.values()):
-        print("⚠️ 存在塌陷运行：这些行的读数不可解读（网络输出恒零，未在学习）")
+        print("警告：存在塌陷运行：这些行的读数不可解读（网络输出恒零，未在学习）")
 
 
 if __name__ == "__main__":

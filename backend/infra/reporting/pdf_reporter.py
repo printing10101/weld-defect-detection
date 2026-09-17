@@ -163,7 +163,7 @@ class PdfReporter:
         大底片二次解码；缺省时自行从 image["path"] 解码。
 
         witness（S-22）：可选军代表/见证人署名，透传到签字栏（不传则不出该行）。
-        诚实边界：witness 仅在本次生成时生效（不落库），重生成报告（regenerate）
+        边界说明：witness 仅在本次生成时生效（不落库），重生成报告（regenerate）
         需再次传入。
         """
         # 报告模板数据化：模板名 → YAML 数据文件；未知/损坏回退 standard。

@@ -165,7 +165,7 @@ def _preliminary_basis(reasons: list[str]) -> str:
     """
     detail = "；".join(reasons) if reasons else "底片质量门禁未通过"
     return (
-        f"⚠ AI 预筛级别（非正式级别）：底片质量未达标准要求——{detail}。"
+        f"注意：AI 预筛级别（非正式级别）：底片质量未达标准要求——{detail}。"
         "该级别仅供 AI 辅助预筛参考，不得作为验收/合格判定依据，"
         "须由持证人依标准原文重新评定"
     )
@@ -209,7 +209,7 @@ class InspectionPipeline:
         相机拍灯箱的 8bit 照片绝对黑度不可测、IQI 识别不可靠，黑度/IQI/质量/
         位深/扫描参数门禁不阻断，evaluable 按翻拍口径重算（仅严重伪缺陷否决，
         与 /verify 同源）；级别经 AI 预筛通道输出（grade_preliminary=True，
-        basis 首条 ⚠ 声明）并强制人工复核（need_review=True），检测/量化/
+        basis 首条警示声明）并强制人工复核（need_review=True），检测/量化/
         报告链路照常执行。
         """
         reg = self._reg

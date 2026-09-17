@@ -202,7 +202,7 @@ def build_record_pdf(record: dict[str, Any], out_pdf: str | Path) -> Path:
         Paragraph(_NOTE, small),
     ]
     if grad.get("note"):
-        story.append(Paragraph(f"⚠ {grad['note']}", small))
+        story.append(Paragraph(f"注意：{grad['note']}", small))
     doc.build(story)
 
     try:

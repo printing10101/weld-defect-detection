@@ -79,7 +79,7 @@ def grid_search_temperature(
     """网格搜索最小化 ECE 的温度（校准目标与 §15.4 门禁同口径）。
 
     返回 {best_temp, ece_before, ece_after, n}；样本不足（< MIN_PAIRS_PER_CLASS）
-    时返回 best_temp=1.0 并标记 skipped——诚实不拟合优于小样本过拟合。
+    时返回 best_temp=1.0 并标记 skipped——宁可跳过拟合，也不用小样本硬拟合。
     """
     from backend.evaluation.calibration import expected_calibration_error
 

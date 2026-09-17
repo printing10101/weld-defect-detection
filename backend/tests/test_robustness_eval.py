@@ -1,7 +1,7 @@
 """鲁棒性扰动评估（backend.evaluation.robustness）单测。
 
 用可控的假检测器验证评估逻辑本身：恒等检测器应稳定通过，对亮度敏感的
-检测器应被正确判 fail；空 GT 走诚实不通过口径。
+检测器应被正确判 fail；空 GT 走判不通过口径。
 """
 
 from __future__ import annotations
@@ -103,7 +103,7 @@ def test_wrong_class_is_not_matched():
 
 
 def test_empty_targets_fails_honestly():
-    """无 GT 时不得静默通过（诚实口径）。"""
+    """无 GT 时不得静默通过（保守口径）。"""
 
     def any_detector(_img):
         return []

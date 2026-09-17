@@ -57,7 +57,7 @@ def disclaimer_for(tables: StandardTables) -> str:
         )
     note = (tables.source_note or "").strip()
     head = (
-        "⚠ 标准来源声明：本系统评级数值转录自公开解读文本，非标准授权正本；"
+        "标准来源声明：本系统评级数值转录自公开解读文本，非标准授权正本；"
         "当前未持有授权副本，数值未经授权原文逐条复核与正式签核。"
     )
     tail = (

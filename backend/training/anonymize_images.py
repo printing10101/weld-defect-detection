@@ -159,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"脱敏完成：复制 {len(report)} 个文件，其中 {len(changed)} 个含隐私元数据已清理")
     leftover = audit_directory(args.dst)
     if leftover:
-        print(f"⚠ 脱敏后仍有残留（请检查）：{leftover}")
+        print(f"警告：脱敏后仍有残留（请检查）：{leftover}")
         return 1
     return 0
 

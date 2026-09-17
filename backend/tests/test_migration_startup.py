@@ -99,9 +99,7 @@ def test_migrate_legacy_db_missing_column_healed(tmp_path) -> None:
     eng = create_db_engine(p)
     with eng.connect() as c:
         # 只建 images 一张 0001 时代最小表：无 film_no/batch_no/content_hash
-        c.exec_driver_sql(
-            "CREATE TABLE images (id VARCHAR(64) PRIMARY KEY, path VARCHAR(512))"
-        )
+        c.exec_driver_sql("CREATE TABLE images (id VARCHAR(64) PRIMARY KEY, path VARCHAR(512))")
     eng.dispose()
 
     version = ensure_migrations(p)
@@ -123,12 +121,8 @@ def test_migrate_versioned_db_missing_column_healed(tmp_path) -> None:
     p = str(tmp_path / "versioned_missing_col.db")
     eng = create_db_engine(p)
     with eng.connect() as c:
-        c.exec_driver_sql(
-            "CREATE TABLE images (id VARCHAR(64) PRIMARY KEY, path VARCHAR(512))"
-        )
-        c.exec_driver_sql(
-            "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"
-        )
+        c.exec_driver_sql("CREATE TABLE images (id VARCHAR(64) PRIMARY KEY, path VARCHAR(512))")
+        c.exec_driver_sql("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
         c.exec_driver_sql(f"INSERT INTO alembic_version VALUES ('{_HEAD}')")
         c.commit()  # SQLAlchemy 2.0 commit-as-you-go：不显式提交则 INSERT 被回滚
     eng.dispose()
@@ -153,9 +147,7 @@ def test_migrate_upgrade_failure_still_heals_columns(tmp_path) -> None:
         # 版本停在 0012，但 0013 要建的 defect_atlas 已被 create_all 抢建
         c.exec_driver_sql("CREATE TABLE images (id VARCHAR(64) PRIMARY KEY)")
         c.exec_driver_sql("CREATE TABLE defect_atlas (id VARCHAR(64) PRIMARY KEY)")
-        c.exec_driver_sql(
-            "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"
-        )
+        c.exec_driver_sql("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
         c.exec_driver_sql("INSERT INTO alembic_version VALUES ('0012_report_meta')")
     eng.dispose()
 

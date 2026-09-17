@@ -74,7 +74,7 @@ describe("BatchProgress", () => {
     });
     const w = mount(BatchProgress, { props: { status } });
     expect(w.text()).toContain("失败 1");
-    expect(w.text()).toContain("⚠ 底片质量不合格");
+    expect(w.text()).toContain("注意：底片质量不合格");
   });
 
   it("running 时显示取消按钮并发出 cancel", async () => {

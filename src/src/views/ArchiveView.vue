@@ -252,7 +252,7 @@ const levelOptions = ["", "I", "II", "III", "IV"] as const;
       v-else-if="err"
       class="err show"
     >
-      ⚠ 加载失败：{{ err }}　<button
+      注意：加载失败：{{ err }}　<button
         class="btn link"
         type="button"
         @click="onFilter"

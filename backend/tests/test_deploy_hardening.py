@@ -29,7 +29,7 @@ def test_font_fallback_when_no_candidates(monkeypatch) -> None:
 
 
 def test_annotator_root_anchored_to_install_root() -> None:
-    """标注器数据目录必须锚定安装根，且不依赖 CWD（Tauri/安装包场景）。"""
+    """标注器数据目录必须锚定安装根，且不依赖 CWD（安装包场景）。"""
     from backend.annotator import server as annotator_server
 
     root = annotator_server.ROOT

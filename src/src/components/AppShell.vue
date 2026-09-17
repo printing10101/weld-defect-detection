@@ -49,7 +49,7 @@ function openBatch(): void {
 }
 
 /* ── 检测人员信息：自建输入对话框。
- *  Tauri WebView 不实现 window.prompt（恒返回 null，此前该菜单点了永远没反应），
+ *  桌面壳 WebView 不实现 window.prompt（恒返回 null，此前该菜单点了永远没反应），
  *  项目内已有同款结论（ConfirmDialog 注释），交互一律走自建对话框。 ── */
 const operatorDialogOpen = ref(false);
 const operatorDraft = ref("");
@@ -66,7 +66,7 @@ function confirmOperator(): void {
   operatorDialogOpen.value = false;
 }
 
-/* ── 退出：尽力 window.close()；Tauri 主窗口通常不允许脚本关闭，
+/* ── 退出：尽力 window.close()；桌面壳主窗口通常不允许脚本关闭，
  *  300ms 后仍在运行则如实告知操作员正确的退出方式（此前点了毫无反应）。 ── */
 const exitHintOpen = ref(false);
 
@@ -272,7 +272,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- 检测人员信息对话框（替代 Tauri 下失效的 window.prompt） -->
+    <!-- 检测人员信息对话框（替代桌面壳下失效的 window.prompt） -->
     <div
       v-if="operatorDialogOpen"
       class="overlay"

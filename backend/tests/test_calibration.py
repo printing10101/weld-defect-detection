@@ -2,7 +2,7 @@
 
 - temperature_transform：T=1 恒等、T>1 软化、T<1 锐化、数值稳定；
 - apply_class_temperature：逐类独立、未列类不变、类数不一致安全跳过；
-- grid_search_temperature：欠自信数据应找到 T<1；样本不足诚实跳过；
+- grid_search_temperature：欠自信数据应找到 T<1；样本不足则跳过；
 - parse_calibration_payload：指纹/结构/数值三重校验；
 - YoloDetector._eff_thr：分数与阈值同变换（保持检出集合不变的关键）。
 """

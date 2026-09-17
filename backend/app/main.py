@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
     # 业务端点首个请求会经 get_registry 阻塞等待装配完成（语义与原先一致）。
     _configure_logging()
 
-    # 孤儿兜底：若由 Tauri 壳启动（env 给了父 PID），监控父进程消失即自杀退出，
+    # 孤儿兜底：若由桌面壳启动（env 给了父 PID），监控父进程消失即自杀退出，
     # 避免壳被强杀/崩溃时遗留孤儿后端长期占用端口与内存。
     try:
         from backend.infra.orphan_guard import start_orphan_guard_if_spawned
@@ -519,7 +519,7 @@ def _register_spa_routes(app: FastAPI) -> None:
         if DIST is None:
             return HTMLResponse(
                 "<h2>ScanDetection</h2><p>前端未构建（dist 缺失）。"
-                "请使用 Tauri 桌面端，或在开发模式下执行 <code>pnpm build</code>。</p>"
+                "请使用桌面端，或在开发模式下执行 <code>pnpm build</code>。</p>"
             )
         # index.html 禁缓存：内容散列命名的 assets 可长效缓存，但 index.html 必须每次
         # 回源，否则前端重新构建后浏览器仍停留在旧 bundle（表现为新功能"看不到"）。

@@ -16,7 +16,7 @@
 守卫置空（check 全放行），且补丁保留但永不拦截（避免热卸载补丁引入的
 线程竞态）。
 
-诚实边界（不夸大）：
+能力边界（不夸大）：
 - 主机名目的地址需先 getaddrinfo 解析才能判定，解析本身可能产生 DNS
   查询外发；离线部署应配置 IP 字面量端点（文档已注明），解析后仍会
   对每个结果地址做白名单校验，TCP 连接必被校验；
@@ -82,7 +82,7 @@ class EgressGuard:
             ip = ipaddress.ip_address(host)
         except ValueError:
             # 主机名：解析后校验全部结果地址（任一不在白名单即不放行）。
-            # 诚实注：getaddrinfo 本身可能产生 DNS 外联，见模块 docstring。
+            # 注：getaddrinfo 本身可能产生 DNS 外联，见模块 docstring。
             try:
                 infos = socket.getaddrinfo(host, None)
             except OSError:
@@ -195,7 +195,7 @@ def configure_egress_guard(enabled: bool, allow_cidrs: list[str]) -> EgressGuard
 
     - enabled=True：安装补丁（若未装）并启用白名单校验；
     - enabled=False：守卫置 None（check 全放行）。补丁保留但形同虚设，
-      避免运行中卸载补丁与并发 connect 的竞态（诚实取舍：空转开销可忽略）。
+      避免运行中卸载补丁与并发 connect 的竞态（权衡：空转开销可忽略）。
     返回当前生效守卫（None=防护关闭）。
     """
     global _guard, _patched

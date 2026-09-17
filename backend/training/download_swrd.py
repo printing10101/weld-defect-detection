@@ -30,7 +30,7 @@ def print_download_guide() -> None:
         "3. 标注格式支持：COCO instances_*.json / 逐图同名 .json / Pascal VOC .xml / 已是 YOLO .txt。\n"
         "4. 运行：python -m backend.training.download_swrd --ingest\n"
         "5. 比赛/论文中按 DATA_LICENSE.md 的 BibTeX 署名 SWRD 作者。\n"
-        "⚠️ 切勿把 SWRD 原始数据重新分发或闭源商用；仅用于训练你自己的模型与合规参赛。"
+        "注意：切勿把 SWRD 原始数据重新分发或闭源商用；仅用于训练你自己的模型与合规参赛。"
     )
 
 

@@ -149,7 +149,7 @@ async function doToggle(acc: AccountOut): Promise<void> {
         v-if="err"
         class="err show"
       >
-        ⚠ {{ err }}
+        注意：{{ err }}
       </p>
       <p
         v-else-if="notice"
@@ -195,7 +195,7 @@ async function doToggle(acc: AccountOut): Promise<void> {
         role="alert"
       >
         <p class="kp-title">
-          ⚠ 账号「{{ keyPanel.username }}」的 SM2 私钥（仅此一次展示，系统不留存副本）
+          注意：账号「{{ keyPanel.username }}」的 SM2 私钥（仅此一次展示，系统不留存副本）
         </p>
         <textarea
           class="keyout"

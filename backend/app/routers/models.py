@@ -187,7 +187,7 @@ async def _activate_with_gate(model_id: str, reg: Registry, operator: str) -> Ac
         ) from exc
     active_id = reg.model_registry.active_id or ""
     if not record["passed"]:
-        # 评估未过：拒绝并告警 + 审计（诚实门禁：不允许"先切了再说"）。
+        # 评估未过：拒绝并告警 + 审计（门禁从紧：不允许"先切了再说"）。
         try:
             reg.security_store.raise_alert(
                 kind="model_gate_reject",

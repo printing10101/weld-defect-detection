@@ -13,7 +13,7 @@
 - 启动：lifespan 装配期后台拉起（独立线程，不阻塞端口绑定与 registry 装配），
   就绪判定为 ``GET /health`` 返回 200（模型加载中 llama-server 返回 503）；
 - 停止：应用退出时优雅回收（terminate → kill 兜底）。Windows 上辅以
-  **Job Object（KILL_ON_JOB_CLOSE）**：壳（Tauri）对后端是硬杀（child.kill），
+  **Job Object（KILL_ON_JOB_CLOSE）**：桌面壳对后端是硬杀（child.kill），
   Python 退出钩子不会执行，由 OS 保证"后端进程死 → llama-server 同死"，
   杜绝孤儿进程长期占用显存/端口；Linux（麒麟/UOS）用 PR_SET_PDEATHSIG 同语义；
 - 降级：一律**不阻断主应用启动**（与 registry 装配同一失败哲学），状态经
@@ -51,7 +51,7 @@
 - 子进程以 **argv 列表 + shell=False** 拉起（不经 shell 拼接），
   二进制/模型路径仅来自受控配置文件与项目内置目录，非请求期用户输入。
 
-诚实边界：stop() 只回收"本管理器拉起"的进程；收编实例（adopted，含 external
+边界说明：stop() 只回收"本管理器拉起"的进程；收编实例（adopted，含 external
 模式的端点）归外部所有，仅报告状态、不做生命周期干预。
 """
 

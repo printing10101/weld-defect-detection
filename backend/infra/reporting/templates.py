@@ -107,7 +107,7 @@ def _tpl_from(raw: dict) -> ReportTemplate:
         section_conclusion=str(raw.get("section_conclusion") or "七、结论"),
         level_text=str(raw.get("level_text") or "综合评定级别：{level} 级"),
         no_level_text=str(raw.get("no_level_text") or "无法自动评级，需人工复核。"),
-        review_warn=str(raw.get("review_warn") or "⚠ 本报告标注需要人工复核。"),
+        review_warn=str(raw.get("review_warn") or "注意：本报告标注需要人工复核。"),
         signer_text=str(raw.get("signer_text") or "签字：{signer}"),
         fingerprint_text=str(
             raw.get("fingerprint_text") or "数字指纹：SHA-256:{fp}（报告内容防篡改校验）"

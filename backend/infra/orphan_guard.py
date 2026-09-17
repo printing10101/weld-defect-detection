@@ -1,6 +1,6 @@
 """父进程孤儿兜底（S-* 可靠性）。
 
-当后端由 Tauri 壳拉起时，Tauri 通过环境变量 ``SCANDETECTION_PARENT_PID`` 传入
+当后端由桌面壳拉起时，桌面壳通过环境变量 ``SCANDETECTION_PARENT_PID`` 传入
 壳自身 PID。本模块启动一个后台守护线程，周期探测父进程是否存活：
 
 - 父进程仍在 → 继续；
@@ -153,7 +153,7 @@ def _guard_loop(parent_pid: int, interval_sec: float) -> None:
 
 
 def start_orphan_guard_if_spawned(interval_sec: float = 3.0) -> threading.Thread | None:
-    """若由 Tauri 壳启动（env 提供了正整数父 PID），武装孤儿兜底线程。
+    """若由桌面壳启动（env 提供了正整数父 PID），武装孤儿兜底线程。
 
     直接命令行运行（无 env）返回 None，不产生任何副作用。
     """

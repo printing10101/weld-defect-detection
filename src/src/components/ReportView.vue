@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 报告解读视图（设计稿：结论先行 + 样张首页预览 + 影像对比 + 操作建议）。
- * 数据诚实性：全部内容来自 ReportOut 真实字段 + 用户上传文件真实 objectURL：
+ * 展示口径：全部内容来自 ReportOut 真实字段 + 用户上传文件真实 objectURL：
  * - 级别/待复核/可评片/缺陷数：ReportOut；
  * - 首页预览：ReportOut.workpiece_no/weld_no/report_meta 等真实回显，
  *   与打印 PDF 同一数据源；留空栏 = 报告留空（供手工补填），不伪造；
@@ -1169,7 +1169,7 @@ async function onVerify(): Promise<void> {
           v-else-if="detsErr"
           class="err show"
         >
-          ⚠ 载入失败：{{ detsErr }}
+          注意：载入失败：{{ detsErr }}
         </p>
         <template v-else-if="dets">
           <p class="stat">
@@ -1266,7 +1266,7 @@ async function onVerify(): Promise<void> {
             v-if="exportErr"
             class="err show"
           >
-            ⚠ 回流失败：{{ exportErr }}
+            注意：回流失败：{{ exportErr }}
           </div>
         </template>
       </div>
@@ -1281,7 +1281,7 @@ async function onVerify(): Promise<void> {
         ✓ 数字签名校验通过（签发者：{{ verifyResult.signer ?? "—" }}）
       </template>
       <template v-else-if="verifyResult.valid === false">
-        ⚠ 数字签名无效或报告内容已被篡改（{{ verifyResult.reason ?? "内容指纹不匹配" }}）
+        注意：数字签名无效或报告内容已被篡改（{{ verifyResult.reason ?? "内容指纹不匹配" }}）
       </template>
       <template v-else>
         — 本报告未附数字签名（{{ verifyResult.reason ?? "无签发记录" }}）
@@ -1291,7 +1291,7 @@ async function onVerify(): Promise<void> {
       v-if="verifyError"
       class="err show"
     >
-      ⚠ 签名校验请求失败：{{ verifyError }}
+      注意：签名校验请求失败：{{ verifyError }}
     </div>
 
     <div class="sig">

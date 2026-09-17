@@ -2,7 +2,7 @@
  * 工作台路由（Vue Router）——六个视图由 URL 驱动。
  *：用真实路由取代 AppShell 里基于 ref 的 v-show 手工切换，
  * 使「当前工作区」成为可寻址/可回溯的导航状态，为后续深链与多文档范式留出扩展位。
- * 采用 hash 历史：Tauri 生产以本地文件运行，hash 路由免去服务端 rewrite 配置。
+ * 采用 hash 历史：桌面壳生产以本地协议运行，hash 路由免去服务端 rewrite 配置。
  * createAppRouter(history?) 工厂便于单元测试注入 memory 历史。
  */
 import { createRouter, createWebHashHistory, type RouteRecordRaw } from "vue-router";

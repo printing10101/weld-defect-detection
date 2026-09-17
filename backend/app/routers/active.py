@@ -86,7 +86,7 @@ class PoolOut(BaseModel):
 
 def _pool_dir(reg: Registry) -> Path:
     # 经 resolve_config_path 锚定安装根（并遵循 data_dir 覆盖）：直接拼
-    # config.paths.data_dir 是 CWD 锚定，打包/Tauri 启动（CWD≠安装根）时
+    # config.paths.data_dir 是 CWD 锚定，打包/桌面壳启动（CWD≠安装根）时
     # 训练池会落错目录树，与 FilePoolStore/训练脚本的取数约定分裂。
     from backend.infra.config import resolve_config_path
 

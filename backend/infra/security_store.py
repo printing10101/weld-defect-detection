@@ -319,7 +319,7 @@ class SecurityStore:
     def ack_alert(self, alert_id: str, *, acked_by: str, note: str | None = None) -> dict[str, Any]:
         """确认（已读）告警（C-22）：status → acknowledged，不等于处置（resolved）。
 
-        诚实说明：alerts 表结构未区分"确认人/处置人"两列（避免为读确认引入
+        说明：alerts 表结构未区分"确认人/处置人"两列（避免为读确认引入
         迁移），这里复用 resolved_by/resolved_at 记录确认人与时间——语义为
         "首个确认该告警的人"，后续 resolve 会覆盖为处置人。"""
         with Session(self._engine) as session, session.begin():

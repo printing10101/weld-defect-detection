@@ -158,7 +158,7 @@ def sync_registry_pointer() -> None:
         reg.mark_active_by_uri(str(RUN_WEIGHTS))
         print(f"[deploy] 注册表活跃指针 -> {reg.active_id}")
     except Exception as exc:  # noqa: BLE001
-        print(f"[deploy] ⚠️ 注册表指针同步失败（不影响权重部署）：{exc}")
+        print(f"[deploy] 警告：注册表指针同步失败（不影响权重部署）：{exc}")
 
 
 def main() -> None:
@@ -190,9 +190,9 @@ def main() -> None:
     except SystemExit:
         raise
     except Exception as exc:  # noqa: BLE001
-        print(f"[deploy] ⚠️ 部署后评估闭环失败（不阻断部署，但指标/模型卡未更新）：{exc}")
+        print(f"[deploy] 警告：部署后评估闭环失败（不阻断部署，但指标/模型卡未更新）：{exc}")
     if not report["gate_passed"]:
-        print("[deploy] ⚠️ 真实集 0 检出，门槛未过——部署回退需人工判断，勿使用该模型！")
+        print("[deploy] 警告：真实集 0 检出，门槛未过——部署回退需人工判断，勿使用该模型！")
         raise SystemExit(3)
 
 

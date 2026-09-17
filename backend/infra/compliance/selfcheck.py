@@ -191,7 +191,7 @@ def _check_access(reg) -> list[dict[str, str]]:
     )
     denied_cnt = int(reg.repository.list_audit(action="export_denied", limit=1)[1])
     # 高密级导出拦截：以运行证据（export_denied 审计记录，含 std_eval 高密级拒导）
-    # 佐证拦截逻辑真实生效；无记录时诚实给 warning 而非硬判 pass。
+    # 佐证拦截逻辑真实生效；无记录时给 warning 而非硬判 pass。
     std_denied, _ = reg.repository.list_audit(
         action="export_denied", object_id="std_eval:false_reports", limit=1
     )
@@ -385,7 +385,7 @@ def _check_boundary(reg) -> list[dict[str, str]]:
                 "分级保护要求：跨源访问受控，防止外部网站读取本机 API 数据",
                 "fail",
                 f"cors_origins={origins}（含通配符: {wildcard}，非本机来源: {non_local}）",
-                "移除 '*' 与非本机来源，仅保留 127.0.0.1/localhost/tauri 来源",
+                "移除 '*' 与非本机来源，仅保留 127.0.0.1/localhost/历史 tauri 来源",
             )
         )
     else:
@@ -394,7 +394,7 @@ def _check_boundary(reg) -> list[dict[str, str]]:
                 "CORS 仅本机来源",
                 "分级保护要求：跨源访问受控，防止外部网站读取本机 API 数据",
                 "pass",
-                f"cors_origins={origins}（无通配符，全部为本机/Tauri 来源）",
+                f"cors_origins={origins}（无通配符，全部为本机/历史 tauri 来源）",
             )
         )
     from backend.infra.offline import offline_conclusion

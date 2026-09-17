@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 上传面板（设计稿：DropZone + 参数行内帮助 + 即时校验 + 预览）。
- * 数据诚实性：仅处理用户真实选择的文件；预览为该文件的真实 objectURL；
+ * 展示口径：仅处理用户真实选择的文件；预览为该文件的真实 objectURL；
  * 校验消息针对真实文件（扩展名/大小）。不包含任何预设样例。
  *
  * 报告补充信息（report_meta）：按《射线检测报告》样张汇总表分组录入
@@ -275,7 +275,7 @@ defineExpose({ reset });
           v-if="fileErr"
           class="err show"
         >
-          ⚠ {{ fileErr }}
+          注意：{{ fileErr }}
         </div>
       </div>
 
@@ -304,7 +304,7 @@ defineExpose({ reset });
             v-if="thicknessErr"
             class="err show"
           >
-            ⚠ {{ thicknessErr }}
+            注意：{{ thicknessErr }}
           </div>
         </div>
         <div class="field">

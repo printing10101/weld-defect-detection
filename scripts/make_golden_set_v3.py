@@ -15,7 +15,7 @@ data/training/{train,val,test} 由 **planB_run.generate(seed=12345)** 生成
 - 通过 monkeypatch 重定向输出目录（不改训练脚本一行；绝不写入
   data/training/raw，防评估样本回流训练池造成评估泄漏）；
 - 生成后对全部训练 split 做 dHash 感知汉明距离校验，量化"零重叠"；
-- 固定种子 + 指纹 + 诚实口径写入 _META.json。
+- 固定种子 + 指纹 + 如实口径写入 _META.json。
 
 用途边界：v3 服务于**权重版本回归门禁**（同分布上比较新旧权重的可复现相对
 指标），**不是**真实底片精度的证书。真实泛化仍须真实标注数据（当前缺失）。
@@ -108,7 +108,7 @@ def main() -> None:
             f"请人工检查训练集构成或调整生成参数"
         )
 
-    # ---- 元信息（与 golden v2 _META 同构 + 诚实口径） ----
+    # ---- 元信息（与 golden v2 _META 同构 + 如实口径） ----
     counts: Counter[int] = Counter()
     for lbl in lbl_dir.glob("*.txt"):
         for line in lbl.read_text(encoding="utf-8").splitlines():

@@ -130,7 +130,7 @@ def test_run_inspection_photo_film_advisory(tmp_path: Path) -> None:
     assert out["evaluable"] is True, "翻拍影像不应被降级门禁判为不可评片"
     assert out["grade_preliminary"] is True, "翻拍级别必须走预筛通道强标记"
     assert out["joint_level"], "翻拍影像应输出 AI 预筛级别"
-    assert str(out["basis"][0]).startswith("⚠"), "basis 首条必须是预筛强声明"
+    assert str(out["basis"][0]).startswith("注意："), "basis 首条必须是预筛强声明"
     assert out["defect_count"] >= 1, "胶片区内的缺陷应被检出"
     assert Path(out["pdf_path"]).exists(), "翻拍影像也应产出报告"
     stored = reg.repository.get_image(out["image_id"])

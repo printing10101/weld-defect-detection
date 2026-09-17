@@ -25,7 +25,7 @@ onMounted(() => {
   bindDesktopCloseGuard();
 });
 
-/** preload 注入的桌面桥（Electron 环境）；web/Tauri 环境为 undefined。 */
+/** preload 注入的桌面桥（Electron 环境）；web 环境为 undefined。 */
 const desktopBridge = (
   window as unknown as {
     desktop?: {

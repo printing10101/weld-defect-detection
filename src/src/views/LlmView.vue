@@ -220,7 +220,7 @@ onUnmounted(() => {
       v-if="err"
       class="err show"
     >
-      ⚠ {{ err }}
+      注意：{{ err }}
     </p>
     <p
       v-else-if="notice"

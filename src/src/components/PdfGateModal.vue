@@ -59,7 +59,7 @@ defineProps<{ ctrl: ControlledPdf }>();
         v-if="ctrl.gateErr.value"
         class="err show"
       >
-        ⚠ {{ ctrl.gateErr.value }}
+        注意：{{ ctrl.gateErr.value }}
       </div>
       <div class="gate-acts">
         <button

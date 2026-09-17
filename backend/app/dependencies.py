@@ -699,7 +699,7 @@ class Registry:
 
         返回 {model_id, passed, metrics, reason}；结果写入 pending_activations
         （candidate 状态）。评估不可完成（Golden 缺失/加载失败）向上抛由路由转
-        HTTP 错误——诚实门禁：评估不了就不允许投产，不留"默认放行"。
+        HTTP 错误——门禁从紧：评估不了就不允许投产，不留"默认放行"。
         """
         summary = self.run_candidate_evaluation(model_id)
         metrics = summary.get("metrics", {})

@@ -98,9 +98,7 @@ def test_sdc2_ciphertext_byte_compatible_with_gmssl_reference(monkeypatch) -> No
     master = bytes(range(32))
     monkeypatch.setenv("SCAN_CRYPTO_KEY", base64.b64encode(master).decode())
     # 固定 nonce：encrypt() 内部 os.urandom 只用于生成 16B 计数器
-    monkeypatch.setattr(
-        "backend.infra.crypto.os.urandom", lambda n: bytes(range(n))[::-1]
-    )
+    monkeypatch.setattr("backend.infra.crypto.os.urandom", lambda n: bytes(range(n))[::-1])
     provider = default_crypto_provider()
 
     nonce = bytes(range(16))[::-1]

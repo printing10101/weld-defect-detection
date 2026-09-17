@@ -670,7 +670,7 @@ function onDropFiles(e: DragEvent): void {
             v-if="submitError"
             class="err show"
           >
-            ⚠ {{ submitError }}
+            注意：{{ submitError }}
           </div>
           <!-- 上传进度（真实字节数）：百张大底片上传期不再只有一句"提交中…" -->
           <div
@@ -843,7 +843,7 @@ function onDropFiles(e: DragEvent): void {
           v-if="submitError"
           class="err show"
         >
-          ⚠ {{ submitError }}
+          注意：{{ submitError }}
         </div>
       </div>
     </div>
@@ -854,7 +854,7 @@ function onDropFiles(e: DragEvent): void {
         v-if="backendDown"
         class="err show"
       >
-        ⚠ {{ lastPollErr ? `进度获取失败（${lastPollErr}），` : "" }}推理服务可能无响应，已暂停进度轮询。<button
+        注意：{{ lastPollErr ? `进度获取失败（${lastPollErr}），` : "" }}推理服务可能无响应，已暂停进度轮询。<button
           class="btn link"
           type="button"
           @click="retryConnection"
@@ -866,7 +866,7 @@ function onDropFiles(e: DragEvent): void {
         v-if="submitError"
         class="err show"
       >
-        ⚠ {{ submitError }}
+        注意：{{ submitError }}
         <button
           class="btn link"
           type="button"
@@ -879,7 +879,7 @@ function onDropFiles(e: DragEvent): void {
         v-if="viewError"
         class="err show"
       >
-        ⚠ {{ viewError }}
+        注意：{{ viewError }}
         <button
           class="btn link"
           type="button"
@@ -951,7 +951,7 @@ function onDropFiles(e: DragEvent): void {
         class="hint"
         role="alert"
       >
-        ⚠ {{ historyError }}
+        注意：{{ historyError }}
       </p>
       <div class="hist-list">
         <button

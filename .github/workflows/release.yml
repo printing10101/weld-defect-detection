@@ -1,7 +1,7 @@
 name: Release
 
 # 打 tag（v*）或手动触发：构建离线自足安装包 → 冒烟 → 附加到 GitHub Release。
-# 权重处理（诚实降级）：仓库内无权重（大文件不入 git）时构建"基线降级版"并在
+# 权重处理（降级口径）：仓库内无权重（大文件不入 git）时构建"基线降级版"并在
 # 产物名/说明中标注，禁止冒充正式交付版；正式发版前把 best.onnx 放到
 # models/weights/best.onnx（或用 -RequireWeights 的本地打包链）。
 # 注意：安装包未做代码签名（无证书），SmartScreen 会提示——见 SECURITY.md。

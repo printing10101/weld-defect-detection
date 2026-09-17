@@ -4,7 +4,7 @@
  * 单片：全部查看/滤波操作；双片：左右两窗并排，缩放/平移/旋转联动（可关）。
  * 即时同步：单张/批量上传的影像经 viewerFilms store 汇入此处——缩略图条点选
  * 即看，停留本页时新到影像自动上屏，无需重新选文件。
- * 数据诚实性：仅显示用户真实上传/选择的影像，不预置任何样例。
+ * 展示口径：仅显示用户真实上传/选择的影像，不预置任何样例。
  */
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";

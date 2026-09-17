@@ -315,7 +315,7 @@ def main() -> None:
                 f"<div class='grade'><span class='level' style='color:{lv_color};border-color:{lv_color}'>"
                 f"{lv} 级</span>"
                 f"<span class='tag {'warn' if grade['need_review'] else 'ok'}'>"
-                f"{'⚠ 需人工复核' if grade['need_review'] else '自动判定'}</span>"
+                f"{'需人工复核' if grade['need_review'] else '自动判定'}</span>"
                 f"<p class='basis'>{basis}</p></div>"
             )
         else:
@@ -457,7 +457,7 @@ def main() -> None:
 </header>
 <div class="tagline">以下全部结果均由<b>真实工业底片</b>与<b>已部署 ONNX 模型</b>在本地实时推理得出，无任何人工修饰。</div>
 
-{"<div class='pdf-zone'><h3 class='sec'>正式报告（PDF/A-1b · 数字签名）</h3><div class='pdf-card'><p>对真实裂纹底片 <b>PG101-2-6</b> 一键生成的合规归档报告：PDF/A-1b 长期归档格式、内容指纹 SHA-256 数字签名、判定依据条款快照。</p><a class='pdf-btn' href='data:application/pdf;base64," + pdf_b64 + "' download='PG101-2-6_评片报告.pdf'>⬇ 下载正式评片报告（PDF/A，{pdf_kb} KB）</a></div></div>" if pdf_b64 else ""}
+{"<div class='pdf-zone'><h3 class='sec'>正式报告（PDF/A-1b · 数字签名）</h3><div class='pdf-card'><p>对真实裂纹底片 <b>PG101-2-6</b> 一键生成的合规归档报告：PDF/A-1b 长期归档格式、内容指纹 SHA-256 数字签名、判定依据条款快照。</p><a class='pdf-btn' href='data:application/pdf;base64," + pdf_b64 + "' download='PG101-2-6_评片报告.pdf'>下载正式评片报告（PDF/A，{pdf_kb} KB）</a></div></div>" if pdf_b64 else ""}
 
 <h3 class="sec">关键成果</h3>
 <div class="metrics">{metric_html}</div>

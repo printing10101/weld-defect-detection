@@ -136,5 +136,5 @@ def test_report_api_unknown_template_falls_back(tmp_path: Path) -> None:
 
 
 def test_default_template_file_ships_with_package() -> None:
-    """默认模板随包分发（Tauri 打包/任意 CWD 均可用）。"""
+    """默认模板随包分发（桌面打包/任意 CWD 均可用）。"""
     assert (_TEMPLATES_DIR / "standard.yaml").exists()

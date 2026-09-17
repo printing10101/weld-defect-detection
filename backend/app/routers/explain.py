@@ -38,7 +38,7 @@ async def explain(
 
     defect_id 缺省时对**全部检出缺陷**分别叠加（取最高置信缺陷的叠加结果）。
     torch 后端（训练/验证工作站）走真 Grad-CAM；ONNX 部署路径自动回退
-    Sobel 显著性近似（见 domain/explain.py 两级设计与诚实降级声明）。
+    Sobel 显著性近似（见 domain/explain.py 两级设计与降级声明）。
     """
     async with staged_upload(image, reg.config) as tmp_path:
         heatmap_b64 = await run_in_threadpool(_explain_sync, reg, tmp_path, defect_id)

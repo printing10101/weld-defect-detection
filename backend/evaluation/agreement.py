@@ -5,7 +5,7 @@
 输入为配对的（自动评级, 人工评级）序列——数据经人工复核工作流产生
 （每条复核记录的 defect 级别对），可由 run_spec_eval CLI 以 JSONL 喂入。
 未评级（None，如判定熔断）作为独立类别参与计算，不做剔除——剔除会
-虚高一致率，违反诚实评估口径。
+虚高一致率，评估结论失真。
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ def grading_agreement(
     两个序列必须等长（同一缺陷集合的两个评级来源）。返回 dict 可 JSON 化，
     结构与 std501807 的输出风格一致（数值 + verdict 布尔）。
 
-    诚实评估口径：空输入（n=0）不构成达标证据，verdict 判不通过——
+    评估口径：空输入（n=0）不构成达标证据，verdict 判不通过——
     与 calibration/quant_agreement 两个 harness 的空输入语义一致。
     """
     if len(auto_grades) != len(human_grades):

@@ -10,11 +10,11 @@ import hashlib
 from pathlib import Path
 
 # 安装根目录锚点：backend/infra/model_store.py -> parents[2] = 安装根目录
-# （dev/repo 布局下为仓库根；Tauri 打包后为本机安装目录）
+# （dev/repo 布局下为仓库根；桌面打包后为本机安装目录）
 from backend.infra.paths import resolve_model_uri as _resolve_model_uri
 
 # backend 包根目录锚点：parents[1] = backend/。
-# Tauri 打包时模型随 ``backend`` 资源一同分发，落在 <安装目录>/backend/models/weights/，
+# 桌面打包时模型随 ``backend`` 资源一同分发，落在 <安装目录>/backend/models/weights/，
 # 而非安装根目录下的 models/weights；因此解析时回退到此处，避免找不到权重而静默降级。
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 

@@ -17,7 +17,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-# 安装根目录锚点：parents[2] = 安装根目录（相对 CWD 在 Tauri 安装包场景会漂移）
+# 安装根目录锚点：parents[2] = 安装根目录（相对 CWD 在安装包场景会漂移）
 ROOT = Path(__file__).resolve().parents[2] / "data" / "real_label"
 IMG = ROOT / "images"
 LBL = ROOT / "labels"

@@ -30,7 +30,7 @@ data/external/
 data/compare/
 data/runs/
 data/batch/
-# 真实底片衍生产物不入库（INSTINCTS：权重与真实工业数据不入库）
+# 真实底片衍生产物不入库（权重与真实工业数据均不入库）
 data/atlas/
 data/rejects/
 data/demo/
@@ -68,7 +68,7 @@ cli.tgz
 .env.*
 !.env.example
 
-# Tool-managed workspace memory
+# 本地工具的工作区缓存
 .workbuddy/
 
 # OS
@@ -111,10 +111,10 @@ data/backups/
 data/privacy/
 data/rejects/
 _doc_task/
-# 军工级要求文档：敏感，公开仓库禁止入库
-/扫描检测软件-军工级要求文档.docx
+# 本地要求类文档：不入库
+/*.docx
 
-# 本地工具状态（扫描/审计/记忆缓存）
+# 本地工具缓存
 .mimosa/
 .dsh-memory/
 .import_linter_cache/
@@ -124,21 +124,12 @@ data/model_registry.json
 data/eval/.gate_work/
 
 
-# === 公开仓安全边界（2026-09 审计后加固）===
-# 本机绝对路径
-C:\Users\Lenovo/**
-D:\扫描检测软件/**
-D:\灵境制造/**
-D:\铸型工坊/**
-# 高校/第三方官方全文（版权）
-backend/app/syllabus/handbooks/
-# 无关攻防技能包与爬虫
+# === 公开仓安全边界 ===
+# 无关工具目录与脚本
 .trae/
-github可用skill/
 _zip_inspect/
 **/crawl_judgments.py
-# 真实案件/密钥
-data/real_judgments/
+# 密钥与证书
 *.pem
 *.key
 !**/*.example
@@ -147,5 +138,5 @@ data/real_judgments/
 .verify-run-*/
 # Electron 打包产物（electron-builder 输出，安装包为交付物不入库）
 src/release/
-# 后端开发态日志（SCANDETECTION_USER_DATA_DIR=仓库根时落在 /logs，与 Tauri dev 行为一致）
+# 后端开发态日志（SCANDETECTION_USER_DATA_DIR=仓库根时落在 /logs）
 /logs/

@@ -75,7 +75,7 @@ def test_v02_matrix_aggregation_and_files():
     counts = body["report"]["counts"]
     assert rows, "矩阵解析结果为空"
     assert sum(counts.values()) == len(rows)
-    # 矩阵存在未验证项（诚实标注）→ warning，缺口非空
+    # 矩阵存在未验证项（如实标注）→ warning，缺口非空
     assert body["overall"] in {"pass", "warning"}
     if body["overall"] == "warning":
         assert body["report"]["gaps"]

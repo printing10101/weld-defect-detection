@@ -98,7 +98,7 @@ def _sanitize_record_name(name: str) -> str:
 
 
 def _eval_result_path(rel_path: str) -> Path:
-    """解析评价结果路径。诚实边界：支持绝对路径（CLI/测试工作流），
+    """解析评价结果路径。边界说明：支持绝对路径（CLI/测试工作流），
     已登录调用方可探测任意路径是否存在——残留读面，写面已由
     _sanitize_record_name 封死；如需收紧须先迁移 CLI/测试的路径用法。"""
     return resolve_config_path(rel_path)

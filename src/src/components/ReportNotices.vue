@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 评片告警面板：门禁降级原因、印字区误检屏蔽、单张查重命中等（后端统一
- * 并入 ReportOut.warnings 文本）。数据诚实性：仅原样展示后端真实告警，
+ * 并入 ReportOut.warnings 文本）。展示口径：仅原样展示后端真实告警，
  * 前端不做规则推导；无告警时整块不渲染。
  */
 import { computed } from "vue";
@@ -19,7 +19,7 @@ const notices = computed<string[]>(() => [...(props.result.warnings ?? [])]);
     role="alert"
   >
     <div class="n-h">
-      ⚠ 需注意
+      需注意
     </div>
     <ul>
       <li

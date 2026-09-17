@@ -174,7 +174,7 @@ class IpcCfg(BaseModel):
     enforce: true=除存活/指标/认证与静态资源外，所有请求须携带 X-IPC-Token
              头（或已带 Bearer 会话）——防其他本机进程误调/网页 CSRF 式调用。
              后端启动时生成一次性令牌写入 data/ipc_token（进程生命周期有效），
-             Tauri 外壳读取后注入 WebView。单机调试/测试可置 false（诚实声明：
+             桌面壳读取后注入 WebView。单机调试/测试可置 false（边界说明：
              本机回环为明文 HTTP，令牌不解决传输加密；需 TLS 时挂本机证书，
              不在本次范围）。
     """
@@ -584,8 +584,8 @@ class WatchdogCfg(BaseModel):
     interval_sec     : 采样周期（秒）。
     rss_warn_mb      : RSS 告警阈值（MB），超限落 security alert + 审计。
     rss_restart_mb   : RSS 重启标记阈值（MB）；仅 graceful_restart=true 时写
-                       data/restart_required 标记文件（由 Tauri 壳检测重启，
-                       当前壳侧集成待做——诚实边界，仅告警+审计兜底）。
+                       data/restart_required 标记文件（由桌面壳检测重启，
+                       当前壳侧集成待做——已知局限，仅告警+审计兜底）。
     graceful_restart : 是否允许写重启标记文件。
     """
 
@@ -845,8 +845,8 @@ def resolve_config_path(p: str) -> Path:
     """相对配置路径锚定安装根目录（与 dependencies._resolve_path 语义一致）。
 
     绝对路径原样返回；相对路径解析为 _INSTALL_ROOT / p，使产品以任意方式启动
-    （安装程序.exe / Tauri 外壳 / 启动脚本，CWD 各异）都能落到正确的运行时目录。
-    Tauri 打包版经 SCANDETECTION_USER_DATA_DIR 把 data/ 前缀的路径改锚到
+    （安装程序.exe / 桌面外壳 / 启动脚本，CWD 各异）都能落到正确的运行时目录。
+    桌面打包版经 SCANDETECTION_USER_DATA_DIR 把 data/ 前缀的路径改锚到
     <用户数据目录>/data/...（卸载不清空，见 paths.data_dir_override）；配置/
     权重等程序资产不受影响。
     """

@@ -76,7 +76,7 @@ def image_preview(
             status_code=404,
             detail={"code": "NOT_FOUND", "message": f"影像不存在或尚未归档: {image_id}"},
         )
-    # 诚实边界：DB 内 path 支持外部底片路径（与 std_eval._eval_result_path 同
+    # 边界说明：DB 内 path 支持外部底片路径（与 std_eval._eval_result_path 同
     # 口径，见 test_diconde_route）；服务端数据非用户直传，不做 images_dir 锚定。
     gray = _read_gray(str(image["path"]))
     if gray is None:

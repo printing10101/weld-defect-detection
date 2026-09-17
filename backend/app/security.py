@@ -5,7 +5,7 @@
 - 限流：每客户端 IP 滑动窗口计数，防单来源打爆 API（本地桌面低风险，
   但设计文档  要求防护；阈值宽松，不干扰正常使用）。
 - IPC 令牌（C-17）：业务请求须携带启动期一次性令牌（X-IPC-Token 头）或
-  已带会话凭据——防其他本机进程误调/网页 CSRF 式调用。诚实边界：本机回环
+  已带会话凭据——防其他本机进程误调/网页 CSRF 式调用。边界说明：本机回环
   明文传输，令牌不解决传输加密（需 TLS 后续挂本机证书）。
 """
 
@@ -42,9 +42,7 @@ class UnhandledExceptionMiddleware(BaseHTTPMiddleware):
         try:
             return await call_next(request)
         except Exception:  # noqa: BLE001 - 兜底中间件的职责就是接住一切未处理异常
-            _LOG.exception(
-                "unhandled exception on %s %s", request.method, request.url.path
-            )
+            _LOG.exception("unhandled exception on %s %s", request.method, request.url.path)
             from fastapi.responses import JSONResponse
 
             return JSONResponse(
@@ -134,7 +132,7 @@ class IpcTokenMiddleware(BaseHTTPMiddleware):
     """IPC 一次性令牌校验（C-17）。
 
     enforce=true 时：除豁免路径外，请求须满足其一——
-      1. ``X-IPC-Token`` 头 = 启动期一次性令牌（Tauri 注入 WebView 后前端统一携带）；
+      1. ``X-IPC-Token`` 头 = 启动期一次性令牌（桌面壳注入 WebView 后前端统一携带）；
       2. 已携带会话凭据（Authorization: Bearer ... 或 ?access_token=，登录引导
          与直链下载场景）——凭据有效性由下游 get_principal 校验，本中间件
          只判"有无"，不重复验会话。

@@ -193,7 +193,7 @@ class VerifyOut(BaseModel):
 def _sm2_verify(public_key_hex: str, signature_hex: str, data: bytes) -> bool:
     """用 sidecar 内公钥做 SM2 验签（SM3withSM2），不依赖本机私钥/主密钥。
 
-    信任模型（诚实声明）：公钥随报告 sidecar 分发，若攻击者能同时替换
+    信任模型：公钥随报告 sidecar 分发，若攻击者能同时替换
     PDF 与 sidecar 则可整体重签——sidecar 签名提供的是完整性/出处校验，
     抵赖性防护需配合硬件托管密钥（PKCS#11 provider）与公钥备案。
     """

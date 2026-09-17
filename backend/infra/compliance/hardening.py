@@ -8,7 +8,7 @@
    监听列表（未安装则如实降级为仅核验配置，不造假）；
 3. 未授权接口：内省 FastAPI app.routes，枚举未挂 get_principal/require_role
    的 API 路由（health/metrics/auth 豁免，其余应为空集）；
-4. TLS/传输：IPC 令牌强制与否 + 本机回环明文 HTTP 的诚实声明；
+4. TLS/传输：IPC 令牌强制与否 + 本机回环明文 HTTP 的风险说明；
 5. 文件权限：数据目录 / DB / IPC 令牌文件的 POSIX 权限位（Windows 平台
    ACL 无法经 POSIX 位核验，如实注明）。
 
@@ -325,7 +325,7 @@ def _check_transport(reg, app) -> list[dict[str, str]]:
                 "生产环境置 ipc.enforce=true",
             )
         )
-    # 诚实声明：本机回环为明文 HTTP，无 TLS；靠单机部署边界 + IPC 令牌缓解。
+    # 边界说明：本机回环为明文 HTTP，无 TLS；靠单机部署边界 + IPC 令牌缓解。
     items.append(
         _finding(
             "传输加密（TLS）",

@@ -249,7 +249,7 @@ function stopBackend() {
 // IPC 令牌注入（对应 inject_ipc_token，C-17）。
 // 后端 lifespan 启动时生成令牌写 <数据目录>/data/ipc_token（进程生命周期有效，
 // 重启即刷新）；注入后前端 services/api.ts 统一携带 X-IPC-Token 头。
-// 诚实边界：令牌防"其他本机进程误调/网页 CSRF 式调用"，回环明文传输，
+// 边界说明：令牌防"其他本机进程误调/网页 CSRF 式调用"，回环明文传输，
 // 不解决传输加密。
 // ---------------------------------------------------------------------------
 async function injectIpcToken() {

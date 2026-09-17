@@ -90,7 +90,7 @@ def main() -> None:
             f"bbox=({d.bbox.x:.0f},{d.bbox.y:.0f},{d.bbox.w:.0f},{d.bbox.h:.0f}) "
             f"shape={d.shape.value if d.shape else None}"
         )
-    print("[smoke] ✅ M4b 链路跑通（合成数据）")
+    print("[smoke] M4b 链路跑通（合成数据）")
 
 
 if __name__ == "__main__":

@@ -375,7 +375,7 @@ def build_dataset(
         f"跨split同源组={len(audit.cross_split_groups)} → {out_root / 'leakage_audit.json'}"
     )
     for c in audit.cross_split_groups[:5]:
-        print(f"[dataset] ⚠ 同源底片组跨split: {c['group']} → {sorted(c['splits'])}")  # type: ignore[arg-type]
+        print(f"[dataset] 警告：同源底片组跨split: {c['group']} → {sorted(c['splits'])}")  # type: ignore[arg-type]
     if enforce_groups and audit.cross_split_groups:
         raise RuntimeError(
             f"同源底片组跨 split（enforce_groups=True）：共 {len(audit.cross_split_groups)} 组，"

@@ -167,5 +167,5 @@ def enforce_split_disjoint(*dirs: Path) -> list[OverlapReport]:
         )
         if report.n_train >= MIN_SPLIT_FOR_ENFORCE and report.n_test >= MIN_SPLIT_FOR_ENFORCE:
             raise RuntimeError(msg)
-        print(f"[dataset] ⚠ {msg}（小样本集仅告警）")
+        print(f"[dataset] 警告：{msg}（小样本集仅告警）")
     return reports

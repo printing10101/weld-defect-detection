@@ -4,8 +4,8 @@
 - 超过 ``rss_warn_mb`` → security alert（kind=memory_pressure，跨阈值只告警一次，
   回落后再超限才再次告警，防刷屏）+ 主审计链留痕；
 - 超过 ``rss_restart_mb`` 且 ``graceful_restart``=true → 写重启标记文件
-  ``<data_dir>/restart_required``（含原因与时间戳）。Tauri 壳（main.rs 的
-  supervisor）周期检测到该标记即重启后端，实现内存超限的优雅自愈。
+  ``<data_dir>/restart_required``（含原因与时间戳）。桌面壳（main.cjs 的
+  监督循环）周期检测到该标记即重启后端，实现内存超限的优雅自愈。
   标记文件本身不触发本进程强制终止——进程继续运行，由告警+审计+壳侧重启兜底。
 
 RSS 采样优先 psutil；不可用时尽力回退：
@@ -204,7 +204,7 @@ class MemoryWatchdog:
                 _LOG.warning("watchdog 审计落库失败: %s", exc)
 
     def _write_restart_marker(self, rss: float) -> None:
-        """写优雅重启标记文件（诚实边界：当前壳侧未消费，仅落盘+日志）。"""
+        """写优雅重启标记文件（已知局限：当前壳侧未消费，仅落盘+日志）。"""
         marker = self._data_dir / _RESTART_MARKER
         try:
             self._data_dir.mkdir(parents=True, exist_ok=True)
@@ -215,7 +215,7 @@ class MemoryWatchdog:
                         "rss_mb": rss,
                         "threshold_mb": self._restart,
                         "at": self.last_sample_at,
-                        "note": "Tauri 壳检测到本文件后将重启后端（优雅自愈）",
+                        "note": "桌面壳检测到本文件后将重启后端（优雅自愈）",
                     }
                 ),
                 encoding="utf-8",

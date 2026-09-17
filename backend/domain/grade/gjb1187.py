@@ -3,7 +3,7 @@
 军标评级骨架：按 registry.register_standard 模式注册（standard_id="GJB 1187A"），
 结构对齐既有适配器样板（gb3323.py）。
 
-诚实边界（务必读）：
+边界与局限（务必读）：
 - 评级数值表（tables/gjb1187.yaml）**全部为占位值**，不来自军标原文——军标属
   受控文件，本系统未获得授权正本，未做任何转录核对。表值待军标原文校核后启用。
 - 因此表 yaml 置 ``authorized: false``，走既有熔断语义：``grade`` 一律抛

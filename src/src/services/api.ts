@@ -100,7 +100,7 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-/** IPC 一次性令牌（C-17）：Tauri 外壳在后端就绪后注入 window.__IPC_TOKEN__，
+/** IPC 一次性令牌（C-17）：桌面外壳在后端就绪后注入 window.__IPC_TOKEN__，
  *  本机后端要求业务请求统一携带 X-IPC-Token（防其他本机进程误调/网页 CSRF
  *  式调用）；浏览器开发环境无此值，仅调试时由后端关闭 ipc.enforce。 */
 function getIpcToken(): string | null {
@@ -204,7 +204,7 @@ async function request<T>(path: string, init?: RequestInit, timeoutMs = REQUEST_
   // 操作员姓名（X-Operator-Name）：仅登录前场景作审计 actor 记录
   const headers: Record<string, string> = { "X-Operator-Name": getOperatorName() };
   if (token) headers.Authorization = `Bearer ${token}`;
-  // IPC 一次性令牌（C-17）：每次请求实时读取（Tauri 注入时机晚于前端启动）
+  // IPC 一次性令牌（C-17）：每次请求实时读取（桌面壳注入时机晚于前端启动）
   const ipcToken = getIpcToken();
   if (ipcToken) headers["X-IPC-Token"] = ipcToken;
   Object.assign(headers, init?.headers ?? {});
@@ -571,7 +571,7 @@ export function getChallenge(): Promise<ChallengeOut> {
 
 /**
  * SM2 挑战-响应登录。
- * 软件模式简化流程（诚实声明）：私钥文件内容提交给本机后端代签后验签——
+ * 软件模式简化流程（边界说明）：私钥文件内容提交给本机后端代签后验签——
  * 单机本地软件可接受；私钥仅在本机进程内存中出现，不落日志/审计。
  */
 export function login(

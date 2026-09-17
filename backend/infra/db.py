@@ -396,7 +396,7 @@ def create_db_engine(path_or_url: str) -> Engine:
     - 完整 SQLAlchemy URL（含 ``://``，来自 paths.db_url）→ 按方言直接建引擎，
       不施加 SQLite PRAGMA。
 
-    国产数据库方言示例（S-03，诚实声明：本仓库未做真机验证，仅给出接入写法，
+    国产数据库方言示例（S-03，如实说明：本仓库未做真机验证，仅给出接入写法，
     连通性/迁移行为须在目标环境联调确认）：
 
     - 达梦 DM8（需 ``pip install sqlalchemy_dm``，或厂商 dmPython + 方言包）::

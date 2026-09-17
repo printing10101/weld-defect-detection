@@ -213,7 +213,7 @@ def shape_fidelity_metrics(
 
 
 def _wilson_ci(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
-    """Wilson 得分区间（小样本下比正态近似诚实，NDT 可靠性口径通用）。"""
+    """Wilson 得分区间（小样本下比正态近似更保守，NDT 可靠性口径通用）。"""
     if n == 0:
         return 0.0, 1.0
     p = k / n

@@ -52,7 +52,7 @@ basis_empty: 无自动判定依据（标准数值未授权或无需判定）。
 section_conclusion: 七、结论
 level_text: 综合评定级别：{level} 级
 no_level_text: 无法自动评级，需人工复核。
-review_warn: ⚠ 本报告标注需要人工复核。
+review_warn: 注意：本报告标注需要人工复核。
 signer_text: 签字：{signer}
 fingerprint_text: 数字指纹：SHA-256:{fp}（报告内容防篡改校验）
 

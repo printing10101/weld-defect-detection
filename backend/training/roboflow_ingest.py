@@ -111,7 +111,7 @@ def ingest(name: str, export_dir: Path | None = None) -> Path:
     )
     if mapped == 0:
         print(
-            "[roboflow] ⚠️ 映射框为 0：该集类别名无法识别（如 XrayWeld 匿名 0-4）。"
+            "[roboflow] 警告：映射框为 0：该集类别名无法识别（如 XrayWeld 匿名 0-4）。"
             "请提供类别语义映射，或仅在域预训练中使用（不作为检测训练集）。"
         )
     return dataset_builder.build_dataset()

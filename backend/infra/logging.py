@@ -122,7 +122,7 @@ def configure_logging(log_format: str = "text") -> None:
     - 主路：RotatingFileHandler 写入日志目录（打包版=用户数据目录 logs/，
       开发版=%LOCALAPPDATA%/ScanDetection/logs，见 _writable_log_base_dir），
       超 5MB 轮转、保留 20 份（上限 ~105MB）；
-    - 兜底：ERROR 级 stderr（由 Tauri 壳收入 %TEMP%/ScanDetection/backend.log），
+    - 兜底：ERROR 级 stderr（由桌面壳收入 %TEMP%/ScanDetection/backend.log），
       只承载严重异常，频次低，避免逐条业务日志无界写入临时文件。
     """
     level = logging.INFO

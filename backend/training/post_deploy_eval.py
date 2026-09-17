@@ -9,7 +9,7 @@ YoloDetector）下产出 mAP50/逐类 AP/召回/精确 + ECE 校准 + 与上次�
 2. ``data/model_cards/<model_id>.json``      —— 模型卡（实测指标/数据分布/局限）；
 3. ``data/experiments/experiments.jsonl``    —— ExperimentTracker 实验记录。
 
-诚实性铁律：评估域（synthetic/real）按数据路径**如实标注**并在模型卡
+评估域（synthetic/real）按数据路径**如实标注**并在模型卡
 局限中声明，禁止把同源合成域指标冒充真实域性能；``data/real_label`` 恢复
 后以 ``--data data/real_label`` 重跑即得真实域数字。
 
@@ -411,7 +411,7 @@ def main() -> None:
     if report is None:
         raise SystemExit(0)
     if report["regression"] and not report["regression"]["passed"]:
-        print("[post-deploy-eval] ⚠️ 与上次评估相比指标退化（详见 regression.violations）")
+        print("[post-deploy-eval] 警告：与上次评估相比指标退化（详见 regression.violations）")
         raise SystemExit(3)
 
 

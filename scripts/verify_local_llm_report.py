@@ -301,7 +301,7 @@ def _report(failures: list[str], run_dir: Path, keep: bool) -> int:
     if failures:
         print(f"结论: FAIL（{len(failures)} 项未通过）")
         for f in failures:
-            print(f"  ✗ {f}")
+            print(f"  未过项: {f}")
     else:
         print("结论: PASS —— 本地模型确实参与评片，全链路可用")
     if not keep:

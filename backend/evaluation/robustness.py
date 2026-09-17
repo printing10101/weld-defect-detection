@@ -6,7 +6,7 @@
 
 与 harness.py 同一输入协议（preds/targets: {bbox:[x,y,w,h], class_id, score}），
 纯 numpy/cv2 实现、可离线单测；推理经 ``infer_fn`` 回调注入（依赖倒置，
-不绑定具体检测器）。空 GT 判不通过的诚实口径与 agreement.py 一致。
+不绑定具体检测器）。空 GT 判不通过的保守口径与 agreement.py 一致。
 """
 
 from __future__ import annotations
@@ -133,7 +133,7 @@ def robustness_metrics(
     report = RobustnessReport()
     total_gt = sum(len(t) for _, t in samples)
     if total_gt == 0:
-        # 空 GT 判不通过：稳定率无从谈起，不得静默给满分（诚实口径）。
+        # 空 GT 判不通过：稳定率无从谈起，不得静默给满分（保守口径）。
         report.failures.append("评估集无真值标注，无法验证稳定性")
         return report
 
