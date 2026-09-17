@@ -111,8 +111,15 @@ def _font_candidates() -> list[Path]:
             p = root / name
             if p.exists():
                 cands.append(p)
-        # Linux 常把字体放在子目录，轻量递归（仅文件名匹配）
+        # Linux 常把字体放在子目录：按候选名递归匹配（宋体样张口径）。名字
+        # 匹配必须在下面任意字体兜底之前完成——否则 DejaVu 等无中文字形的
+        # 字体会因目录序在前被注册选中，中文整篇落成占位框（CI 裸环境实测）。
         if root in (Path("/usr/share/fonts"), Path("/usr/local/share/fonts")):
+            name_set = set(names)
+            cands.extend(p for p in root.rglob("*") if p.name in name_set)
+    # 任意字体兜底（最后）：无中文字形时出占位框，仅告警不崩溃
+    for root in (Path("/usr/share/fonts"), Path("/usr/local/share/fonts")):
+        if root.exists():
             cands.extend(root.rglob("*.tt[cf]"))
 
     # 去重保序

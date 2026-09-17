@@ -26,6 +26,7 @@ dependencies = [
     "python-multipart>=0.0.9",  # FastAPI multipart 上传（detect/batch 等）
     "reportlab>=4.0",  # Registry 装配即导入 PdfReporter；规格书首选 weasyprint 因
     #   Windows 缺 GTK/Pango 实测不可用（2026-08-04 M6），v1 用 reportlab（全离线中文字体）
+    "qrcode[pil]>=8.2",  # 报告页脚追溯二维码（G01，fail-soft）；缺包时该能力静默降级
     "pypdf>=4.0",  # M7 PDF/A-1b 后处理（XMP + sRGB OutputIntent + 文档 ID）
     "pillow-heif>=1.0",  # HEIC 解码（image_loader 懒加载，缺失则该格式降级不可用）
     "rapidocr-onnxruntime>=1.2",  # 底片印字（扫描日期/编号）OCR；缺失时该功能降级 unavailable

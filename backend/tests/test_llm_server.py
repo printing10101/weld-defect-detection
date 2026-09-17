@@ -49,6 +49,10 @@ def _cfg(tmp_path: Path, port: int, **kw) -> LlmCfg:
     model.write_bytes(b"gguf-stub")
     return LlmCfg(
         model_file=str(model),
+        # 缺省用当前解释器顶替 llama 运行时（monkeypatch _build_command 后并不
+        # 真正执行它）——否则 managed 路径落到 tools/llama 默认路径，CI 等无
+        # 运行时的环境全部退成 unavailable，测试密不可移植
+        server_exe=kw.pop("server_exe", sys.executable),
         port=port,
         startup_timeout_sec=kw.pop("startup_timeout_sec", 8.0),
         watch_interval_sec=kw.pop("watch_interval_sec", 0.3),
