@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import timedelta
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select, text
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from backend.infra.db import Base, CarrierRecord, ExportRequestRecord, create_db_engine
@@ -245,12 +246,16 @@ class ExportStore:
             rec = session.get(ExportRequestRecord, request_id)
             if rec is None:
                 raise KeyError(f"export request not found: {request_id}")
-            res = session.execute(
-                text(
-                    "UPDATE export_requests SET status = :st, decided_by = :by, "
-                    "decided_at = :at WHERE id = :rid AND status = 'pending'"
+            # UPDATE 影响行数 rowcount 只在 CursorResult 上暴露（Result 静态视图无此属性）
+            res = cast(
+                CursorResult[Any],
+                session.execute(
+                    text(
+                        "UPDATE export_requests SET status = :st, decided_by = :by, "
+                        "decided_at = :at WHERE id = :rid AND status = 'pending'"
+                    ),
+                    {"st": status, "by": decided_by, "at": _now(), "rid": request_id},
                 ),
-                {"st": status, "by": decided_by, "at": _now(), "rid": request_id},
             )
             if res.rowcount == 0:
                 raise ValueError(f"export request status is {rec.status!r}, expected 'pending'")
@@ -285,12 +290,15 @@ class ExportStore:
             now = _now()
             if rec.token_expires_at is None or rec.token_expires_at < now:
                 return None
-            res = session.execute(
-                text(
-                    "UPDATE export_requests SET used_at = :at, status = 'consumed' "
-                    "WHERE id = :rid AND used_at IS NULL"
+            res = cast(
+                CursorResult[Any],
+                session.execute(
+                    text(
+                        "UPDATE export_requests SET used_at = :at, status = 'consumed' "
+                        "WHERE id = :rid AND used_at IS NULL"
+                    ),
+                    {"at": now, "rid": rec.id},
                 ),
-                {"at": now, "rid": rec.id},
             )
             if res.rowcount == 0:
                 return None

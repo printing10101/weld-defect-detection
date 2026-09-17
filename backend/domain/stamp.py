@@ -22,6 +22,7 @@ import dataclasses
 import logging
 import re
 import threading
+from collections.abc import Callable
 
 import cv2
 import numpy as np
@@ -255,7 +256,7 @@ def _unmap_boxes(
 
 # 正/镜像之外的候选方向（背面装反=180°倒置、翻面扫描=垂直翻转）。
 # 仅在正向与镜像均未命中后才尝试（常规底片不多花推理），取置信度最高者。
-_ORIENTATIONS: tuple[tuple[str, object], ...] = (
+_ORIENTATIONS: tuple[tuple[str, Callable[[np.ndarray], np.ndarray]], ...] = (
     ("rotated", lambda img: cv2.flip(img, -1)),
     ("flipped", lambda img: cv2.flip(img, 0)),
 )

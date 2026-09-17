@@ -33,6 +33,7 @@ from backend.infra.timeutil import fmt_naive_utc
 
 if TYPE_CHECKING:
     from backend.evaluation.gate_rejects import GateRejectStore
+    from backend.infra.atlas_store import AtlasStore
     from backend.infra.backup import BackupScheduler
     from backend.infra.disk_space import DiskWatchdog
     from backend.infra.llm_registry import LlmRegistry
@@ -265,7 +266,7 @@ class Registry:
         # 累积则长跑批量下连接池永不释放。
         self._gate_reject_store: GateRejectStore | None = None
         # 缺陷图谱样本库（懒建单例，见 atlas_store()）。
-        self._atlas_store: object | None = None
+        self._atlas_store: AtlasStore | None = None
         # 懒建单例的初始化锁：批量 worker 并发首访时防止 check-then-act
         # 竞态各建一个 store（多出的 SQLAlchemy engine 永不释放）。
         self._lazy_store_lock = threading.Lock()
@@ -280,7 +281,7 @@ class Registry:
                     self._gate_reject_store = _Store(str(_resolve_path(self.config.paths.db_path)))
         return self._gate_reject_store
 
-    def atlas_store(self):
+    def atlas_store(self) -> AtlasStore:
         """缺陷图谱样本库懒建单例（首次访问才连接 DB，模式同 gate_reject_store）。"""
         if self._atlas_store is None:
             with self._lazy_store_lock:

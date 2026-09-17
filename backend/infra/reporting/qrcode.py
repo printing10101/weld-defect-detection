@@ -54,7 +54,9 @@ def qr_png_bytes(payload: str) -> bytes | None:
         qr.make(fit=True)
         img = qr.make_image(fill_color="black", back_color="white")
         buf = io.BytesIO()
-        img.save(buf, format="PNG")
+        # 不传 format：make_image 返回联合类型，save 的参数在各分支签名不一；
+        # 默认 kind 已是 PNG，运行时行为不变
+        img.save(buf)
         return buf.getvalue()
     except Exception as exc:  # noqa: BLE001 —— 二维码生成失败不阻断出片
         _LOG.warning("追溯二维码生成失败（报告继续生成）: %s", exc)

@@ -21,8 +21,9 @@ import logging
 import os
 import threading
 from pathlib import Path
+from typing import cast
 
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import ColumnDefault, create_engine, inspect
 
 _LOG = logging.getLogger("scandetection.migrate")
 
@@ -89,7 +90,10 @@ def _reconcile_missing_columns(db_path: str) -> list[str]:
                         f"{col.type.compile(engine.dialect)}"
                     )
                     if col.server_default is not None:
-                        ddl += f" DEFAULT {col.server_default.arg}"
+                        # ORM 声明的 server_default 均为字符串字面量（ColumnDefault.arg）；
+                        # cast 仅为类型视图，运行时访问路径与原 .arg 一致
+                        default_value = cast(ColumnDefault, col.server_default).arg
+                        ddl += f" DEFAULT {default_value}"
                     conn.exec_driver_sql(ddl)
                     added.append(f"{table.name}.{col.name}")
             if added:

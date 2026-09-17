@@ -406,6 +406,7 @@ def test_batch_cancel_while_paused_converges(tmp_path: Path) -> None:
         assert finished["cancelled"] == 3
         # 取消后 resume 是 no-op（无退回任务、状态不再翻转）
         assert bm.resume(batch_id) == 0
-        assert bm.status(batch_id)["status"] == "finished"
+        final_status = bm.status(batch_id)
+        assert final_status is not None and final_status["status"] == "finished"
     finally:
         bm.shutdown()

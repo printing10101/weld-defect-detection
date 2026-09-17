@@ -96,6 +96,7 @@ def test_trace_endpoint_found_and_matched(tmp_path):
 
             reg = get_registry()
             image = reg.repository.get_image(rep["image_id"])
+            assert image is not None
             report_id = (image.get("report") or {}).get("report_id")
             stored_hash = (image.get("report") or {}).get("report_hash") or ""
             assert report_id and stored_hash

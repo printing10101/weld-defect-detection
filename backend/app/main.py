@@ -437,9 +437,12 @@ def create_app() -> FastAPI:
 
     # 统一错误包注册在工厂内：create_app() 产出的每个实例（含测试实例）
     # 行为一致——AppError/AuthError/校验错误/未捕获异常都走统一错误包。
-    app.add_exception_handler(AppError, _app_error_handler)
-    app.add_exception_handler(AuthError, _auth_error_handler)
-    app.add_exception_handler(RequestValidationError, _validation_handler)
+    # starlette 把 ExceptionHandler 的 exc 形参声明为 Exception，按具体异常
+    # 子类专型的 handler 在注册处必然逆变不匹配；分发由 add_exception_handler
+    # 按异常类精确路由，运行时安全（与仓库既有 type: ignore 口径一致）。
+    app.add_exception_handler(AppError, _app_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(AuthError, _auth_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(RequestValidationError, _validation_handler)  # type: ignore[arg-type]
     app.add_exception_handler(Exception, _unhandled_handler)
     _register_spa_routes(app)
     return app

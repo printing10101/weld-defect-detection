@@ -264,9 +264,10 @@ class InspectionRepository:
                 )
             )
             items = [self._image_to_dict(r) for r in rows]
-            # 批量附加缺陷计数（一次 IN 查询；过滤软删除，与 get_image 口径一致）
+            # 批量附加缺陷计数（一次 IN 查询；过滤软删除，与 get_image 口径一致）；
+            # ids 置于分支外——下方报告编号查询同样要用，分两处赋值会成「可能未绑定」
+            ids = [it["image_id"] for it in items]
             if items:
-                ids = [it["image_id"] for it in items]
                 cnt_rows = session.execute(
                     select(DefectRecord.image_id, func.count())
                     .where(DefectRecord.image_id.in_(ids))

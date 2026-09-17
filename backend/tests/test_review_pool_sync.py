@@ -80,6 +80,7 @@ def test_deferred_review_does_not_export(tmp_path) -> None:
         image_id = rep["image_id"]
         reg = get_registry()
         image = reg.repository.get_image(image_id)
+        assert image is not None
         defect_ids = [d["id"] for d in (image.get("defects") or [])]
 
         out = _review(
