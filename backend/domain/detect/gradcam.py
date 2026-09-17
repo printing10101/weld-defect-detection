@@ -57,7 +57,7 @@ def _candidate_layers(det_model: object) -> list[object]:
     （见 grad_cam_map）。检测头分支（cv2/cv3/dfl）的末端 1×1 卷积输出已是
     逐锚框回归/分类语义，空间结构过粗，不作为候选。
     """
-    from torch import nn
+    from torch import nn  # type: ignore  # torch 为可选 ML 依赖（ml extra），类型环境不装
 
     root = getattr(det_model, "model", None)
     if root is None or len(root) == 0:
@@ -88,8 +88,8 @@ def grad_cam_map(
     任何失败返回 None（调用方回退近似路径）。
     """
     try:
-        import torch
-        from torch import nn
+        import torch  # type: ignore  # torch 为可选 ML 依赖（ml extra），类型环境不装
+        from torch import nn  # type: ignore
 
         det_model = getattr(model, "model", None)
         if det_model is None:

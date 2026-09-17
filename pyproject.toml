@@ -93,6 +93,9 @@ exclude_lines = [
 [tool.pyright]
 pythonVersion = "3.13"
 include = ["backend"]
+# 交付形态为 Windows 桌面安装包：按 Windows 解析平台语义（ctypes.windll、
+# WinDLL 等 win32 专属 API 在 Linux 类型环境下不存在，不钉平台则 CI 必红）。
+pythonPlatform = "Windows"
 # 指向项目 venv：让 pyright 解析 fastapi/pydantic/sqlalchemy 等第三方包，
 # 避免"类型门禁全红"却全是 reportMissingImports 的工具误报（上线前检查报告遗留项）。
 # CI 无此 venv 时 pyright 自动回退到当前解释器（pip install -e .[dev] 已装齐依赖）。

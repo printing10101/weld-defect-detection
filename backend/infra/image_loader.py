@@ -229,7 +229,7 @@ def _decode_pillow(p: Path) -> np.ndarray | None:
     from PIL import Image
 
     try:
-        from pillow_heif import register_heif_opener
+        from pillow_heif import register_heif_opener  # type: ignore  # 未列入包 __all__，运行时存在
 
         register_heif_opener()
     except ImportError:

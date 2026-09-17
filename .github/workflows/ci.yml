@@ -101,9 +101,14 @@ jobs:
         run: pip install uv
       - name: Verify requirements.lock is in sync
         run: |
+          # lock 面向 Windows 安装包（provision_python_embed），解析目标显式钉死
+          # 平台与 Python 版本，与生成机器的解释器/操作系统解耦，保证任意一侧
+          # 重新生成都是同一份结果。
           uv pip compile requirements.txt \
             --extra-index-url https://download.pytorch.org/whl/cpu \
             --generate-hashes \
+            --python-platform windows \
+            --python-version 3.13 \
             --output-file /tmp/requirements.generated.lock
           # uv 生成文件的头部注释记录本次 --output-file 路径，与提交版必然不同；
           # 比对前剔除注释行，只对包清单与哈希做一致性校验。

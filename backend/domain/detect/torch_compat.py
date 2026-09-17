@@ -18,7 +18,7 @@ from typing import Any
 @contextmanager
 def trusted_torch_load() -> Iterator[None]:
     """作用域内 torch.load 默认 weights_only=False（退出即恢复）。"""
-    import torch
+    import torch  # type: ignore  # torch 为可选 ML 依赖（ml extra），类型环境不装
 
     orig_load = torch.load
 
