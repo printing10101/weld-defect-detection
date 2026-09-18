@@ -5,8 +5,8 @@ dataset_guard 回答"两个 split 目录里有没有同一张图"（md5 + 感知
 
 1. 一张物理底片的多张衍生图（裁剪 patch、copy-paste 合成、过采样副本）
    是否跨越 train/val/test。评估图只要与训练图同源，指标即被乐观污染
-   （RIAWELC 教训：patch 级随机划分令同一底片的 patch 跨 split，
-   24k 图基准整体虚高，"Revisiting RIAWELC" 用 MD5 + 底片 ID 重审计证实）；
+   （RIAWELC 隐患：patch 级随机划分令同一底片的 patch 跨 split，
+   表观性能可被同源泄漏推高；截至 2026-09 该虚高幅度尚无公开量化审计）；
 2. 字节/感知重复按"源底片组"归因落盘，供部署后评估闭环引用审计。
 
 同源等价类（assign_groups，并查集，对 filename 主干）：
