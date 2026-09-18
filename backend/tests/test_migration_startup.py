@@ -137,11 +137,12 @@ def test_migrate_versioned_db_missing_column_healed(tmp_path) -> None:
     assert {"film_no", "batch_no", "content_hash"} <= cols
 
 
-def test_migrate_upgrade_failure_still_heals_columns(tmp_path) -> None:
-    """upgrade 中途撞表失败（dev 库 0013 defect_atlas 已存在场景）：异常照常
-    上抛（调用方 create_all 兜底），但 finally 的列自愈仍补齐缺失列——
-    版本卡住不能阻止列漂移被修复。"""
-    p = str(tmp_path / "upgrade_fails.db")
+def test_migrate_upgrade_collision_stamps_head_and_converges(tmp_path) -> None:
+    """回归（dev 库 0013 撞表场景）：版本停在 0012、0013 要建的 defect_atlas
+    已被 create_all 抢建 → upgrade 撞 "table already exists"。捕获后 stamp
+    head 让版本归位（否则每次启动重撞同一堵墙、版本永久卡死），列自愈照常
+    补齐缺失列；再次运行幂等且不再有任何迁移动作。"""
+    p = str(tmp_path / "upgrade_collision.db")
     eng = create_db_engine(p)
     with eng.connect() as c:
         # 版本停在 0012，但 0013 要建的 defect_atlas 已被 create_all 抢建
@@ -149,13 +150,36 @@ def test_migrate_upgrade_failure_still_heals_columns(tmp_path) -> None:
         c.exec_driver_sql("CREATE TABLE defect_atlas (id VARCHAR(64) PRIMARY KEY)")
         c.exec_driver_sql("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
         c.exec_driver_sql("INSERT INTO alembic_version VALUES ('0012_report_meta')")
+        c.commit()  # commit-as-you-go：不显式提交则 INSERT 被回滚
     eng.dispose()
 
-    with pytest.raises(sa_exc.OperationalError):
-        ensure_migrations(p)
+    version = ensure_migrations(p)
+    assert version == _HEAD
 
     eng = create_db_engine(p)
     with eng.connect() as c:
         cols = {r[1] for r in c.exec_driver_sql("PRAGMA table_info(images)").fetchall()}
     eng.dispose()
     assert "film_no" in cols
+    # 幂等：版本归位后重复运行不再撞表
+    assert ensure_migrations(p) == _HEAD
+
+
+def test_migrate_non_collision_upgrade_failure_still_raises(tmp_path, monkeypatch) -> None:
+    """撞表之外的 upgrade 失败（磁盘错误、DDL bug 等）不属于遗留抢建态，
+    必须照常上抛——防止 "already exists" 捕获分支把真实故障静默吞掉。"""
+    p = str(tmp_path / "upgrade_io_fail.db")
+    eng = create_db_engine(p)
+    with eng.connect() as c:
+        c.exec_driver_sql("CREATE TABLE images (id VARCHAR(64) PRIMARY KEY)")
+        c.exec_driver_sql("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
+        c.exec_driver_sql("INSERT INTO alembic_version VALUES ('0012_report_meta')")
+        c.commit()  # commit-as-you-go：不显式提交则 INSERT 被回滚
+    eng.dispose()
+
+    def _fail_up(*_args, **_kwargs):
+        raise sa_exc.OperationalError("CREATE TABLE x", {}, Exception("disk I/O error"))
+
+    monkeypatch.setattr("alembic.command.upgrade", _fail_up)
+    with pytest.raises(sa_exc.OperationalError):
+        ensure_migrations(p)

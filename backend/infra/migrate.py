@@ -4,7 +4,10 @@
 - 全新 DB（无 images 表）→ `alembic upgrade head` 建表；
 - 历史 DB（create_all 已建表、但无 alembic_version）→ `alembic stamp head`
   （打上基线版本、不执行 DDL，避免 CREATE TABLE 与已存在表冲突）；
-- 已带版本表 → `alembic upgrade head` 应用任何新增迁移。
+- 已带版本表 → `alembic upgrade head` 应用任何新增迁移；若 upgrade 撞
+  "table already exists"（待迁移的表已被 create_all 抢建的遗留库），捕获后
+  stamp head 让版本归位——不上抛，否则版本永远卡在旧基线，每次启动重撞
+  同一堵墙且后续迁移链永不生效。非撞表类失败照常上抛。
 
 无论哪条路径，仓储层保留的 `Base.metadata.create_all` 作为幂等兜底仍安全。
 
@@ -23,6 +26,7 @@ import threading
 from pathlib import Path
 from typing import cast
 
+import sqlalchemy.exc as sa_exc
 from sqlalchemy import ColumnDefault, create_engine, inspect
 
 _LOG = logging.getLogger("scandetection.migrate")
@@ -179,6 +183,14 @@ def _ensure_migrations_locked(db_path: str) -> str:
             # 全新 DB：执行初始迁移建表
             _LOG.info("fresh DB, running initial migration")
             command.upgrade(cfg, "head")
+    except sa_exc.OperationalError as exc:
+        # 待迁移要建的表已被 create_all 抢建（dev 库 0013 defect_atlas 场景）：
+        # 表已在，列由收尾自愈兜底，stamp head 让版本归位即可收敛；非撞表类
+        # 失败（如磁盘错误、DDL 本身有 bug）不属于这种遗留态，照常上抛。
+        if "already exists" not in str(exc):
+            raise
+        _LOG.warning("upgrade 撞已存在表（create_all 抢建的遗留库），stamp head 转列自愈兜底")
+        command.stamp(cfg, "head")
     finally:
         # 无论 upgrade 成功、stamp 跳过 DDL 还是中途失败，都以 ORM 元数据
         # 补齐缺失列——版本号推进了而物理列没跟上，比版本落后更危险
