@@ -24,6 +24,7 @@ import json
 import shutil
 import tempfile
 import time
+import warnings
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -47,11 +48,16 @@ def _make_workload(work: Path) -> dict[str, Path]:
 def _tamper_copy(archive: Path, tampered: Path) -> str:
     """复制归档并篡改首个非 manifest 条目的字节，返回被篡改的条目名。"""
     shutil.copy(archive, tampered)
-    with zipfile.ZipFile(tampered, "a") as zf:
-        names = [n for n in zf.namelist() if n != "manifest.json"]
-        target = names[0]
-        original = zf.read(target)
-        zf.writestr(target, bytes([original[0] ^ 0xFF]) + original[1:])
+    # 篡改手段即"zip 追加同名条目"（verify 读取末位同名条目必得篡改内容）；
+    # zipfile 对重复条目名的 UserWarning 是该机制的固有噪音，就地静音，
+    # 避免演练输出看起来像出了错。
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        with zipfile.ZipFile(tampered, "a") as zf:
+            names = [n for n in zf.namelist() if n != "manifest.json"]
+            target = names[0]
+            original = zf.read(target)
+            zf.writestr(target, bytes([original[0] ^ 0xFF]) + original[1:])
     return target
 
 
