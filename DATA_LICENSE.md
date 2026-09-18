@@ -11,7 +11,13 @@
 |--------|------|------|---------|------|-----------|-----------|
 | Roboflow Danila「X-ray Weld Defect」 | Public Domain | 416 张(~几十 MB) | 是 | YOLOv8 直下 | 可直接用 | 无限制 |
 | Roboflow Cassius Fro「XrayWeld」 | CC BY 4.0 | 619 张 | 是 | 实例分割(转 bbox) | 可直接用 | 需署名 |
-| SWRD（北理工） | CC BY 4.0 | 115.86 GB | 是 | 多边形/VOC/YOLO | 装不下 | 需署名 |
+| SWRD（北理工） | CC BY 4.0 | 115.86 GB | 是 | 多边形/VOC/YOLO | 09-19 复查：D 剩 372G / E 剩 777G，全量可行 | 需署名 |
+
+> SWRD 下载入口（2026-09-19 核实）：① http://www.tz-ndt.com/#/download（浏览器登录，境内可达）；
+> ② 课题组 GitHub `bit628/RapidX-Annotator` README 直挂的 Google Drive 文件夹（境内通常不可达，需代理）。
+> 建议只取原图 3,675 张（滑窗版是大头），下到 E 盘后流式解压 + 降采样。
+> 同团队另开源 RapidX Annotator（PyQt5 射线标注工具，SoftwareX 论文 10.1016/j.softx.2025.102328），
+> 支持 DICOM/TIFF 输入与多边形标注，可作为 165 张底片标注的候选工具（注意依赖较旧，需隔离环境）。
 | GDXray+ Welds | NC(仅研究/教育) | 3.5–4.5 GB 全集 | 是 | bbox 文本 | 可下 | 仅教育/无奖场景 |
 | HF rikkarth（Kaggle CC0 镜像） | CC0 | ~2.0k 张 | 否(外观) | YOLOv8 直下 | 已下载至 data/external/hf/rikkarth/ | 仅预训练 |
 | RIAWELC | 不明(无 LICENSE) | 24k 张 | 是 | 分类 | 可下 | 待确认 |
